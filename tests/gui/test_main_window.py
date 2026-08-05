@@ -1,0 +1,47 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from PySide6.QtCore import Qt
+from pytestqt.qtbot import QtBot
+
+from pc_manager_agent.app.runtime import ApplicationRuntime
+from pc_manager_agent.ui.main_window import MainWindow
+
+
+@pytest.mark.gui
+def test_main_window_has_safe_default_tabs_and_local_chat(
+    qtbot: QtBot,
+    runtime: ApplicationRuntime,
+) -> None:
+    window = MainWindow(runtime)
+    qtbot.addWidget(window)
+    assert window._tabs.count() == 4
+    assert not window._scan_button.isEnabled()
+    window._chat_input.setText("delete everything")
+    qtbot.keyClick(window._chat_input, Qt.Key.Key_Return)
+    assert "不会把聊天内容发送" in window._conversation.toPlainText()
+
+
+@pytest.mark.gui
+def test_gui_plan_confirmation_and_background_scan(
+    qtbot: QtBot,
+    runtime: ApplicationRuntime,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "gui-files"
+    root.mkdir()
+    (root / "one.txt").write_text("one", encoding="utf-8")
+    window = MainWindow(runtime)
+    qtbot.addWidget(window)
+    window._root_input.setText(str(root))
+    window._prepare_plan()
+    assert window._confirm_button.isEnabled()
+    assert "R0" in window._risk_label.text()
+    window._approve_plan()
+    assert window._scan_button.isEnabled()
+    window._start_scan()
+    qtbot.waitUntil(lambda: window._worker is None, timeout=10_000)
+    assert window._results.rowCount() == 1
+    assert "完成" in window.statusBar().currentMessage()

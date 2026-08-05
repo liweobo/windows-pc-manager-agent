@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "windows-pc-manager-agent"
+version = "0.1.0"
+description = "A safety-first Windows 11 personal computer management agent"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = { file = "LICENSE" }
+authors = [{ name = "liweobo" }]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Win32 (MS Windows)",
+  "Operating System :: Microsoft :: Windows :: Windows 11",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Desktop Environment",
+]
+dependencies = [
+  "openai>=1.100,<3",
+  "platformdirs>=4.3,<5",
+  "pydantic>=2.11,<3",
+  "pyside6>=6.10,<7",
+  "sqlalchemy>=2.0,<3",
+]
+
+[project.scripts]
+pc-manager-agent = "pc_manager_agent.main:main"
+
+[dependency-groups]
+dev = [
+  "bandit>=1.8,<2",
+  "build>=1.3,<2",
+  "mypy>=1.17,<2",
+  "pip-audit>=2.9,<3",
+  "pre-commit>=4.2,<5",
+  "pytest>=8.4,<10",
+  "pytest-cov>=6,<8",
+  "pytest-qt>=4.5,<5",
+  "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pc_manager_agent"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "PIE", "RUF", "SIM"]
+ignore = ["RUF001"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src"]
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-config --strict-markers"
+markers = [
+  "gui: requires a Qt application",
+  "security: exercises a security boundary",
+  "windows: requires Windows-specific behaviour",
+]
+filterwarnings = ["error::ResourceWarning"]
+
+[tool.coverage.run]
+branch = true
+source = ["pc_manager_agent"]
+omit = [
+  "src/pc_manager_agent/main.py",
+  "src/pc_manager_agent/ui/*",
+  "src/pc_manager_agent/platform/windows/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+  "@abstractmethod",
+]

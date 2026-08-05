@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible defect without attaching private user data.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include API keys, credentials, audit databases, or private file listings.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected safe behaviour
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Highest observed risk
+      options: [R0, R1, R2, R3, R4, Unknown]
+    validations:
+      required: true

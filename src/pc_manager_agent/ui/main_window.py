@@ -1,0 +1,366 @@
+"""Main PySide6 window; all operations are delegated to orchestration services."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QThreadPool, Slot
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
+
+from pc_manager_agent.app.runtime import ApplicationRuntime
+from pc_manager_agent.confirmation.models import ConfirmationRequest
+from pc_manager_agent.domain.plans import TaskPlan
+from pc_manager_agent.domain.reports import ScanReport
+from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.ui.system_tray import SystemTrayController
+from pc_manager_agent.ui.workers import ScanWorker, require_scan_report
+
+
+class MainWindow(QMainWindow):
+    """Present plans and reports while keeping safety logic outside the UI."""
+
+    def __init__(self, runtime: ApplicationRuntime) -> None:
+        super().__init__()
+        self._runtime = runtime
+        self._orchestrator: ScanOrchestrator | None = None
+        self._plan: TaskPlan | None = None
+        self._confirmation: ConfirmationRequest | None = None
+        self._worker: ScanWorker | None = None
+        self._tray: SystemTrayController | None = None
+        self._quitting = False
+        self.setWindowTitle("Windows PC Manager Agent — 安全基础版")
+        self.resize(1_080, 720)
+        self._tabs = QTabWidget()
+        self.setCentralWidget(self._tabs)
+        self._build_chat_tab()
+        self._build_scan_tab()
+        self._build_audit_tab()
+        self._build_settings_tab()
+        self.statusBar().showMessage("就绪：默认不会修改任何文件")
+
+    def attach_tray(self, tray: SystemTrayController) -> None:
+        """Attach tray presentation after both objects are constructed."""
+        self._tray = tray
+
+    def _build_chat_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        self._conversation = QTextBrowser()
+        self._conversation.setPlainText(
+            "Agent：这是阶段 0 安全基础版。聊天不会直接执行系统操作。\n"
+            "请在“只读扫描”页选择目录并检查结构化计划。"
+        )
+        input_row = QHBoxLayout()
+        self._chat_input = QLineEdit()
+        self._chat_input.setPlaceholderText("输入目标（阶段 0 仅本地显示，不发送给模型）")
+        send_button = QPushButton("发送")
+        send_button.clicked.connect(self._handle_chat)
+        self._chat_input.returnPressed.connect(self._handle_chat)
+        input_row.addWidget(self._chat_input)
+        input_row.addWidget(send_button)
+        layout.addWidget(self._conversation)
+        layout.addLayout(input_row)
+        self._tabs.addTab(page, "聊天")
+
+    def _build_scan_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        directory_row = QHBoxLayout()
+        self._root_input = QLineEdit()
+        self._root_input.setPlaceholderText("选择一个明确授权的扫描目录")
+        browse_button = QPushButton("选择目录")
+        plan_button = QPushButton("生成安全计划")
+        browse_button.clicked.connect(self._choose_directory)
+        plan_button.clicked.connect(self._prepare_plan)
+        directory_row.addWidget(self._root_input)
+        directory_row.addWidget(browse_button)
+        directory_row.addWidget(plan_button)
+
+        self._risk_label = QLabel("风险：尚未生成计划")
+        self._risk_label.setStyleSheet("font-weight: 600;")
+        self._plan_view = QTextBrowser()
+        self._plan_view.setPlaceholderText("结构化计划、扫描范围和排除范围会显示在这里。")
+        action_row = QHBoxLayout()
+        self._confirm_button = QPushButton("确认计划")
+        self._reject_button = QPushButton("拒绝计划")
+        self._scan_button = QPushButton("开始只读扫描")
+        self._cancel_button = QPushButton("取消扫描")
+        self._confirm_button.setEnabled(False)
+        self._reject_button.setEnabled(False)
+        self._scan_button.setEnabled(False)
+        self._cancel_button.setEnabled(False)
+        self._confirm_button.clicked.connect(self._approve_plan)
+        self._reject_button.clicked.connect(self._reject_plan)
+        self._scan_button.clicked.connect(self._start_scan)
+        self._cancel_button.clicked.connect(self._cancel_scan)
+        for button in (
+            self._confirm_button,
+            self._reject_button,
+            self._scan_button,
+            self._cancel_button,
+        ):
+            action_row.addWidget(button)
+
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 1)
+        self._progress.setValue(0)
+        self._results = QTableWidget(0, 6)
+        self._results.setHorizontalHeaderLabels(
+            ("文件名", "扩展名", "类型", "大小（字节）", "修改时间（UTC）", "完整路径")
+        )
+        self._results.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._results.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._results.setSortingEnabled(True)
+        self._results.horizontalHeader().setStretchLastSection(True)
+
+        layout.addLayout(directory_row)
+        layout.addWidget(self._risk_label)
+        layout.addWidget(self._plan_view, 2)
+        layout.addLayout(action_row)
+        layout.addWidget(self._progress)
+        layout.addWidget(self._results, 3)
+        self._tabs.addTab(page, "只读扫描")
+
+    def _build_audit_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        refresh = QPushButton("刷新审计记录")
+        refresh.clicked.connect(self._refresh_audit)
+        self._audit_table = QTableWidget(0, 6)
+        self._audit_table.setHorizontalHeaderLabels(
+            ("时间", "事件", "风险", "工具", "确认", "计划 ID")
+        )
+        self._audit_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._audit_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(refresh)
+        layout.addWidget(self._audit_table)
+        self._tabs.addTab(page, "审计")
+
+    def _build_settings_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        provider = self._runtime.settings.llm_provider
+        model = self._runtime.settings.openai_model or "未设置"
+        layout.addWidget(QLabel(f"模型供应商：{provider}"))
+        layout.addWidget(QLabel(f"模型 ID：{model}"))
+        layout.addWidget(QLabel("API Key：仅从环境变量读取，界面和日志不会显示"))
+        layout.addWidget(QLabel(f"本地数据目录：{self._runtime.settings.data_directory}"))
+        layout.addWidget(QLabel(f"扫描文件上限：{self._runtime.settings.scan_max_files}"))
+        layout.addWidget(QLabel("阶段 0 不执行移动、重命名、回收站或系统修改。"))
+        layout.addStretch(1)
+        self._tabs.addTab(page, "设置")
+
+    @Slot()
+    def _handle_chat(self) -> None:
+        text = self._chat_input.text().strip()
+        if not text:
+            return
+        self._conversation.append(f"你：{text}")
+        self._conversation.append(
+            "Agent：阶段 0 不会把聊天内容发送给外部模型，也不会直接执行。"
+            "请使用只读扫描页生成可审查计划。"
+        )
+        self._chat_input.clear()
+
+    @Slot()
+    def _choose_directory(self) -> None:
+        selected = QFileDialog.getExistingDirectory(self, "选择允许扫描的目录")
+        if selected:
+            self._root_input.setText(selected)
+
+    @Slot()
+    def _prepare_plan(self) -> None:
+        root_text = self._root_input.text().strip()
+        if not root_text:
+            self._show_error("请先选择一个扫描目录。")
+            return
+        try:
+            orchestrator = self._runtime.create_scan_orchestrator(Path(root_text))
+            plan, review = orchestrator.prepare_plan(Path(root_text))
+            if not review.approved:
+                details = "\n".join(issue.message for issue in review.issues)
+                raise RuntimeError(f"安全审查拒绝计划：\n{details}")
+            confirmation = orchestrator.request_plan_confirmation(plan)
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        self._orchestrator = orchestrator
+        self._plan = plan
+        self._confirmation = confirmation
+        self._plan_view.setPlainText(plan.model_dump_json(indent=2))
+        self._risk_label.setText("风险：R0 只读；修改文件 0；删除文件 0；回滚等级 NONE（无需回滚）")
+        self._confirm_button.setEnabled(True)
+        self._reject_button.setEnabled(True)
+        self._scan_button.setEnabled(False)
+        self.statusBar().showMessage("计划已通过安全审查，等待你的明确确认")
+
+    @Slot()
+    def _approve_plan(self) -> None:
+        if not self._orchestrator or not self._plan or not self._confirmation:
+            self._show_error("没有待确认的计划。")
+            return
+        try:
+            self._orchestrator.resolve_plan_confirmation(
+                self._confirmation.confirmation_id,
+                True,
+                self._plan,
+            )
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        self._confirm_button.setEnabled(False)
+        self._reject_button.setEnabled(False)
+        self._scan_button.setEnabled(True)
+        self.statusBar().showMessage("计划已确认；可以开始 R0 只读扫描")
+
+    @Slot()
+    def _reject_plan(self) -> None:
+        if not self._orchestrator or not self._plan or not self._confirmation:
+            return
+        try:
+            self._orchestrator.resolve_plan_confirmation(
+                self._confirmation.confirmation_id,
+                False,
+                self._plan,
+            )
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        self._confirm_button.setEnabled(False)
+        self._reject_button.setEnabled(False)
+        self._scan_button.setEnabled(False)
+        self.statusBar().showMessage("计划已拒绝；未执行扫描")
+
+    @Slot()
+    def _start_scan(self) -> None:
+        if not self._orchestrator or not self._plan or self._worker is not None:
+            return
+        worker = ScanWorker(self._orchestrator, self._plan)
+        worker.signals.completed.connect(self._scan_completed)
+        worker.signals.failed.connect(self._scan_failed)
+        self._worker = worker
+        self._scan_button.setEnabled(False)
+        self._cancel_button.setEnabled(True)
+        self._progress.setRange(0, 0)
+        self.statusBar().showMessage("正在执行只读扫描……")
+        QThreadPool.globalInstance().start(worker)
+
+    @Slot()
+    def _cancel_scan(self) -> None:
+        if self._worker:
+            self._worker.cancel()
+            self.statusBar().showMessage("已请求取消，正在等待当前元数据读取结束……")
+
+    @Slot(object)
+    def _scan_completed(self, value: object) -> None:
+        try:
+            report = require_scan_report(value)
+        except TypeError as exc:
+            self._scan_failed(str(exc))
+            return
+        self._worker = None
+        self._cancel_button.setEnabled(False)
+        self._scan_button.setEnabled(True)
+        self._progress.setRange(0, 1)
+        self._progress.setValue(1)
+        self._populate_results(report)
+        summary = report.summary
+        state = "已取消" if summary.cancelled else "完成"
+        self.statusBar().showMessage(
+            f"{state}：{summary.files_seen} 个文件，{summary.total_size_bytes} 字节，"
+            f"{summary.issues} 个跳过/错误"
+        )
+        self._refresh_audit()
+
+    @Slot(str)
+    def _scan_failed(self, message: str) -> None:
+        self._worker = None
+        self._cancel_button.setEnabled(False)
+        self._scan_button.setEnabled(True)
+        self._progress.setRange(0, 1)
+        self._progress.setValue(0)
+        self._show_error(f"扫描失败：{message}")
+
+    def _populate_results(self, report: ScanReport) -> None:
+        self._results.setSortingEnabled(False)
+        self._results.setRowCount(len(report.files))
+        for row, metadata in enumerate(report.files):
+            values = (
+                metadata.name,
+                metadata.extension,
+                metadata.media_type or "未知",
+                str(metadata.size_bytes),
+                metadata.modified_at.isoformat(),
+                str(metadata.path),
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 3:
+                    item.setData(Qt.ItemDataRole.UserRole, metadata.size_bytes)
+                self._results.setItem(row, column, item)
+        self._results.setSortingEnabled(True)
+        self._results.resizeColumnsToContents()
+
+    @Slot()
+    def _refresh_audit(self) -> None:
+        try:
+            rows = self._runtime.audit.list_recent(100)
+        except Exception as exc:
+            self._show_error(f"无法读取审计记录：{exc}")
+            return
+        self._audit_table.setRowCount(len(rows))
+        for row_index, event in enumerate(rows):
+            values = (
+                event.occurred_at.isoformat(),
+                event.event_type,
+                event.risk_level or "",
+                event.tool_name or "",
+                event.confirmation_result or "",
+                event.plan_id or "",
+            )
+            for column, value in enumerate(values):
+                self._audit_table.setItem(row_index, column, QTableWidgetItem(value))
+
+    def request_quit(self) -> None:
+        """Cancel work, hide tray, and close the window for application shutdown."""
+        self._quitting = True
+        self.shutdown()
+        if self._tray:
+            self._tray.hide()
+        self.close()
+
+    def shutdown(self) -> None:
+        """Request cancellation and wait a bounded time for workers."""
+        if self._worker:
+            self._worker.cancel()
+        QThreadPool.globalInstance().waitForDone(5_000)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Hide to tray unless a controlled application exit is in progress."""
+        if not self._quitting and self._tray and self._tray.is_available:
+            event.ignore()
+            self.hide()
+            self.statusBar().showMessage("应用仍在托盘运行")
+            return
+        event.accept()
+
+    def _show_error(self, message: str) -> None:
+        QMessageBox.warning(self, "操作未执行", message)
+        self.statusBar().showMessage(message)
