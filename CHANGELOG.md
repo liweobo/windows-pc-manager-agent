@@ -13,6 +13,11 @@ once release tags are introduced.
   rollback contracts, and a metadata-only directory scanner.
 - Unit, integration, security, GUI, CI, and project documentation foundations.
 
+### Changed
+
+- Renamed the internal `platform` package to `platform_support` to distinguish
+  operating-system adapters from Python's standard-library `platform` module.
+
 ### Security
 
 - Default-deny protected paths, path traversal, symlink, junction, and reparse
