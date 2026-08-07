@@ -19,3 +19,8 @@ once release tags are introduced.
   point handling.
 - No permanent deletion, system mutation, elevation, arbitrary shell execution,
   or credential collection.
+
+### Fixed
+
+- Use one Windows directory-identity API for discovery and execution-time
+  revalidation, and make scanner timeout tests independent of clock resolution.

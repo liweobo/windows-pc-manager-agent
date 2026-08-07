@@ -39,8 +39,12 @@ def test_scanner_enforces_file_limit_timeout_and_cancellation(tmp_path: Path) ->
     assert limited.summary.truncated
     assert limited.summary.files_seen == 1
 
-    timed = scanner.execute(
-        ScanRequest(root=tmp_path, timeout_seconds=0.000000001), CancellationToken()
+    ticks = iter((10.0, 10.1))
+    timed_scanner = DirectoryScannerTool(
+        PathPolicy.for_scan_root(tmp_path), clock=lambda: next(ticks, 10.1)
+    )
+    timed = timed_scanner.execute(
+        ScanRequest(root=tmp_path, timeout_seconds=0.05), CancellationToken()
     )
     assert timed.summary.timed_out
 
@@ -49,6 +53,18 @@ def test_scanner_enforces_file_limit_timeout_and_cancellation(tmp_path: Path) ->
     cancelled = scanner.execute(ScanRequest(root=tmp_path), token)
     assert cancelled.summary.cancelled
     assert cancelled.summary.files_seen == 0
+
+
+def test_scanner_reads_nested_directory_with_stable_identity(tmp_path: Path) -> None:
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "inside.txt").write_text("x", encoding="utf-8")
+
+    report = make_scanner(tmp_path).execute(ScanRequest(root=tmp_path), CancellationToken())
+
+    assert report.summary.files_seen == 1
+    assert report.files[0].path == nested / "inside.txt"
+    assert not any(issue.code == "path-identity-changed" for issue in report.issues)
 
 
 def test_scanner_skips_symlink_when_supported(tmp_path: Path) -> None:

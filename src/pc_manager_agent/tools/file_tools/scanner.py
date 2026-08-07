@@ -5,6 +5,7 @@ from __future__ import annotations
 import mimetypes
 import os
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,8 +26,14 @@ from pc_manager_agent.tools.manifest import CancellationToken, ToolManifest
 class DirectoryScannerTool:
     """Enumerate metadata inside one approved directory without following links."""
 
-    def __init__(self, path_policy: PathPolicy) -> None:
+    def __init__(
+        self,
+        path_policy: PathPolicy,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._path_policy = path_policy
+        self._clock = clock
         self._manifest = ToolManifest(
             name="file.scan",
             description="Read file metadata inside one explicitly approved root",
@@ -61,7 +68,7 @@ class DirectoryScannerTool:
 
     def _scan(self, request: ScanRequest, cancellation: CancellationToken) -> ScanReport:
         root = self._path_policy.validate_scan_root(request.root)
-        started = time.monotonic()
+        started = self._clock()
         files: list[FileMetadata] = []
         issues: list[ScanIssue] = []
         directories_seen = 0
@@ -78,7 +85,7 @@ class DirectoryScannerTool:
             if cancellation.cancellation_requested():
                 cancelled = True
                 break
-            if time.monotonic() - started >= request.timeout_seconds:
+            if self._clock() - started >= request.timeout_seconds:
                 timed_out = True
                 break
             directory, expected_identity = stack.pop()
@@ -110,7 +117,7 @@ class DirectoryScannerTool:
                         if cancellation.cancellation_requested():
                             cancelled = True
                             break
-                        if time.monotonic() - started >= request.timeout_seconds:
+                        if self._clock() - started >= request.timeout_seconds:
                             timed_out = True
                             break
                         path = Path(entry.path)
@@ -130,13 +137,10 @@ class DirectoryScannerTool:
                             continue
                         try:
                             if entry.is_dir(follow_symlinks=False):
-                                directory_metadata = entry.stat(follow_symlinks=False)
-                                stack.append(
-                                    (
-                                        path,
-                                        (directory_metadata.st_dev, directory_metadata.st_ino),
-                                    )
-                                )
+                                # Use the same OS API at discovery and revalidation. On
+                                # Windows, DirEntry.stat and os.stat can expose different
+                                # identifiers for the same directory.
+                                stack.append((path, self._directory_identity(path)))
                                 continue
                             if not entry.is_file(follow_symlinks=False):
                                 issues.append(
@@ -172,7 +176,7 @@ class DirectoryScannerTool:
             except OSError as exc:
                 issues.append(self._os_issue(directory, exc))
 
-        duration_ms = max(0, round((time.monotonic() - started) * 1_000))
+        duration_ms = max(0, round((self._clock() - started) * 1_000))
         summary = ScanSummary(
             files_seen=len(files),
             directories_seen=directories_seen,
