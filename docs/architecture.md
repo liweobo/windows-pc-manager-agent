@@ -33,7 +33,8 @@ Plan   Safety   Confirmation   Audit
 - `orchestration` implements plan → review → confirm → execute → verify → audit.
 - `ui` displays state and delegates to orchestration. `QRunnable` keeps scans off
   the GUI thread.
-- `platform` contains OS-specific single-instance behaviour.
+- `platform_support` contains OS-specific single-instance behaviour without
+  colliding conceptually with Python's standard-library `platform` module.
 
 ## Runtime flow
 

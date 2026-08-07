@@ -51,7 +51,7 @@ exports, caches, build output, local reports, or user files.
 - `tools`: manifests, registry, and deterministic implementations.
 - `safety`: scope validation and independent plan review.
 - `confirmation`, `audit`, `rollback`: independent security subsystems.
-- `platform`: OS-specific behaviour behind interfaces.
+- `platform_support`: OS-specific behaviour behind interfaces.
 
 Core logic must remain testable without creating a GUI or contacting a model.
 

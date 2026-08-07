@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from pc_manager_agent import __version__
 from pc_manager_agent.app.runtime import ApplicationRuntime
 from pc_manager_agent.config.settings import AppSettings
-from pc_manager_agent.platform.windows.single_instance import QtSingleInstanceGuard
+from pc_manager_agent.platform_support.windows.single_instance import QtSingleInstanceGuard
 from pc_manager_agent.ui.main_window import MainWindow
 from pc_manager_agent.ui.system_tray import SystemTrayController
 

@@ -82,7 +82,7 @@ source = ["pc_manager_agent"]
 omit = [
   "src/pc_manager_agent/main.py",
   "src/pc_manager_agent/ui/*",
-  "src/pc_manager_agent/platform/windows/*",
+  "src/pc_manager_agent/platform_support/windows/*",
 ]
 
 [tool.coverage.report]

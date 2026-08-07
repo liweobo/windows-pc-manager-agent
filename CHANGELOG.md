@@ -13,6 +13,11 @@ once release tags are introduced.
   rollback contracts, and a metadata-only directory scanner.
 - Unit, integration, security, GUI, CI, and project documentation foundations.
 
+### Changed
+
+- Renamed the internal `platform` package to `platform_support` to distinguish
+  operating-system adapters from Python's standard-library `platform` module.
+
 ### Security
 
 - Default-deny protected paths, path traversal, symlink, junction, and reparse
@@ -24,3 +29,5 @@ once release tags are introduced.
 
 - Use one Windows directory-identity API for discovery and execution-time
   revalidation, and make scanner timeout tests independent of clock resolution.
+- Allow the secret-scanning job to read pull-request commit metadata without
+  granting any repository write permission.
