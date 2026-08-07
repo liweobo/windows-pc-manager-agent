@@ -29,3 +29,5 @@ once release tags are introduced.
 
 - Use one Windows directory-identity API for discovery and execution-time
   revalidation, and make scanner timeout tests independent of clock resolution.
+- Allow the secret-scanning job to read pull-request commit metadata without
+  granting any repository write permission.
