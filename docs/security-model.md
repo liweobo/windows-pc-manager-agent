@@ -3,59 +3,75 @@
 ## Trust boundaries
 
 Trusted deterministic code owns path authorization, schemas, risk, confirmation,
-execution, verification, audit, and rollback claims. Model output, UI text,
-filenames, file contents, documents, and webpages are untrusted.
+execution, verification, audit, and rollback claims. Model output, UI text, file names,
+file contents, documents, and web pages are untrusted data. They never become commands.
 
-## Risk policy
+## Stage 1 risk policy
 
-| Level | Meaning | MVP execution |
+| Level | Meaning | Stage 1 behavior |
 |---|---|---|
-| R0 | Read-only | Allowed inside a confirmed, reviewed scope |
-| R1 | Reversible data change | Framework only in stage 0 |
-| R2 | Destructive but recoverable | Not implemented in stage 0 |
-| R3 | High-risk system change | Denied in MVP 0.1 |
-| R4 | Prohibited behaviour | Always denied and audited |
+| R0 | Read-only | Scanner and three analyzers, inside a reviewed and confirmed plan |
+| R1 | Low-risk reversible app/user data | Authorized-path configuration and explicit new report export |
+| R2 | Destructive or external disclosure | No file operation; external model transfer needs exact immediate consent |
+| R3 | High-risk system change | No executable tool is registered |
+| R4 | Prohibited | Always denied |
 
-The only stage 0 tool is `file.scan`: R0, current-user read permission,
-metadata-only, cancellable, no rollback required, maximum 100,000 files, and no
-link following.
+The registered Stage 1 tools are `file.scan`, `file.analyze.large`,
+`file.analyze.inactive`, and `file.analyze.duplicates`. All manifests are R0,
+read-only, cancellable, bounded, and rollback `NONE`.
 
-## Path controls
+## Authorization and path controls
 
-- An explicit approved root is mandatory.
-- `..` traversal is rejected before resolution.
-- The root must exist, be a directory, and not be a symlink/junction/reparse point.
-- Child paths are checked lexically before metadata access.
-- Reparse points are skipped rather than resolved.
-- Other user profiles, browser profiles, SSH keys, password managers, Windows
-  security databases, Personal Vault, the recycle bin, System Volume Information,
-  and configured forbidden roots are skipped.
-- The scanner revalidates at execution and does not read file content.
-- Every discovered directory is bound to its volume/file identifier and checked
-  again immediately before enumeration; changed identities stop that branch.
-- Cancellation, timeout, and a hard file-count bound constrain resource use.
+- A user adds each local root explicitly; authorizing a child never authorizes a parent.
+- The model receives opaque UUIDs and cannot introduce path text or broaden scope.
+- Relative paths, `..`, UNC/device syntax, mapped remote drives, trailing-dot/space
+  ambiguity, missing roots, and non-directories are rejected.
+- Paths are canonicalized and compared by path components, never string prefixes.
+- Credential/browser/session/password-manager/SSH/wallet/Personal Vault/Windows
+  security roots, other profiles, and user forbidden roots are denied.
+- Existing path components and each enumerated entry are checked for symlinks,
+  junctions, and other reparse points before traversal. Redirected paths are skipped.
+- Each directory identity is captured and checked before enumeration. Files opened for
+  hashing are revalidated against approved scope, size, modification time, and available
+  file/device identifiers before and after reading.
+- Offline placeholders are not hydrated for hashing. A changed or unreadable candidate
+  becomes a structured issue; it does not make a duplicate group.
 
-## Confirmation
+## Plan and confirmation controls
 
-Plan confirmation includes a SHA-256 digest of the full immutable plan. Runtime
-confirmation additionally includes the step and a digest of its arguments. Every
-request expires. Changing a plan or arguments invalidates existing approval.
+The compiler derives executable arguments from a validated intent. The safety validator
+checks registry membership, schemas, R0/read-only manifests, exact authorized roots,
+excluded paths, session IDs, thresholds, selected analysis tools, ALL/ANY mode, zero
+modifications, and zero deletions.
 
-## Credentials and external data
+Plan confirmation includes the canonical SHA-256 digest and expiry. Execution repeats
+review and calls `require_plan_approved`; any plan/UI change invalidates approval.
 
-OpenAI credentials are read from `OPENAI_API_KEY`, wrapped as a Pydantic secret,
-excluded from dumps, and never written to logs. No model is contacted when the
-provider is disabled or incomplete. Stage 0 does not send chat text, paths,
-filenames, or file contents to a provider.
+External model confirmation is separate. It binds purpose, provider, exact JSON payload
+digest, object summary, and expiry. Planning sends a goal, labels, opaque IDs, allowed
+analyses, and tool names. Explanation sends aggregate counts, byte totals, categories,
+thresholds, and analysis types. Neither sends paths, names, content, nor raw candidate rows.
 
-Audit redaction recursively removes credential-like keys and common inline secret
-assignments. `.gitignore`, pre-commit private-key detection, and CI secret scanning
-provide additional controls; they do not replace review.
+## Resource and failure controls
 
-## Failure behaviour
+- Scanner output streams in configurable batches; SQLite and exports use bounded pages.
+- Hard file-count and timeout limits constrain every root; cancellation is cooperative.
+- Recoverable per-object errors are counted and scanning continues without widening scope.
+- Cancellation, timeout, and truncation are truthful terminal states, not “completed”.
+- Tool output types and final report IDs/counts are verified.
+- A tool failure records the exact tool and error, aborts the plan, and records task failure.
+- An unavailable or corrupt audit database prevents trusted execution.
+- CSV/JSON export uses an absolute local target and exclusive create. Existing files are
+  never overwritten; an incomplete newly created report is left for manual inspection
+  because this stage contains no deletion capability.
 
-- Unknown tools, invalid schemas, risk mismatch, rollback mismatch, stale
-  confirmation, scope expansion, and R3/R4 steps fail closed.
-- An unavailable audit database prevents tool execution.
-- Scanner filesystem errors are recorded per object; they never broaden scope.
-- The application never requests administrator privileges.
+## Credentials, audit, and rollback
+
+API keys come only from environment-backed settings and Pydantic `SecretStr`; they are
+never written to configuration or logs. Recursive key and inline-value redaction runs
+before every audit insert. CI performs pinned dependency installation, Bandit,
+`pip-audit`, and Gitleaks checks.
+
+User-file analysis changes nothing, so rollback is `NONE` (nothing to undo). Authorized
+path configuration records a FULL inverse action. Export is MANUAL: the application does
+not claim it can automatically remove the report. No administrator privilege is used.

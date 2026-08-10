@@ -1,0 +1,2006 @@
+# API reference
+
+本文档说明 `src/pc_manager_agent` 当前生产代码中的全部函数和方法，包括公开接口、
+私有辅助方法、抽象协议方法、Qt 槽函数以及函数内部的回调。测试辅助函数不属于生产
+API，因此不在本文档范围内。
+
+当前项目仍处于 MVP 0.1 阶段；没有下划线前缀的接口也不代表已经承诺长期兼容。
+名称以下划线开头的函数、方法或协议仅供模块内部使用，调用方不应直接依赖。
+
+## 通用约定
+
+- 所有路径使用 `pathlib.Path`；安全判断由 `PathPolicy` 和执行前复验负责。
+- Pydantic 模型默认拒绝未知字段，计划、确认和报告模型为不可变对象。
+- 时间字段使用带时区的 UTC `datetime`；持续时间使用毫秒。
+- 工具只能经 `ToolRegistry` 注册和调用；模型输出不能直接取得执行权限。
+- 审计存储不可用时采用失败关闭策略，不继续执行工具。
+- `R0` 是只读，`R1` 是低风险可逆操作，`R2` 需要即时确认，`R3` 在 MVP 中禁止
+  执行，`R4` 始终拒绝。
+
+## 主要数据模型
+
+| 模型 | 主要字段 | 用途 |
+| --- | --- | --- |
+| `AppSettings` | 模型供应商、数据目录、扫描上限、超时、确认有效期 | 经过校验的运行时配置 |
+| `TaskScope` | `included_paths`、`excluded_paths` | 定义计划允许和排除的路径边界 |
+| `PlanStep` | 工具名、参数、风险、确认和回滚声明 | 描述一次确定性的工具调用 |
+| `TaskPlan` | 目标、范围、步骤、影响估计、确认要求 | 安全审查和用户确认的不可变计划快照 |
+| `ScanRequest` | 根目录、排除目录、文件上限、超时 | `file.scan` 的严格输入模型 |
+| `FileMetadata` | 路径、名称、类型、大小和时间字段 | 不读取文件正文的元数据记录 |
+| `ScanIssue` | 代码、消息、可选路径 | 表示被跳过对象或非致命文件系统错误 |
+| `ScanSummary` | 数量、大小、取消、超时、截断和耗时 | 扫描结果汇总 |
+| `ScanReport` | 根目录、文件、问题、汇总 | 完整只读扫描输出 |
+| `ConfirmationRequest` | 计划/参数摘要、对象说明、到期时间、状态 | 与不可变计划快照绑定的确认请求 |
+| `AuditEvent` | 计划、工具、确认、结果、错误、回滚和追踪字段 | 写入前会脱敏的结构化审计事件 |
+| `PlannerRequest` | 用户目标、允许/排除路径、允许工具 | 调用方明确同意发送给模型的数据 |
+| `ProviderPlanResult` | 已校验计划、供应商、请求 ID | 与供应商无关的规划结果 |
+| `ToolManifest` | Schema、风险、权限、上限、回滚、平台等 | 工具注册前必须具备的不可变安全清单 |
+| `ReviewIssue` / `SafetyReview` | 拒绝代码、消息、步骤、最终结论 | 安全审查的机器可读结果 |
+| `UndoRecord` | 操作 ID、路径、标识、元数据、有效条件 | 写操作未来使用的真实回滚记录 |
+
+## `pc_manager_agent.app.runtime`
+
+### `pc_manager_agent.app.runtime.ApplicationRuntime.__init__`
+
+```python
+ApplicationRuntime(settings: AppSettings) -> None
+```
+
+- **作用：** 组合应用级依赖。保存已经校验的设置，创建并初始化
+  `AuditRepository`，再按配置的有效期创建共享 `ConfirmationService`。
+- **参数：** `settings` 必须是完整的 `AppSettings`；其中的 `database_path` 决定
+  SQLite 审计库位置。
+- **返回与异常：** 不返回值。数据库建表或健康查询失败时透传
+  `AuditUnavailableError`，应用应停止初始化。
+- **副作用与安全：** 可能创建应用数据目录和 SQLite 文件；不会连接模型，也不会扫描
+  用户目录。审计初始化失败时采用失败关闭。
+
+### `pc_manager_agent.app.runtime.ApplicationRuntime.create_scan_orchestrator`
+
+```python
+create_scan_orchestrator(root: Path) -> ScanOrchestrator
+```
+
+- **作用：** 针对用户本次选择的单一根目录，创建独立的 `PathPolicy`、工具注册表、
+  `DirectoryScannerTool`、`SafetyReviewer` 和 `ScanOrchestrator`。
+- **参数：** `root` 是准备授权的扫描根目录；这里只建立范围对象，真正计划和执行时仍会
+  再次验证路径。
+- **返回：** 返回只拥有 `file.scan` 工具权限的编排器。
+- **安全：** 每次调用都创建新的根目录限定注册表，避免旧任务的路径权限泄漏到新任务。
+
+### `pc_manager_agent.app.runtime.ApplicationRuntime.create_llm_provider`
+
+```python
+create_llm_provider() -> LLMProvider | None
+```
+
+- **作用：** 根据设置构造模型供应商适配器。`disabled` 返回 `None`；`openai` 返回
+  `OpenAILLMProvider`。
+- **返回与异常：** 未启用供应商时返回 `None`。OpenAI 缺少模型名或 API Key、或者供应商
+  名称不受支持时抛出 `ProviderConfigurationError`。
+- **安全：** 只有显式配置才创建云端客户端；API Key 从 `SecretStr` 中临时读取，不写日志。
+  创建适配器本身不会发起网络请求。
+
+### `pc_manager_agent.app.runtime.ApplicationRuntime.close`
+
+```python
+close() -> None
+```
+
+- **作用：** 关闭应用级持久化资源，目前委托 `AuditRepository.close()` 释放连接池。
+- **返回：** 无。
+- **调用要求：** 正常退出和测试清理都应调用；它不删除数据库或审计记录。
+
+## `pc_manager_agent.audit.redaction`
+
+### `pc_manager_agent.audit.redaction.is_sensitive_key`
+
+```python
+is_sensitive_key(key: str) -> bool
+```
+
+- **作用：** 对键名进行不区分大小写的规范化，判断是否包含 `api_key`、`token`、
+  `password`、`cookie`、`session` 等敏感片段。
+- **参数与返回：** 输入任意字符串键名；疑似凭据字段返回 `True`，否则返回 `False`。
+- **注意：** 这是保守的名称启发式判断，允许误报以降低凭据写入日志的风险。
+
+### `pc_manager_agent.audit.redaction.redact_text`
+
+```python
+redact_text(value: str) -> str
+```
+
+- **作用：** 在自由文本中查找形如 `token=...`、`password:...` 的内联赋值，并把值替换为
+  `[REDACTED]`。
+- **参数与返回：** 返回新的脱敏字符串，不修改原字符串。
+- **限制：** 它只处理明显的键值形式，不应把它当作任意文档内容的完整隐私识别器。
+
+### `pc_manager_agent.audit.redaction.redact_json`
+
+```python
+redact_json(value: JsonValue) -> JsonValue
+```
+
+- **作用：** 递归遍历 JSON 字典和列表。敏感键的值整体替换为 `[REDACTED]`；普通字符串
+  继续交给 `redact_text()`；数字、布尔值和 `None` 原样保留。
+- **返回：** 保持输入 JSON 结构形状的新值。
+- **安全：** 是结构化审计写入前的统一脱敏入口，不负责修改源事件对象。
+
+## `pc_manager_agent.audit.repository`
+
+### `pc_manager_agent.audit.repository.AuditRepository.__init__`
+
+```python
+AuditRepository(database_path: Path) -> None
+```
+
+- **作用：** 创建 SQLite SQLAlchemy 引擎和会话工厂，但尚未建立表或宣布仓库可用。
+- **参数：** `database_path` 是应用本地状态数据库的完整路径。
+- **副作用：** 引擎创建过程会确保父目录存在；`_initialized` 初始为 `False`。
+
+### `pc_manager_agent.audit.repository.AuditRepository.initialize`
+
+```python
+initialize() -> None
+```
+
+- **作用：** 创建 `audit_events` 表，并执行 `SELECT 1` 验证数据库连接和 SQLite 配置可用。
+- **异常：** SQLAlchemy 操作失败时包装成 `AuditUnavailableError`，原异常保留为异常链。
+- **安全：** 只有全部成功才把仓库标记为已初始化；失败后高风险流程不得继续。
+
+### `pc_manager_agent.audit.repository.AuditRepository.record`
+
+```python
+record(event: AuditEvent) -> None
+```
+
+- **作用：** 把一个 `AuditEvent` 转换为关系模型，在转换过程中递归脱敏，然后以单事务追加。
+- **参数：** `event` 是不可变结构化事件；调用方应提供真实的计划、确认和执行结果。
+- **异常：** 未初始化或事务写入失败时抛出 `AuditUnavailableError`；不会吞掉错误。
+- **安全：** 不执行更新或覆盖；事件写入失败会阻断当前安全工作流。
+
+### `pc_manager_agent.audit.repository.AuditRepository.list_recent`
+
+```python
+list_recent(limit: int = 100) -> tuple[AuditEventRow, ...]
+```
+
+- **作用：** 按发生时间倒序读取最近的审计行。
+- **参数：** `limit` 会被强制限制到 `1..500`，避免界面请求无界数据。
+- **返回与异常：** 返回不可变元组；未初始化或查询失败时抛出
+  `AuditUnavailableError`。
+- **副作用：** 只读查询，不改变数据库。
+
+### `pc_manager_agent.audit.repository.AuditRepository.close`
+
+```python
+close() -> None
+```
+
+- **作用：** 释放 SQLAlchemy 连接池，并把仓库恢复为未初始化状态。
+- **返回：** 无；不会删除表、数据库文件或历史事件。
+
+### `pc_manager_agent.audit.repository.AuditRepository._redact_mapping`
+
+```python
+_redact_mapping(value: dict[str, JsonValue] | None) -> dict[str, Any] | None
+```
+
+- **作用：** 私有适配器，将可选字典交给 `redact_json()`，并验证脱敏后仍是字典。
+- **返回：** 输入为 `None` 时返回 `None`，否则返回脱敏字典。
+- **异常：** 若脱敏函数意外改变顶层形状，抛出 `TypeError`，防止错误数据静默写入。
+
+### `pc_manager_agent.audit.repository.AuditRepository._to_row`
+
+```python
+_to_row(event: AuditEvent) -> AuditEventRow
+```
+
+- **作用：** 私有类方法，把领域事件逐字段映射为 SQLAlchemy 行；自由文本使用
+  `redact_text()`，JSON 映射使用 `_redact_mapping()`，枚举转换为字符串值。
+- **返回：** 尚未加入会话的 `AuditEventRow`。
+- **安全：** 是所有审计写入的脱敏边界，调用方不应绕过它直接构造并保存数据库行。
+
+## `pc_manager_agent.config.settings`
+
+### `pc_manager_agent.config.settings.AppSettings.validate_provider`
+
+```python
+validate_provider(value: str) -> str
+```
+
+- **作用：** Pydantic 字段验证器，去除首尾空白并转为小写，只接受 `disabled` 或
+  `openai`。
+- **返回与异常：** 返回规范化供应商标识；其他值抛出 `ValueError`，阻止隐式加载未知实现。
+
+### `pc_manager_agent.config.settings.AppSettings.normalize_optional_model`
+
+```python
+normalize_optional_model(value: str | None) -> str | None
+```
+
+- **作用：** 规范化可选 OpenAI 模型名；去除首尾空白，并把空字符串视为未配置。
+- **返回：** 规范化模型名或 `None`。
+
+### `pc_manager_agent.config.settings.AppSettings.database_path`
+
+```python
+database_path: Path
+```
+
+- **作用：** 只读属性，在 `data_directory` 下生成固定的 `state.db` 路径。
+- **返回：** 路径对象；读取属性不会创建文件。
+
+### `pc_manager_agent.config.settings.AppSettings.from_environment`
+
+```python
+from_environment() -> AppSettings
+```
+
+- **作用：** 从进程环境变量读取供应商、模型、密钥、扫描上限、超时和可选数据目录，再由
+  Pydantic 完成类型转换及范围校验。
+- **返回与异常：** 返回不可变 `AppSettings`；非法数字、范围或供应商由 Pydantic 抛出
+  `ValidationError`。
+- **安全：** 不读取项目内 `.env` 文件；API Key 使用排除显示和导出的 `SecretStr` 字段。
+
+## `pc_manager_agent.confirmation.state_machine`
+
+### `pc_manager_agent.confirmation.state_machine.ConfirmationService.__init__`
+
+```python
+ConfirmationService(
+    ttl_seconds: int = 300,
+    now: Callable[[], datetime] | None = None,
+) -> None
+```
+
+- **作用：** 初始化内存确认状态机、确认请求表、计划批准摘要表和运行时批准绑定集合。
+- **参数：** `ttl_seconds` 控制确认有效期；`now` 可注入时钟以进行确定性测试。
+- **安全：** 确认只在当前进程内有效，应用重启后不会沿用旧授权。
+
+### `pc_manager_agent.confirmation.state_machine.ConfirmationService.request_plan`
+
+```python
+request_plan(plan: TaskPlan, object_summary: str) -> ConfirmationRequest
+```
+
+- **作用：** 创建 `PLAN` 类型确认，将确认 ID、计划 ID、完整计划摘要、对象说明和过期时间
+  绑定在一起，并保存为 `PENDING`。
+- **参数：** `plan` 是待确认快照；`object_summary` 是展示给用户的具体影响说明。
+- **返回：** 新的不可变 `ConfirmationRequest`；不代表用户已经批准。
+
+### `pc_manager_agent.confirmation.state_machine.ConfirmationService.request_runtime`
+
+```python
+request_runtime(
+    plan: TaskPlan,
+    step: PlanStep,
+    object_summary: str,
+) -> ConfirmationRequest
+```
+
+- **作用：** 为 R2 等需要即时确认的具体步骤创建 `RUNTIME` 请求，同时绑定完整计划摘要、
+  `step_id` 和参数摘要。
+- **前置条件：** 先调用 `require_plan_approved()`；总体计划没有精确批准时直接失败。
+- **返回与异常：** 返回待处理请求；计划未批准或已经变化时抛出 `ConfirmationError`。
+
+### `pc_manager_agent.confirmation.state_machine.ConfirmationService.resolve`
+
+```python
+resolve(
+    confirmation_id: UUID,
+    approved: bool,
+    plan: TaskPlan,
+    step: PlanStep | None = None,
+) -> ConfirmationRequest
+```
+
+- **作用：** 解析用户决定。依次验证请求存在、仍为待处理、没有过期、计划 ID/摘要一致；
+  运行时确认还要验证步骤和参数摘要。
+- **返回：** 状态更新为 `APPROVED` 或 `REJECTED` 的新请求对象，并记录对应授权绑定。
+- **异常：** 未知 ID、重复处理、过期、计划变化、步骤不匹配或参数变化均抛出
+  `ConfirmationError`。过期请求会先保存为 `EXPIRED`。
+- **安全：** 旧确认不能批准修改后的计划或参数；拒绝和过期不会产生执行授权。
+
+### `pc_manager_agent.confirmation.state_machine.ConfirmationService.require_plan_approved`
+
+```python
+require_plan_approved(plan: TaskPlan) -> None
+```
+
+- **作用：** 执行前检查该 `plan_id` 保存的批准摘要是否与当前完整计划摘要完全一致。
+- **返回与异常：** 成功时无返回；未批准或任意字段变化时抛出 `ConfirmationError`。
+
+### `pc_manager_agent.confirmation.state_machine.ConfirmationService.require_runtime_approved`
+
+```python
+require_runtime_approved(plan: TaskPlan, step: PlanStep) -> None
+```
+
+- **作用：** 先验证总体计划批准，再检查 `(plan_id, step_id, arguments_digest)` 的即时批准
+  是否存在。
+- **异常：** 总体计划无效或运行时确认缺失/过期时抛出 `ConfirmationError`。
+- **安全：** 用于真正执行 R2 步骤前的确定性门禁，不能由 UI 布尔状态替代。
+
+## `pc_manager_agent.domain.plans`
+
+### `pc_manager_agent.domain.plans.TaskScope.require_included_path`
+
+```python
+require_included_path() -> Self
+```
+
+- **作用：** `TaskScope` 的模型后置验证器，强制计划至少有一个明确允许路径。
+- **返回与异常：** 合法时返回当前不可变模型；空 `included_paths` 抛出 `ValueError`，最终由
+  Pydantic 汇总为 `ValidationError`。
+- **安全：** 防止以“没有范围”等同于“任意范围”的方式扩大权限。
+
+### `pc_manager_agent.domain.plans.PlanStep.arguments_digest`
+
+```python
+arguments_digest() -> str
+```
+
+- **作用：** 将步骤参数序列化为键顺序稳定、无多余空格的 UTF-8 JSON，再计算 SHA-256。
+- **返回：** 64 个十六进制字符的参数摘要。
+- **安全：** 摘要用于运行时确认绑定；相同语义但字典插入顺序不同会得到同一结果，参数内容
+  改变则确认失效。摘要不是加密或凭据保护手段。
+
+### `pc_manager_agent.domain.plans.TaskPlan.validate_steps`
+
+```python
+validate_steps() -> Self
+```
+
+- **作用：** `TaskPlan` 的模型后置验证器，要求至少一个步骤，并保证所有 `step_id` 唯一。
+- **返回与异常：** 合法时返回当前模型；空步骤或重复 ID 抛出 `ValueError`。
+- **安全：** 避免确认和审计无法唯一指向具体步骤。
+
+### `pc_manager_agent.domain.plans.TaskPlan.canonical_digest`
+
+```python
+canonical_digest() -> str
+```
+
+- **作用：** 将整个计划以 JSON 模式导出、稳定排序并计算 SHA-256，覆盖计划 ID、版本、目标、
+  范围、步骤、参数、影响估计和确认声明。
+- **返回：** 64 字符计划摘要。
+- **安全：** 计划确认以此摘要绑定；任何执行相关字段变化都会使旧确认失效。
+
+## `pc_manager_agent.domain.risk`
+
+### `pc_manager_agent.domain.risk.RiskLevel.severity`
+
+```python
+severity: int
+```
+
+- **作用：** 把 `R0` 至 `R4` 的枚举值转换为可排序整数 `0..4`。
+- **返回：** 风险等级中的数字部分。
+- **使用场景：** 安全审查用它判断是否达到必须即时确认的 `R2` 门槛；它不替代具体规则。
+
+## `pc_manager_agent.main`
+
+### `pc_manager_agent.main.build_parser`
+
+```python
+build_parser() -> argparse.ArgumentParser
+```
+
+- **作用：** 创建最小命令行解析器，注册 `--version` 和 `--smoke-test`。
+- **返回：** 尚未解析参数的 `ArgumentParser`，便于单元测试注入参数。
+- **副作用：** 不创建 GUI、不读取配置，也不启动应用。
+
+### `pc_manager_agent.main.run_application`
+
+```python
+run_application(settings: AppSettings, *, smoke_test: bool = False) -> int
+```
+
+- **作用：** 获取或创建 `QApplication`，设置应用标识，取得单实例锁，初始化运行时、主窗口和
+  托盘，然后进入 Qt 事件循环。退出时无论成功与否都关闭窗口、托盘、审计资源和单实例锁。
+- **参数：** `settings` 是已校验配置；`smoke_test=True` 时用定时器在约 100 ms 后受控退出。
+- **返回：** 已有实例时返回 `0`；运行时初始化失败并显示错误对话框时返回 `1`；正常运行
+  返回 Qt 事件循环退出码。
+- **安全：** 不自动提权。审计库无法初始化时不创建可执行工具的主界面。
+
+### `pc_manager_agent.main.run_application.controlled_quit`
+
+```python
+controlled_quit() -> None
+```
+
+- **作用：** `run_application()` 内部闭包，先调用 `window.request_quit()` 完成取消和托盘清理，
+  再请求 Qt 事件循环退出。
+- **可见性：** 仅连接到托盘退出动作和烟雾测试定时器，不是模块级公共 API。
+
+### `pc_manager_agent.main.main`
+
+```python
+main(argv: list[str] | None = None) -> int
+```
+
+- **作用：** 解析命令行。普通模式从环境加载设置；烟雾测试模式创建临时数据目录，避免测试
+  写入真实用户审计库，然后委托 `run_application()`。
+- **参数：** `argv=None` 表示使用进程参数；测试可传入显式列表。
+- **返回：** `run_application()` 的退出码。
+
+## `pc_manager_agent.orchestration.service`
+
+### `pc_manager_agent.orchestration.service.ScanOrchestrator.__init__`
+
+```python
+ScanOrchestrator(
+    *,
+    registry: ToolRegistry,
+    reviewer: SafetyReviewer,
+    path_policy: PathPolicy,
+    confirmation: ConfirmationService,
+    audit: AuditRepository,
+    max_files: int,
+    timeout_seconds: float,
+) -> None
+```
+
+- **作用：** 注入完成扫描生命周期所需的注册表、安全审查、路径策略、确认、审计和资源上限。
+- **参数：** 所有依赖均由 `ApplicationRuntime` 组合；`max_files` 和 `timeout_seconds` 会写入
+  计划和工具参数。
+- **副作用：** 读取可选环境变量 `PC_MANAGER_GIT_COMMIT`，用于后续审计追踪；不执行扫描。
+
+### `pc_manager_agent.orchestration.service.ScanOrchestrator.prepare_plan`
+
+```python
+prepare_plan(root: Path) -> tuple[TaskPlan, SafetyReview]
+```
+
+- **作用：** 校验并规范化根目录，计算位于该根目录内的禁止路径，构造唯一的 `file.scan`
+  R0 步骤和完整 `TaskPlan`，随后交给独立 `SafetyReviewer`。
+- **返回：** 计划与审查结果的二元组；即使审查拒绝也返回可解释的 `SafetyReview`。
+- **异常：** 根目录无效时抛出 `PathSecurityError`；审计写入失败时抛出
+  `AuditUnavailableError`。
+- **副作用与安全：** 只记录 `plan.reviewed` 审计事件，不读取文件内容，也不执行工具。
+
+### `pc_manager_agent.orchestration.service.ScanOrchestrator.request_plan_confirmation`
+
+```python
+request_plan_confirmation(plan: TaskPlan) -> ConfirmationRequest
+```
+
+- **作用：** 再次审查计划；通过后生成包含根目录、最大文件数和“不会修改文件”说明的计划确认。
+- **返回与异常：** 返回待处理确认；审查不通过时抛出 `OrchestrationError`。
+- **安全：** 不允许为被拒绝计划生成可用确认。
+
+### `pc_manager_agent.orchestration.service.ScanOrchestrator.resolve_plan_confirmation`
+
+```python
+resolve_plan_confirmation(
+    confirmation_id: UUID,
+    approved: bool,
+    plan: TaskPlan,
+) -> ConfirmationRequest
+```
+
+- **作用：** 委托确认状态机验证并记录用户决定，然后追加 `confirmation.resolved` 审计事件。
+- **返回：** 已解析的不可变确认对象。
+- **异常：** 确认不匹配、过期或审计写入失败时透传相应异常；不会在审计失败后假装批准成功。
+
+### `pc_manager_agent.orchestration.service.ScanOrchestrator.execute`
+
+```python
+execute(plan: TaskPlan, cancellation: CancellationToken) -> ScanReport
+```
+
+- **作用：** 按“重新审查 → 精确确认检查 → `tool.started` 审计 → 注册表执行 → 后置验证 →
+  `tool.completed` 审计”的顺序完成一次只读扫描。
+- **参数：** `plan` 必须是已确认且未变化的计划；`cancellation` 是线程安全的协作取消信号。
+- **返回：** 类型和后置条件均验证通过的 `ScanReport`。
+- **异常：** 审查拒绝、确认无效、工具异常、输出类型错误或后置条件失败都会记录
+  `tool.failed`（含脱敏错误和耗时）后重新抛出。
+- **安全：** 只通过 `ToolRegistry` 执行；审计开始事件写入失败时工具不会启动。
+
+### `pc_manager_agent.orchestration.service.ScanOrchestrator._verify`
+
+```python
+_verify(plan: TaskPlan, report: ScanReport) -> None
+```
+
+- **作用：** 私有后置验证，确认报告根目录等于已确认范围，并确认汇总文件数等于实际文件元组
+  长度。
+- **异常：** 任一条件不成立时抛出 `OrchestrationError`，使执行被审计为失败。
+
+### `pc_manager_agent.orchestration.service.ScanOrchestrator._within`
+
+```python
+_within(path: Path, root: Path) -> bool
+```
+
+- **作用：** 私有词法包含判断，用绝对路径、Windows 大小写规范化和 `commonpath` 判断候选路径
+  是否位于根目录内。
+- **返回：** 位于范围内返回 `True`；跨驱动器等导致 `ValueError` 时安全返回 `False`。
+
+## `pc_manager_agent.persistence.database`
+
+### `pc_manager_agent.persistence.database.create_sqlite_engine`
+
+```python
+create_sqlite_engine(database_path: Path) -> Engine
+```
+
+- **作用：** 创建父目录，使用结构化 SQLAlchemy `URL` 构造本地 SQLite 引擎，并注册连接
+  初始化回调。
+- **返回：** 尚未建业务表的 SQLAlchemy `Engine`。
+- **副作用：** 可能创建父目录；第一次连接时可能创建数据库文件。
+- **安全：** 路径作为 URL 参数传递，不拼接 SQL；连接强制使用完整性相关 PRAGMA。
+
+### `pc_manager_agent.persistence.database.create_sqlite_engine.configure_connection`
+
+```python
+configure_connection(dbapi_connection: object, _connection_record: object) -> None
+```
+
+- **作用：** `create_sqlite_engine()` 内部 SQLAlchemy `connect` 事件回调，为每个新连接启用
+  外键、WAL 日志和 `synchronous=FULL`。
+- **异常处理：** 任一 PRAGMA 失败时先关闭底层连接再重新抛出；游标始终在 `finally` 中关闭。
+- **可见性：** 由 SQLAlchemy 自动调用，调用方不应直接调用。
+
+## `pc_manager_agent.platform_support.base`
+
+### `pc_manager_agent.platform_support.base.SingleInstanceGuard.acquire`
+
+```python
+acquire() -> bool
+```
+
+- **作用：** 平台无关协议方法，要求实现尝试取得单实例所有权。
+- **返回：** 当前进程取得锁返回 `True`；已经有活动实例返回 `False`。
+- **实现要求：** 不得通过终止其他进程或提权来取得所有权。
+
+### `pc_manager_agent.platform_support.base.SingleInstanceGuard.close`
+
+```python
+close() -> None
+```
+
+- **作用：** 平台无关协议方法，释放当前进程拥有的单实例资源。
+- **要求：** 应支持重复调用，并且不能移除其他活动实例的锁。
+
+## `pc_manager_agent.platform_support.windows.single_instance`
+
+### `pc_manager_agent.platform_support.windows.single_instance.QtSingleInstanceGuard.__init__`
+
+```python
+QtSingleInstanceGuard(
+    server_name: str = "WindowsPCManagerAgent-0.1",
+) -> None
+```
+
+- **作用：** 保存本地 IPC 服务名，创建尚未监听的 `QLocalServer`，初始化未取得状态。
+- **参数：** `server_name` 应在应用版本/用户范围内稳定；测试可注入不同名称避免冲突。
+
+### `pc_manager_agent.platform_support.windows.single_instance.QtSingleInstanceGuard.server`
+
+```python
+server: QLocalServer
+```
+
+- **作用：** 暴露只读服务器对象，使启动代码能够监听 `newConnection` 并唤醒现有窗口。
+- **返回：** 内部 `QLocalServer`；调用方不应替换或绕过守卫关闭它。
+
+### `pc_manager_agent.platform_support.windows.single_instance.QtSingleInstanceGuard.acquire`
+
+```python
+acquire() -> bool
+```
+
+- **作用：** 先用 `QLocalSocket` 探测现有服务。150 ms 内成功连接表示已有活动实例，返回
+  `False`；否则清理陈旧端点并尝试监听同名服务。
+- **返回：** 监听成功返回 `True`，失败返回 `False`。
+- **副作用与安全：** 只操作当前应用的本地 IPC 名称，不终止进程、不提权。
+
+### `pc_manager_agent.platform_support.windows.single_instance.QtSingleInstanceGuard.close`
+
+```python
+close() -> None
+```
+
+- **作用：** 仅在当前对象已取得所有权时关闭服务器、移除本地端点并清除状态。
+- **幂等性：** 未取得或已经释放时直接返回，可安全重复调用。
+
+## `pc_manager_agent.providers.llm.base`
+
+### `pc_manager_agent.providers.llm.base.LLMProvider.name`
+
+```python
+name: str
+```
+
+- **作用：** 抽象只读属性，要求供应商实现返回稳定、非敏感的标识。
+- **返回：** 例如 `openai`；不得包含模型密钥或用户配置。
+- **抽象行为：** 基类实现抛出 `NotImplementedError`，具体适配器必须覆盖。
+
+### `pc_manager_agent.providers.llm.base.LLMProvider.create_plan`
+
+```python
+async create_plan(request: PlannerRequest) -> ProviderPlanResult
+```
+
+- **作用：** 抽象异步规划接口，只负责把明确允许的数据转换成结构化 `TaskPlan`。
+- **参数：** `request` 明确列出用户目标、路径范围和允许工具。
+- **返回：** 经过 Schema 校验的供应商中立结果。
+- **安全：** 实现不得执行工具或扩大范围；基类只定义契约并抛出 `NotImplementedError`。
+
+## `pc_manager_agent.providers.llm.openai_provider`
+
+### `pc_manager_agent.providers.llm.openai_provider._ResponsesAPI.parse`
+
+```python
+async parse(**kwargs: object) -> object
+```
+
+- **作用：** 私有结构化协议，描述 OpenAI 客户端 `responses.parse` 所需的最小异步接口，便于
+  注入测试替身。
+- **返回：** 原始响应对象；真正的类型和内容由 `OpenAILLMProvider.create_plan()` 验证。
+
+### `pc_manager_agent.providers.llm.openai_provider._OpenAIClient.responses`
+
+```python
+responses: _ResponsesAPI
+```
+
+- **作用：** 私有协议属性，抽象 OpenAI 客户端的 Responses API 资源。
+- **用途：** 降低业务适配器对 SDK 具体客户端类型的耦合，测试无需网络。
+
+### `pc_manager_agent.providers.llm.openai_provider.OpenAILLMProvider.__init__`
+
+```python
+OpenAILLMProvider(
+    *,
+    model: str,
+    api_key: str,
+    client: _OpenAIClient | None = None,
+) -> None
+```
+
+- **作用：** 验证并保存显式模型名；使用提供的客户端，或创建超时 30 秒、最多重试一次的
+  `AsyncOpenAI` 客户端。
+- **异常：** 模型名或 API Key 为空时抛出 `ValueError`。
+- **安全：** API Key 只传给 SDK，不保存为公开属性；依赖注入允许测试避免真实请求。
+
+### `pc_manager_agent.providers.llm.openai_provider.OpenAILLMProvider.name`
+
+```python
+name: str
+```
+
+- **作用与返回：** 始终返回稳定标识 `openai`，不泄露模型 ID 或密钥。
+
+### `pc_manager_agent.providers.llm.openai_provider.OpenAILLMProvider.create_plan`
+
+```python
+async create_plan(request: PlannerRequest) -> ProviderPlanResult
+```
+
+- **作用：** 把固定安全指令和 `PlannerRequest` JSON 发送到 Responses API，要求 SDK 直接按
+  `TaskPlan` 解析；验证输出类型后封装供应商和请求追踪 ID。
+- **返回：** `ProviderPlanResult`；它只表示规划结果，不表示计划已审查、确认或执行。
+- **异常：** SDK `APIError` 被脱敏包装为 `OpenAIProviderError`；缺少合法结构化计划同样抛出
+  `OpenAIProviderError`。
+- **隐私与安全：** 只发送调用方显式放入 `PlannerRequest` 的数据；本方法不能调用工具，返回
+  计划仍必须经过确定性安全审查和确认。
+
+## `pc_manager_agent.rollback.base`
+
+### `pc_manager_agent.rollback.base.OperationCommand.execute`
+
+```python
+execute() -> None
+```
+
+- **作用：** 写操作命令抽象方法；具体实现只能在安全审查和确认门禁之后改变状态。
+- **抽象行为：** 基类抛出 `NotImplementedError`；实现应在失败时抛出明确异常而非吞掉错误。
+
+### `pc_manager_agent.rollback.base.OperationCommand.verify`
+
+```python
+verify() -> bool
+```
+
+- **作用：** 抽象后置条件验证，检查真实系统状态是否符合命令声明。
+- **返回：** 验证通过返回 `True`，失败返回 `False`；不得仅复述执行函数返回值。
+
+### `pc_manager_agent.rollback.base.OperationCommand.build_undo_record`
+
+```python
+build_undo_record() -> UndoRecord
+```
+
+- **作用：** 从执行前后观察到的状态构建真实的 `UndoRecord`，记录路径、文件标识、元数据、
+  回滚级别和有效条件。
+- **要求：** 无法自动回滚时必须使用 `PARTIAL`、`MANUAL` 或 `NONE`，不得虚构 `FULL`。
+
+### `pc_manager_agent.rollback.base.OperationCommand.rollback`
+
+```python
+rollback(record: UndoRecord) -> bool
+```
+
+- **作用：** 抽象回滚操作；只有记录有效条件仍成立时才能尝试恢复。
+- **返回：** 已验证恢复成功返回 `True`，否则返回 `False` 或由实现抛出明确异常。
+- **当前范围：** MVP 0.1 尚无实际写操作实现，这些方法是安全扩展契约。
+
+## `pc_manager_agent.safety.path_policy`
+
+### `pc_manager_agent.safety.path_policy._absolute_lexical`
+
+```python
+_absolute_lexical(path: Path) -> Path
+```
+
+- **作用：** 私有词法规范化函数，移除 `.` 等片段并转换为绝对路径，但不调用
+  `Path.resolve()`，因此不会主动跟随符号链接、目录联接或其他重解析点。
+- **返回：** 词法规范化后的 `Path`。
+- **安全：** 仅做字符串/路径级比较；存在性和链接检查必须由后续函数完成。
+
+### `pc_manager_agent.safety.path_policy._is_within`
+
+```python
+_is_within(path: Path, root: Path) -> bool
+```
+
+- **作用：** 私有范围比较，先对两条路径进行词法绝对化和 Windows 大小写规范化，再通过
+  `os.path.commonpath()` 判断包含关系。
+- **返回：** 候选位于根目录内（包括根本身）时返回 `True`；不同驱动器等比较错误时返回
+  `False`。
+- **安全：** 不使用容易产生前缀误判的字符串 `startswith()`。
+
+### `pc_manager_agent.safety.path_policy.is_reparse_point`
+
+```python
+is_reparse_point(path: Path) -> bool
+```
+
+- **作用：** 使用 `os.lstat()` 在不跟随链接的情况下读取文件属性，同时检查
+  `Path.is_symlink()` 和 Windows `FILE_ATTRIBUTE_REPARSE_POINT`。
+- **返回：** 符号链接、目录联接或其他重解析点返回 `True`；普通对象返回 `False`。
+- **错误处理：** `lstat` 失败时返回 `False`，调用方仍需通过存在性、权限和实际访问错误检查
+  进行失败关闭，不能仅依赖本函数授权访问。
+
+### `pc_manager_agent.safety.path_policy.PathPolicy.__init__`
+
+```python
+PathPolicy(
+    approved_roots: Iterable[Path],
+    forbidden_roots: Iterable[Path] = (),
+    *,
+    current_user_root: Path | None = None,
+) -> None
+```
+
+- **作用：** 把允许和禁止根目录转换为不可变、词法规范化元组，并记录当前用户目录及其
+  `Users` 父目录。
+- **参数：** 至少需要一个 `approved_root`；测试可显式传入 `current_user_root`。
+- **异常：** 允许根目录为空时抛出 `ValueError`。
+- **安全：** 构造只建立策略，不证明路径存在；所有执行入口仍须调用 `validate_scan_root()`。
+
+### `pc_manager_agent.safety.path_policy.PathPolicy.for_scan_root`
+
+```python
+for_scan_root(
+    root: Path,
+    extra_forbidden: Iterable[Path] = (),
+) -> PathPolicy
+```
+
+- **作用：** 为一次扫描创建保守策略，自动加入 SSH、OneDrive Personal Vault、Chrome、
+  Edge、Firefox、1Password、Bitwarden 和 Windows 安全数据库等禁止根目录。
+- **参数：** `root` 是唯一批准根；`extra_forbidden` 用于用户自定义禁止目录。
+- **返回：** 绑定当前用户配置文件的新 `PathPolicy`。
+
+### `pc_manager_agent.safety.path_policy.PathPolicy.approved_roots`
+
+```python
+approved_roots: tuple[Path, ...]
+```
+
+- **作用与返回：** 返回不可变的批准根目录元组，调用方不能通过修改返回值扩大策略。
+
+### `pc_manager_agent.safety.path_policy.PathPolicy.forbidden_roots`
+
+```python
+forbidden_roots: tuple[Path, ...]
+```
+
+- **作用与返回：** 返回不可变禁止根目录元组，用于计划展示、排除计算和审计说明。
+
+### `pc_manager_agent.safety.path_policy.PathPolicy.is_forbidden`
+
+```python
+is_forbidden(path: Path) -> bool
+```
+
+- **作用：** 检查路径名称是否命中固定禁止名、是否位于任一禁止根目录，或者是否位于其他
+  Windows 用户的配置文件中。
+- **返回：** 任一禁止条件成立时返回 `True`。
+- **安全：** 使用词法路径，不读取目录内容；“其他用户目录”默认拒绝。
+
+### `pc_manager_agent.safety.path_policy.PathPolicy.is_approved`
+
+```python
+is_approved(path: Path) -> bool
+```
+
+- **作用：** 同时要求候选路径位于至少一个批准根内且不属于禁止范围。
+- **返回：** 满足两个条件才返回 `True`。
+- **注意：** 这是词法授权检查，不替代存在性、重解析点和执行时身份复验。
+
+### `pc_manager_agent.safety.path_policy.PathPolicy.validate_scan_root`
+
+```python
+validate_scan_root(path: Path) -> Path
+```
+
+- **作用：** 拒绝显式 `..`，严格解析现有路径，确认它是目录，拒绝输入路径或解析结果上的
+  重解析点，并检查批准/禁止范围。
+- **返回：** 已存在的规范化绝对根目录。
+- **异常：** 路径不可用、不是目录、包含重解析点或越权时抛出 `PathSecurityError`，错误消息
+  包含被拒绝原因。
+- **安全：** 是计划和执行都会调用的根目录强校验；后续扫描仍会逐项复验。
+
+### `pc_manager_agent.safety.path_policy.PathPolicy.entry_rejection_reason`
+
+```python
+entry_rejection_reason(path: Path) -> str | None
+```
+
+- **作用：** 扫描每个对象前执行轻量策略检查，并返回稳定的机器可读原因。
+- **返回：** 可能为 `outside-approved-root`、`forbidden-path`、`reparse-point`；允许时返回
+  `None`。
+- **用途：** 扫描器把拒绝原因写入 `ScanIssue`，而不是静默跳过或抛弃整个报告。
+
+## `pc_manager_agent.safety.plan_reviewer`
+
+### `pc_manager_agent.safety.plan_reviewer.SafetyReviewer.__init__`
+
+```python
+SafetyReviewer(registry: ToolRegistry, path_policy: PathPolicy) -> None
+```
+
+- **作用：** 注入允许列表注册表和当前任务路径策略，构造不执行任何工具的独立审查器。
+- **副作用：** 无；不会注册工具、确认计划或访问文件内容。
+
+### `pc_manager_agent.safety.plan_reviewer.SafetyReviewer.review`
+
+```python
+review(plan: TaskPlan) -> SafetyReview
+```
+
+- **作用：** 对计划执行完整确定性审查：要求计划确认；验证包含路径；确认工具已注册；校验
+  参数 Schema；比较风险和回滚声明；要求 R2+ 即时确认；拒绝 R3/R4；检查清单声明的路径
+  参数没有扩大范围。
+- **返回：** 包含所有发现问题的 `SafetyReview`。只要有一个 `ReviewIssue`，`approved` 就是
+  `False`。
+- **错误处理：** 可预期的未知工具、参数和路径错误被转换为机器可读问题，而不是直接执行或
+  猜测修复。
+- **安全：** 审查是只读的；返回批准也不等于用户确认，更不等于执行授权。
+
+## `pc_manager_agent.tools.file_tools.scanner`
+
+### `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool.__init__`
+
+```python
+DirectoryScannerTool(
+    path_policy: PathPolicy,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> None
+```
+
+- **作用：** 保存根目录安全策略和可注入单调时钟，并创建 `file.scan` 的不可变
+  `ToolManifest`。
+- **清单声明：** R0、只读、支持取消、回滚 `NONE`、最多 100000 项、最长 3600 秒、仅
+  Windows，作用域参数为 `root`。
+- **参数：** 测试可注入确定性时钟；生产默认使用不受系统时间回拨影响的 `monotonic`。
+
+### `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool.manifest`
+
+```python
+manifest: ToolManifest
+```
+
+- **作用与返回：** 返回构造时创建的不可变安全清单，供注册、审查和输出类型校验使用。
+
+### `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool.execute`
+
+```python
+execute(request: BaseModel, cancellation: CancellationToken) -> BaseModel
+```
+
+- **作用：** 注册工具统一入口，先确认输入实际为 `ScanRequest`，再委托 `_scan()`。
+- **返回：** 以协议基类标注、实际类型为 `ScanReport`。
+- **异常：** 绕过注册表传入错误模型时抛出 `TypeError`；路径安全错误由扫描实现透传。
+
+### `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._scan`
+
+```python
+_scan(request: ScanRequest, cancellation: CancellationToken) -> ScanReport
+```
+
+- **作用：** 私有扫描核心。执行前重新验证根目录；用显式栈遍历目录；逐项检查取消、超时、
+  排除范围和路径策略；不跟随链接；只读取 `stat` 元数据并生成报告。
+- **边界：** 达到 `max_files` 标记 `truncated`；超时标记 `timed_out`；取消标记
+  `cancelled`。非致命权限和文件系统错误转换为 `ScanIssue`。
+- **竞态防护：** 发现目录时记录 `(st_dev, st_ino)`，枚举前再次读取；身份变化时记录
+  `path-identity-changed` 并跳过，降低扫描后替换风险。
+- **返回：** 包含文件元组、问题元组和数量/大小/耗时汇总的 `ScanReport`。
+- **安全：** 不打开文件正文、不写元数据、不永久删除；回滚为 `NONE` 是因为没有写操作。
+
+### `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._path_is_within`
+
+```python
+_path_is_within(path: Path, root: Path) -> bool
+```
+
+- **作用：** 私有排除范围判断，使用绝对路径、Windows 大小写规范化和 `commonpath`。
+- **返回：** 位于排除根内返回 `True`；无法比较时返回 `False`。
+
+### `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._os_issue`
+
+```python
+_os_issue(path: Path, error: OSError) -> ScanIssue
+```
+
+- **作用：** 把操作系统异常转换为报告问题；`PermissionError` 映射为
+  `permission-denied`，其他 `OSError` 映射为 `filesystem-error`。
+- **返回：** 包含原路径和错误文本的 `ScanIssue`；不会吞掉到审计之外，因为问题会进入报告。
+
+### `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._directory_identity`
+
+```python
+_directory_identity(path: Path) -> tuple[int, int]
+```
+
+- **作用：** 使用 `os.stat(..., follow_symlinks=False)` 获取卷/设备号和文件标识号。
+- **返回：** `(st_dev, st_ino)`，用于目录发现与枚举前的身份一致性检查。
+- **异常：** 路径消失或不可访问时抛出 `OSError`，上层会记录问题并跳过。
+
+## `pc_manager_agent.tools.manifest`
+
+### `pc_manager_agent.tools.manifest.CancellationToken.__init__`
+
+```python
+CancellationToken() -> None
+```
+
+- **作用：** 创建内部 `threading.Event`，初始状态为未取消。
+- **线程安全：** `Event` 允许 GUI 线程发出取消、工作线程读取，无需全局可变状态。
+
+### `pc_manager_agent.tools.manifest.CancellationToken.cancel`
+
+```python
+cancel() -> None
+```
+
+- **作用：** 设置内部事件，请求协作取消。
+- **行为：** 幂等且不强制终止线程；工具应在安全检查点主动读取状态。
+
+### `pc_manager_agent.tools.manifest.CancellationToken.is_cancelled`
+
+```python
+is_cancelled: bool
+```
+
+- **作用与返回：** 只读属性，返回取消事件当前是否已设置。
+
+### `pc_manager_agent.tools.manifest.CancellationToken.cancellation_requested`
+
+```python
+cancellation_requested() -> bool
+```
+
+- **作用与返回：** 动态读取当前取消状态，供长循环反复调用；与属性值语义相同，但明确表达
+  “每次重新检查”而不是缓存一次结果。
+
+### `pc_manager_agent.tools.manifest.ToolManifest.__post_init__`
+
+```python
+__post_init__() -> None
+```
+
+- **作用：** dataclass 构造后验证工具名格式、非空描述、正数超时/批量上限，并强制 R0 工具
+  必须只读。
+- **异常：** 任一清单矛盾时抛出 `ValueError`，阻止工具进入注册表。
+- **安全：** 把关键声明一致性检查放在对象创建时，而不是依赖调用方自觉。
+
+### `pc_manager_agent.tools.manifest.RegisteredTool.manifest`
+
+```python
+manifest: ToolManifest
+```
+
+- **作用：** `RegisteredTool` 协议属性，要求每个工具提供不可变、完整的安全清单。
+- **返回：** 与实际执行实现一致的 `ToolManifest`。
+
+### `pc_manager_agent.tools.manifest.RegisteredTool.execute`
+
+```python
+execute(request: BaseModel, cancellation: CancellationToken) -> BaseModel
+```
+
+- **作用：** 确定性工具协议方法，接受已经按清单 Schema 校验的模型和取消令牌。
+- **返回：** 必须是清单声明的 `output_model` 实例；注册表会在运行后再次验证。
+- **限制：** 实现不得解释任意 Shell 文本或扩大已批准范围。
+
+## `pc_manager_agent.tools.registry`
+
+### `pc_manager_agent.tools.registry.ToolRegistry.__init__`
+
+```python
+ToolRegistry() -> None
+```
+
+- **作用：** 创建空的工具名到 `RegisteredTool` 映射；默认没有任何执行权限。
+
+### `pc_manager_agent.tools.registry.ToolRegistry.register`
+
+```python
+register(tool: RegisteredTool) -> None
+```
+
+- **作用：** 按清单名称加入一个工具。
+- **异常：** 名称已存在时抛出 `ToolRegistryError`，禁止静默覆盖已有权限定义。
+- **安全：** 清单在工具构造时已经完成一致性校验。
+
+### `pc_manager_agent.tools.registry.ToolRegistry.manifest`
+
+```python
+manifest(name: str) -> ToolManifest
+```
+
+- **作用：** 查找已注册工具的清单。
+- **返回与异常：** 存在时返回不可变清单；未知名称抛出 `UnknownToolError`，采用默认拒绝。
+
+### `pc_manager_agent.tools.registry.ToolRegistry.validate_input`
+
+```python
+validate_input(
+    name: str,
+    arguments: Mapping[str, object],
+) -> BaseModel
+```
+
+- **作用：** 取得工具清单，把原始参数复制为普通字典，并调用声明的 Pydantic 输入模型校验。
+- **返回：** 具体输入模型实例。
+- **异常：** 未知工具抛出 `UnknownToolError`；Schema 错误包装为 `ToolInputError`。
+
+### `pc_manager_agent.tools.registry.ToolRegistry.execute`
+
+```python
+execute(
+    name: str,
+    arguments: Mapping[str, object],
+    cancellation: CancellationToken | None = None,
+) -> BaseModel
+```
+
+- **作用：** 注册表的唯一执行入口：查找允许工具、校验输入、提供取消令牌、调用工具、验证
+  输出类型。
+- **返回：** 与清单 `output_model` 一致的结果模型。
+- **异常：** 未知工具、输入错误和输出类型违约分别抛出 `UnknownToolError`、`ToolInputError`
+  和 `ToolOutputError`。
+- **安全：** 不接受动态导入或任意命令；模型只能选择已经注册的名称。
+
+### `pc_manager_agent.tools.registry.ToolRegistry.names`
+
+```python
+names: tuple[str, ...]
+```
+
+- **作用与返回：** 返回按名称排序的不可变工具名元组，便于稳定展示、测试和提供给规划器。
+
+## `pc_manager_agent.ui.main_window`
+
+本模块是展示层。带下划线的方法是 Qt 信号连接的内部槽或界面构造辅助函数；它们不应被
+业务代码直接调用。所有扫描动作都委托给编排器，UI 不直接调用文件工具。
+
+### `pc_manager_agent.ui.main_window.MainWindow.__init__`
+
+```python
+MainWindow(runtime: ApplicationRuntime) -> None
+```
+
+- **作用：** 保存运行时依赖，初始化当前编排器、计划、确认、工作线程、托盘和退出状态，
+  创建四个页签并设置窗口标题、尺寸和初始状态栏消息。
+- **参数：** `runtime` 必须已经完成审计数据库初始化。
+- **副作用：** 构造 Qt 控件，但不扫描目录、不调用模型、不执行工具。
+
+### `pc_manager_agent.ui.main_window.MainWindow.attach_tray`
+
+```python
+attach_tray(tray: SystemTrayController) -> None
+```
+
+- **作用：** 在窗口和托盘对象都构造完成后注入托盘控制器，解决双向引用的初始化顺序。
+- **副作用：** 只保存引用，不显示托盘或执行退出。
+
+### `pc_manager_agent.ui.main_window.MainWindow._build_chat_tab`
+
+```python
+_build_chat_tab() -> None
+```
+
+- **作用：** 创建对话显示区、输入框和发送按钮，连接按钮点击及回车信号到 `_handle_chat()`。
+- **安全：** 明确提示阶段 0 聊天仅本地显示；本方法不创建模型供应商或网络连接。
+
+### `pc_manager_agent.ui.main_window.MainWindow._build_scan_tab`
+
+```python
+_build_scan_tab() -> None
+```
+
+- **作用：** 创建目录选择、计划显示、风险提示、确认/拒绝、开始/取消、进度条和结果表格；
+  配置初始禁用状态、只读表格、排序及全部 Qt 信号连接。
+- **安全：** 默认禁用执行按钮，只有计划准备并确认后才由其他槽函数启用。
+
+### `pc_manager_agent.ui.main_window.MainWindow._build_audit_tab`
+
+```python
+_build_audit_tab() -> None
+```
+
+- **作用：** 创建审计刷新按钮和只读表格，展示时间、事件、风险、工具、确认结果及计划 ID。
+- **副作用：** 只构造控件；不会在初始化时读取或改变审计数据库。
+
+### `pc_manager_agent.ui.main_window.MainWindow._build_settings_tab`
+
+```python
+_build_settings_tab() -> None
+```
+
+- **作用：** 以只读标签展示供应商、模型、数据目录、扫描上限和当前 MVP 限制。
+- **安全：** 只显示 API Key 的存储原则，不读取或显示密钥值。
+
+### `pc_manager_agent.ui.main_window.MainWindow._handle_chat`
+
+```python
+_handle_chat() -> None
+```
+
+- **作用：** Qt 槽。读取并去除输入空白；空输入直接返回；非空文本追加到本地对话区，显示
+  安全提示后清空输入框。
+- **安全：** 不调用 `create_llm_provider()`，所以聊天文本不会上传，也不会触发工具执行。
+
+### `pc_manager_agent.ui.main_window.MainWindow._choose_directory`
+
+```python
+_choose_directory() -> None
+```
+
+- **作用：** Qt 槽。打开系统目录选择对话框，并把用户选择的路径写入扫描根目录输入框。
+- **注意：** 选择目录不等于授权执行；路径仍需计划、安全审查和确认。
+
+### `pc_manager_agent.ui.main_window.MainWindow._prepare_plan`
+
+```python
+_prepare_plan() -> None
+```
+
+- **作用：** Qt 槽。检查根目录输入，创建根目录限定编排器，生成并审查计划，再请求计划确认；
+  成功后保存对象、显示结构化 JSON 和 R0 风险说明，启用确认/拒绝按钮。
+- **错误处理：** 空路径或任意计划/审查异常通过 `_show_error()` 告知用户并停止流程。
+- **安全：** 审查拒绝时不会保存可执行状态；扫描按钮保持禁用。
+
+### `pc_manager_agent.ui.main_window.MainWindow._approve_plan`
+
+```python
+_approve_plan() -> None
+```
+
+- **作用：** Qt 槽。确认当前编排器、计划和确认请求均存在，调用确定性确认服务记录批准，
+  然后禁用决定按钮并启用只读扫描按钮。
+- **错误处理：** 确认过期或计划变化等异常显示给用户，扫描按钮不会因此错误启用。
+
+### `pc_manager_agent.ui.main_window.MainWindow._reject_plan`
+
+```python
+_reject_plan() -> None
+```
+
+- **作用：** Qt 槽。把当前计划决定解析为拒绝，并禁用确认、拒绝和扫描按钮。
+- **安全：** 拒绝只记录状态和审计，不执行扫描；缺少当前对象时安全返回。
+
+### `pc_manager_agent.ui.main_window.MainWindow._start_scan`
+
+```python
+_start_scan() -> None
+```
+
+- **作用：** Qt 槽。在编排器和计划存在且没有活动工作器时创建 `ScanWorker`，连接完成/失败
+  信号，更新按钮和不确定进度条，并提交给全局线程池。
+- **安全：** 工作器仍会调用编排器重新审查和验证确认；UI 不能绕过安全层直接执行扫描器。
+
+### `pc_manager_agent.ui.main_window.MainWindow._cancel_scan`
+
+```python
+_cancel_scan() -> None
+```
+
+- **作用：** Qt 槽。若存在活动工作器，则设置其协作取消令牌并更新状态栏。
+- **行为：** 不强杀线程；扫描器在下一个安全检查点结束并返回带 `cancelled=True` 的报告。
+
+### `pc_manager_agent.ui.main_window.MainWindow._scan_completed`
+
+```python
+_scan_completed(value: object) -> None
+```
+
+- **作用：** Qt 槽。先用 `require_scan_report()` 收窄跨线程信号对象，再清理工作状态、恢复
+  控件、填充结果、显示完成/取消摘要并刷新审计表。
+- **错误处理：** 信号载荷类型错误时转入 `_scan_failed()`，不会把任意对象当作报告显示。
+
+### `pc_manager_agent.ui.main_window.MainWindow._scan_failed`
+
+```python
+_scan_failed(message: str) -> None
+```
+
+- **作用：** Qt 槽。清除活动工作器、恢复按钮和进度条，并通过统一错误对话框显示失败原因。
+- **安全：** 只更新界面；工具失败的结构化详情由编排器审计。
+
+### `pc_manager_agent.ui.main_window.MainWindow._populate_results`
+
+```python
+_populate_results(report: ScanReport) -> None
+```
+
+- **作用：** 暂停排序，按报告文件数建立表格行，写入名称、扩展名、媒体类型、大小、修改
+  时间和完整路径；为大小列保存数值排序数据，最后恢复排序并调整列宽。
+- **副作用：** 只操作内存中的 Qt 表格，不打开或修改报告中的文件。
+
+### `pc_manager_agent.ui.main_window.MainWindow._refresh_audit`
+
+```python
+_refresh_audit() -> None
+```
+
+- **作用：** Qt 槽。读取最近最多 100 条审计行，按当前查询顺序填入审计表。
+- **错误处理：** 数据库查询失败时显示错误并保持应用可见，不伪造空审计结果。
+- **副作用：** 只读数据库。
+
+### `pc_manager_agent.ui.main_window.MainWindow.request_quit`
+
+```python
+request_quit() -> None
+```
+
+- **作用：** 标记受控退出，调用 `shutdown()` 请求取消并等待后台任务，隐藏托盘，然后关闭
+  主窗口。
+- **安全：** 确保退出路径不会把仍运行的扫描任务遗留为失控后台工作。
+
+### `pc_manager_agent.ui.main_window.MainWindow.shutdown`
+
+```python
+shutdown() -> None
+```
+
+- **作用：** 若有工作器则请求协作取消，然后让全局线程池最多等待 5000 ms。
+- **行为：** 有界等待避免 UI 永久卡死；不会强制终止线程或进程。
+
+### `pc_manager_agent.ui.main_window.MainWindow.closeEvent`
+
+```python
+closeEvent(event: QCloseEvent) -> None
+```
+
+- **作用：** Qt 关闭事件覆盖。非受控退出且托盘可用时忽略关闭、隐藏窗口并提示仍在托盘运行；
+  受控退出或无托盘时接受关闭。
+- **安全：** 普通窗口关闭不会绕过统一退出流程；托盘退出会先请求取消任务。
+
+### `pc_manager_agent.ui.main_window.MainWindow._show_error`
+
+```python
+_show_error(message: str) -> None
+```
+
+- **作用：** 私有统一错误展示，在警告对话框和状态栏显示同一条用户可见消息。
+- **限制：** 调用方应传入已经脱敏的错误；本方法本身不写审计也不做脱敏。
+
+## `pc_manager_agent.ui.system_tray`
+
+### `pc_manager_agent.ui.system_tray.SystemTrayController.__init__`
+
+```python
+SystemTrayController(
+    window: QMainWindow,
+    quit_callback: Callable[[], None],
+) -> None
+```
+
+- **作用：** 创建系统托盘图标和“打开、隐藏、安全退出”菜单，把动作分别连接到窗口方法和
+  受控退出回调，并连接托盘激活事件。
+- **参数：** `quit_callback` 应是应用统一清理函数，而不是直接调用进程退出。
+- **安全：** 托盘只负责展示和委托，不直接调用编排器或工具。
+
+### `pc_manager_agent.ui.system_tray.SystemTrayController.is_available`
+
+```python
+is_available: bool
+```
+
+- **作用与返回：** 查询当前桌面会话是否提供系统托盘；不缓存结果。
+
+### `pc_manager_agent.ui.system_tray.SystemTrayController.show`
+
+```python
+show() -> None
+```
+
+- **作用：** 仅在托盘可用时显示图标；不可用时安全地不执行任何操作。
+
+### `pc_manager_agent.ui.system_tray.SystemTrayController.hide`
+
+```python
+hide() -> None
+```
+
+- **作用：** 从系统托盘隐藏图标；不关闭窗口或后台资源。
+
+### `pc_manager_agent.ui.system_tray.SystemTrayController.show_window`
+
+```python
+show_window() -> None
+```
+
+- **作用：** 恢复主窗口的正常状态、提升到前台并请求键盘焦点，供菜单和第二实例连接复用。
+
+### `pc_manager_agent.ui.system_tray.SystemTrayController._on_activated`
+
+```python
+_on_activated(reason: QSystemTrayIcon.ActivationReason) -> None
+```
+
+- **作用：** 私有托盘激活处理器；只有普通单击 `Trigger` 时调用 `show_window()`，其他激活
+  原因不处理。
+
+## `pc_manager_agent.ui.workers`
+
+### `pc_manager_agent.ui.workers.ScanWorker.__init__`
+
+```python
+ScanWorker(orchestrator: ScanOrchestrator, plan: TaskPlan) -> None
+```
+
+- **作用：** 初始化 `QRunnable`、线程安全信号对象和新的 `CancellationToken`，保存已经准备
+  的编排器与计划。
+- **副作用：** 不立即执行；只有提交给 `QThreadPool` 后才调用 `run()`。
+
+### `pc_manager_agent.ui.workers.ScanWorker.run`
+
+```python
+run() -> None
+```
+
+- **作用：** Qt 工作线程入口，调用编排器执行；成功时发射 `completed(report)`，任意异常时
+  发射包含异常类型和消息的 `failed(str)`。
+- **异常边界：** 捕获所有 `Exception` 是 Qt 线程边界的有意设计，避免异常丢失；业务层已经
+  负责结构化失败审计。
+
+### `pc_manager_agent.ui.workers.ScanWorker.cancel`
+
+```python
+cancel() -> None
+```
+
+- **作用：** 把取消请求转交给工作器的 `CancellationToken`。
+- **行为：** 线程安全、幂等、协作式，不强制中断当前系统调用。
+
+### `pc_manager_agent.ui.workers.require_scan_report`
+
+```python
+require_scan_report(value: object) -> ScanReport
+```
+
+- **作用：** 对 Qt `Signal(object)` 传输的宽类型对象执行运行时收窄。
+- **返回与异常：** 输入是 `ScanReport` 时原样返回；其他类型抛出 `TypeError`。
+- **安全：** 防止跨线程错误载荷被当作可信扫描结果使用。
+
+## 典型调用顺序
+
+```text
+AppSettings.from_environment
+  -> ApplicationRuntime
+  -> ApplicationRuntime.create_scan_orchestrator
+  -> ScanOrchestrator.prepare_plan
+  -> SafetyReviewer.review
+  -> ScanOrchestrator.request_plan_confirmation
+  -> ConfirmationService.resolve
+  -> ScanOrchestrator.execute
+  -> ToolRegistry.execute
+  -> DirectoryScannerTool.execute
+  -> ScanOrchestrator._verify
+  -> AuditRepository.record
+```
+
+调用方不得跳过中间门禁直接调用 `_scan()`，也不得把模型返回的工具名或参数直接交给系统
+API。新增工具时应先定义严格输入/输出模型和 `ToolManifest`，再补充安全审查、确认、审计、
+回滚和测试。
+
+## Stage 1 新增与修订 API
+
+本节补充阶段 1 的全部生产函数。若前文的阶段 0 说明与本节冲突，以本节为准。阶段 1
+新增的关键模型包括 `AuthorizedPath`、`FileAnalysisIntentDraft`、`FileAnalysisPlan`、
+`FileAnalysisProgress`、`FileAnalysisReport`、`StoredFileRecord`、`DuplicateGroup`、
+`InactiveAssessment`、`ExternalDataConsentRequest`、`ReportExportResult`、`ScanBatch` 和
+`ScanProgress`。这些模型都拒绝未知字段；意图/计划/报告模型不可变。
+
+### 运行时组合与审计回调
+
+#### `pc_manager_agent.app.runtime.ApplicationRuntime.create_file_analysis_services`
+
+```python
+create_file_analysis_services(
+    progress_callback: Callable[[FileAnalysisProgress], None] | None = None,
+) -> FileAnalysisServices
+```
+
+- **作用：** 从当前已授权根目录创建一次完整的阶段 1 依赖包：根目录限定
+  `PathPolicy`、四个 R0 工具、注册表、通用/专用安全审查器、编译器、编排器，以及
+  可选规划器/说明器。
+- **参数与返回：** 可选回调接收跨扫描/分析阶段的不可变进度；返回的服务对象可供 GUI
+  或无界面测试使用。没有授权目录时抛出 `ValueError`，模型配置不完整时抛出
+  `ProviderConfigurationError`。
+- **副作用与安全：** 只组合对象，不扫描。每次调用重新从持久化授权构建策略，不能复用
+  旧范围；工具输出批量写入应用 SQLite。
+
+| 函数 | 详细作用、输入/输出与安全约束 |
+|---|---|
+| `pc_manager_agent.app.runtime.ApplicationRuntime.create_file_analysis_services.scanner_progress(value)` | 内部适配器；把 `ScanProgress` 转换成带会话 ID 的 `FileAnalysisProgress`。没有外部回调或扫描没有会话 ID 时不发射，防止错误关联任务。 |
+| `pc_manager_agent.app.runtime.ApplicationRuntime.create_file_analysis_services.analyzer_progress(session_id, phase, completed, total)` | 内部适配器；把各分析器的分页进度统一为 GUI 进度模型。只传递计数，不读取或发送文件详情。 |
+| `pc_manager_agent.app.runtime.ApplicationRuntime._audit_external_consent(request)` | 在外部数据确认被批准/拒绝后写 `external_data.confirmation.resolved`；记录目的、供应商、载荷摘要和状态，不保存原始载荷。审计失败会失败关闭。 |
+| `pc_manager_agent.app.runtime.ApplicationRuntime._audit_authorized_path_change(action, record)` | 记录授权/禁止根的添加、移除或恢复，风险 R1；保存精确记录和反向动作，用于 FULL 配置回滚，不授权父目录。 |
+| `pc_manager_agent.app.runtime.ApplicationRuntime._audit_report_export(result)` | 记录显式报告创建的路径、格式、行数和大小，风险 R1、回滚 MANUAL；不会自动删除报告。 |
+
+`ApplicationRuntime.__init__` 现在还初始化外部确认、授权仓库、分析结果仓库、报告导出器
+和 Explorer 服务；`ApplicationRuntime.close()` 依次释放分析、授权和审计连接池，不删除
+数据库或用户报告。
+
+### 授权目录服务
+
+#### `pc_manager_agent.authorization.service.AuthorizedPathService.__init__`
+
+```python
+AuthorizedPathService(
+    repository: AuthorizedPathRepository,
+    *,
+    network_path_detector: Callable[[Path], bool] | None = None,
+    on_change: Callable[[str, AuthorizedPath], None] | None = None,
+) -> None
+```
+
+- **作用：** 把授权持久化、Windows 网络路径检测和审计回调组合为唯一的目录授权入口。
+- **安全：** 供应商/模型不持有此服务；检测器可在测试中注入，生产使用 Windows 驱动器
+  类型检查。构造本身不授予任何路径。
+
+| 函数 | 详细作用、输入/输出、异常与副作用 |
+|---|---|
+| `pc_manager_agent.authorization.service.AuthorizedPathService.add_authorized(path, label=None, favorite=False)` | 规范化并验证现有本地目录，拒绝网络、重解析和禁止根；持久化为 `AUTHORIZED` 并返回记录。只授权该根及安全子树，不授权父目录；重复规范路径抛 `AuthorizedPathStoreError`。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.add_forbidden(path, label=None)` | 验证并保存用户自定义禁止目录，返回 `FORBIDDEN` 记录。它增加拒绝范围，不授予读取权。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.remove(path_id)` | 按不透明 UUID 删除一项决定；存在时触发审计并返回 `True`，未知 ID 返回 `False`。它不删除目录或其中内容。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.restore(record)` | 对审计/回滚提供的完整记录重新做路径安全与身份规范化后恢复；规范路径变化时抛 `ValueError`，冲突时抛存储异常。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.list_authorized()` | 从 SQLite 按创建顺序返回所有授权根的不可变元组；无数据返回空元组。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.list_forbidden()` | 返回自定义禁止记录，不包含代码内置的系统保护根。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.forbidden_roots()` | 从禁止记录投影出规范 `Path` 元组，供策略组合；不返回可变数据库对象。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.build_policy(root_ids)` | 只解析给定授权 UUID，拒绝空集合、未知/禁止 ID，构建精确多根策略并逐根复验。返回 `PathPolicy`；不接受路径字符串替代 ID。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.resolve_authorized(root_ids)` | 把 UUID 元组解析成授权记录；保持顺序，任何未知或非授权记录都抛 `PathNotAuthorizedError`，避免部分成功扩大语义。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.require_authorized(path)` | 在所有当前授权根和禁止根下复验一个目录；成功返回规范路径，失败统一转换为 `PathNotAuthorizedError`。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService.require_authorized_file(path)` | 执行路径、范围、重解析、网络和普通文件检查；成功返回规范文件路径，供 Explorer/哈希使用。不会打开内容。 |
+| `pc_manager_agent.authorization.service.AuthorizedPathService._notify(action, record)` | 私有回调门；仅在注入 `on_change` 时通知，数据库成功前不会误报。回调异常向上传播，使安全审计问题可见。 |
+
+### 外部数据确认
+
+#### `pc_manager_agent.confirmation.external_data.ExternalDataConsentService.__init__`
+
+```python
+ExternalDataConsentService(
+    ttl_seconds: int = 300,
+    now: Callable[[], datetime] | None = None,
+    on_resolved: Callable[[ExternalDataConsentRequest], None] | None = None,
+) -> None
+```
+
+- **作用：** 创建只驻留内存的外发数据确认仓库；时钟和完成回调可注入以便测试/审计。
+- **安全：** 重启即丢失批准；这是有意的安全默认值。服务保存摘要而非原始载荷。
+
+| 函数 | 详细作用、输入/输出、异常与安全约束 |
+|---|---|
+| `pc_manager_agent.confirmation.external_data.ExternalDataConsentService.request(purpose, provider, payload, object_summary)` | 对 JSON 兼容载荷计算稳定 SHA-256，创建 PENDING、带目的/供应商/说明/到期时间的请求并返回。原始载荷不进入服务状态。 |
+| `pc_manager_agent.confirmation.external_data.ExternalDataConsentService.resolve(confirmation_id, approved)` | 只解析已知、未处理、未过期请求，设为 APPROVED/REJECTED 并触发审计；未知、重复或过期抛 `ExternalDataConsentError`。 |
+| `pc_manager_agent.confirmation.external_data.ExternalDataConsentService.require_approved(confirmation_id, purpose, provider, payload)` | 外部调用前的强制门禁；重新计算载荷摘要并逐项比较状态、到期、目的、供应商和摘要。任何变化均拒绝且不调用网络。 |
+| `pc_manager_agent.confirmation.external_data.ExternalDataConsentService.payload_digest(payload)` | 用 UTF-8、排序键和紧凑分隔符序列化后返回 64 位 SHA-256 十六进制；同一 JSON 语义产生稳定摘要。 |
+
+### 阶段 1 模型校验函数
+
+| 函数 | 作用与拒绝条件 |
+|---|---|
+| `pc_manager_agent.domain.file_analysis.FileAnalysisIntentDraft.require_scope_and_analysis()` | Pydantic 后置校验；授权根和分析类型都必须非空且无重复。失败抛 `ValidationError`，不会进入编译器。 |
+| `pc_manager_agent.domain.file_analysis.FileAnalysisPlan.validate_task_plan()` | 确认嵌套 `TaskPlan` 修改/删除数量均为零，且所有步骤都是 R0；矛盾计划无法实例化。 |
+| `pc_manager_agent.domain.file_analysis.FileAnalysisPlan.canonical_digest()` | 返回嵌套任务计划的规范确认摘要；不单独创造另一套易漂移的摘要算法。 |
+| `pc_manager_agent.domain.reports.ScanRequest.require_session_for_streaming()` | 当 `retain_files=False` 时强制要求 `session_id`，确保流式批次可归属到唯一 SQLite 会话。 |
+| `pc_manager_agent.providers.llm.base.AnalysisNarrativeDraft.reject_numeric_claims(value)` | 拒绝任何观察文本中的数字字符，防止模型生成与本地测量值冲突的数量；无数字时原样返回元组。 |
+
+### 计划编译与模型规划
+
+#### `pc_manager_agent.orchestration.file_analysis_planner.FileAnalysisPlanCompiler.__init__`
+
+```python
+FileAnalysisPlanCompiler(
+    authorization: AuthorizedPathService,
+    registry: ToolRegistry,
+    *, max_files: int, timeout_seconds: float, batch_size: int = 250,
+) -> None
+```
+
+- **作用：** 保存确定性的授权/注册表边界和全任务资源上限。模型不能修改这些上限。
+- **行为：** 构造不读取目录；`compile()` 才解析 ID 和检查需要的分析器是否已注册。
+
+#### `pc_manager_agent.orchestration.file_analysis_planner.FileAnalysisPlanCompiler.compile`
+
+```python
+compile(user_goal: str, draft: FileAnalysisIntentDraft) -> FileAnalysisPlan
+```
+
+- **作用：** 把不可信意图变成完整可执行计划。只在本地解析根 ID，拒绝重叠根，生成会话
+  ID，为每根分配文件/时间限额，派生禁止子树，为所选分析生成固定工具和参数。
+- **返回与异常：** 返回只含 R0、零修改/删除、需要计划确认的不可变计划。未知 ID、重叠
+  根、缺失注册工具、路径复验或模型校验失败均中止。
+- **安全：** 不解析自然语言、不接受供应商工具参数，重复分析默认启用逐字节验证。
+
+| 函数 | 详细作用 |
+|---|---|
+| `pc_manager_agent.orchestration.file_analysis_planner.FileAnalysisPlanCompiler._reject_overlapping_roots(roots)` | 两两用组件关系比较根；相等、父子嵌套都抛 `ValueError`，避免重复扫描、重复计数和模糊限制分配。 |
+| `pc_manager_agent.orchestration.file_analysis_planner.FileAnalysisPlanCompiler._analysis_description(analysis)` | 从封闭 `AnalysisType` 枚举返回面向用户的固定说明；不存在模型生成的描述或命令。 |
+
+#### `pc_manager_agent.orchestration.file_analysis_planner.FileAnalysisPlanner.__init__`
+
+```python
+FileAnalysisPlanner(provider, authorization, registry, compiler, external_consent) -> None
+```
+
+- **作用：** 组合可替换供应商和确定性编译器；供应商只产生意图，不能执行。
+
+| 函数 | 详细作用、输入/输出与外发边界 |
+|---|---|
+| `pc_manager_agent.orchestration.file_analysis_planner.FileAnalysisPlanner.build_provider_request(user_goal, root_ids=None)` | 从所选或全部授权记录构造目标、标签/不透明 ID、允许分析和实际注册工具名；没有根抛 `ValueError`。返回值不含真实路径。 |
+| `pc_manager_agent.orchestration.file_analysis_planner.FileAnalysisPlanner.request_external_consent(user_goal, root_ids=None)` | 为上一个函数产生的精确 JSON 请求创建 PLANNING 确认，说明会发送/不会发送的字段；不调用供应商。 |
+| `pc_manager_agent.orchestration.file_analysis_planner.FileAnalysisPlanner.plan(user_goal, confirmation_id, root_ids=None)` | 异步重建同一请求，要求精确批准，调用供应商 Schema 输出，再交给编译器。返回计划、供应商和追踪 ID；任何确认/Schema/授权错误都中止。 |
+
+### 文件分析编排器
+
+#### `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator.__init__`
+
+```python
+FileAnalysisOrchestrator(*, registry, validator, confirmation, audit, results) -> None
+```
+
+- **作用：** 组合阶段 1 的最终权限边界；保存 Git commit 环境值用于审计。
+- **安全：** 没有注册表外执行路径；构造不创建会话或读取文件。
+
+#### `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator.review`
+
+```python
+review(plan, *, provider=None, provider_request_id=None) -> SafetyReview
+```
+
+- **作用：** 调用独立专用审查器，并把完整计划、批准/拒绝结论及可选模型追踪写入审计。
+- **副作用与异常：** 只写审计，不执行工具。审计写失败向上传播并阻止后续可信执行。
+
+#### `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator.request_plan_confirmation`
+
+```python
+request_plan_confirmation(plan: FileAnalysisPlan) -> ConfirmationRequest
+```
+
+- **作用：** 再次安全审查后创建计划确认，摘要明确根、分析、阈值和“不移动/重命名/删除”。
+- **异常：** 审查拒绝时抛 `FileAnalysisOrchestrationError`，不生成可批准对象。
+
+#### `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator.resolve_plan_confirmation`
+
+```python
+resolve_plan_confirmation(confirmation_id, approved, plan) -> ConfirmationRequest
+```
+
+- **作用：** 按当前计划规范摘要解析批准/拒绝并写审计。变更、过期、重复处理或未知 ID
+  由确认服务拒绝。
+
+#### `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator.execute`
+
+```python
+execute(plan: FileAnalysisPlan, cancellation: CancellationToken) -> FileAnalysisReport
+```
+
+- **作用：** 重审并要求精确批准，创建本地会话，严格按计划经注册表执行，验证每个输出，
+  响应取消，计算 ALL/ANY 候选和分类，验证最终报告并审计终态。
+- **错误：** 工具、路径、SQLite、审计、输出类型或报告校验错误会标记会话 FAILED、记录
+  工具/任务失败并重新抛出；不会猜测结果或继续后续步骤。
+- **副作用与安全：** 仅写应用 SQLite；内容读取只可能发生在已批准的重复候选哈希中。
+
+| 私有函数 | 详细作用 |
+|---|---|
+| `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator._record_tool_started(plan, step_id, tool_name, arguments)` | 在调用注册表前记录确切步骤、脱敏参数、R0 和已批准状态；失败会阻止调用。 |
+| `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator._record_tool_completed(plan, step_id, tool_name, arguments, result, duration_ms)` | 记录安全压缩后的真实结果、验证通过和耗时；不会把候选文件内容写入审计。 |
+| `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator._record_tool_failed(plan, step_id, tool_name, arguments, error, duration_ms)` | 记录失败工具、异常类型/消息、验证失败和耗时，然后由调用方终止整个任务。 |
+| `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator._validate_step_result(tool_name, result)` | 将四个允许工具映射到确切 Pydantic 结果类型；不匹配抛 `FileAnalysisOrchestrationError`。 |
+| `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator._result_cancelled(result)` | 对扫描读取 `summary.cancelled`，对分析读取类型化 `cancelled`；供执行循环决定是否停止。 |
+| `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator._safe_tool_result(result)` | 把结果缩减为计数、字节数、置信度或问题数，避免审计中复制路径列表/哈希组；未知类型返回空映射。 |
+| `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator._aggregate_scan_summaries(summaries, forced_status, duration_ms)` | 合并多根计数和字节；终态优先级为强制状态、CANCELLED、TIMED_OUT、TRUNCATED、COMPLETED。返回一致 `ScanSummary`。 |
+| `pc_manager_agent.orchestration.file_analysis.FileAnalysisOrchestrator._verify_report(plan, report)` | 验证会话 ID、计划 ID 和候选数量不超过扫描数量；违反即拒绝把报告标为可信。 |
+
+### 聚合结果说明
+
+#### `pc_manager_agent.orchestration.explanation.FileAnalysisExplainer.__init__`
+
+```python
+FileAnalysisExplainer(provider: LLMProvider, external_consent: ExternalDataConsentService)
+```
+
+- **作用：** 组合可替换供应商与外发确认，不持有结果仓库或文件访问能力。
+
+| 函数 | 详细作用、返回与安全约束 |
+|---|---|
+| `pc_manager_agent.orchestration.explanation.FileAnalysisExplainer.build_request(plan, summary)` | 构造仅含 `FileAnalysisSummary`、阈值和分析类型的请求；不含路径、名称、问题明细或内容。 |
+| `pc_manager_agent.orchestration.explanation.FileAnalysisExplainer.request_external_consent(plan, summary)` | 对精确聚合请求创建 EXPLANATION 确认，明确列出发送和排除字段；不发起网络。 |
+| `pc_manager_agent.orchestration.explanation.FileAnalysisExplainer.explain(plan, summary, confirmation_id)` | 异步复核确认、调用供应商取得无数字定性观察，再调用本地渲染器。确认/供应商错误向上传播。 |
+| `pc_manager_agent.orchestration.explanation.render_analysis_explanation(summary, narrative=None)` | 用本地测量值格式化文件、目录、字节、候选和错误数，可追加模型定性观察；返回纯文本，不访问网络/文件。 |
+
+### 分析结果持久化
+
+#### `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.__init__`
+
+```python
+AnalysisResultRepository(database_path: Path) -> None
+```
+
+- **作用：** 创建启用安全 SQLite 设置的 SQLAlchemy 引擎和会话工厂；尚未建表。
+- **副作用：** 数据库父目录可由公共引擎工厂创建；必须调用 `initialize()` 才能读写。
+
+| 函数 | 详细作用、输入/输出、异常与资源约束 |
+|---|---|
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.initialize()` | 创建会话/文件/问题表，并删除上次崩溃遗留的 RUNNING 应用临时会话；SQL 错误包装为 `AnalysisResultStoreError`。不触碰用户文件。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.create_session(session_id, roots)` | 在扫描前创建唯一 RUNNING 会话并以 JSON 保存根列表；空根抛 `ValueError`，重复 ID/SQL 故障失败关闭。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.store_batch(batch)` | 把一个 `ScanBatch` 转为 ORM 行并在单事务追加；空批次无操作。批量大小由扫描请求上限控制，不长期保留模型。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.store_issues(session_id, issues)` | 追加问题代码、最多 1000 字符消息和可选路径；空序列无操作。它记录失败而不改变授权范围。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.complete_scan(session_id, summary)` | 给已知会话写完成时间、真实终态、计数、字节、问题和耗时；未知会话抛 `AnalysisResultStoreError`。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.iter_records(session_id, batch_size=500)` | 按递增主键进行 keyset 分页并生成 `StoredFileRecord` 元组；批次限制 1–2000，避免 OFFSET 和全量内存。迭代期间 SQL 错误向上传播。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.duplicate_sizes(session_id)` | 用 SQL 分组返回出现至少两次且大于零的大小，作为重复检测第一阶段；空文件不会进入哈希。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.record_count(session_id)` | 返回会话元数据行数；无行返回 0，SQL 错误包装。供进度总量使用。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.records_by_size(session_id, size_bytes)` | 返回一个同尺寸候选组的类型化记录；只供后续快速/完整哈希，不声称重复。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.mark_large(record_ids)` | 在单个受界更新中把给定记录标为大文件；空 ID 列表无操作。只改应用索引。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.mark_inactive(record_id, assessment)` | 保存置信度、证据和阈值；只有分析器判为“疑似”才调用，不保存“无用/可删除”建议。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.mark_duplicate(record_ids, group_id)` | 给经过内容验证的记录写中性组 ID；空列表无操作，不选择原件/副本。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.finalize_matches(session_id, analyses, match_mode)` | 先清除旧匹配，再按所选分析条件用 SQL `AND`/`OR` 标记最终候选；无分析条件抛 `ValueError`。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.page_candidates(session_id, offset=0, limit=200, category=None, search='', minimum_size_bytes=0, sort_by='size_bytes', descending=True)` | 返回最多 1000 行的已匹配结果，支持类型、转义后的名称/路径搜索、最小大小和允许列排序；未知排序列抛 `ValueError`，负 offset/大小安全钳制。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.matching_totals(session_id)` | 用 SQL 返回候选数量和总字节；无候选返回 `(0, 0)`。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.iter_matching(session_id, batch_size=500)` | 按主键 keyset 生成所有最终候选批次，批次 1–2000；供大报告流式导出。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.category_summaries(session_id)` | 在 SQLite 中按集中分类枚举聚合候选数量/字节，返回稳定排序的 `CategorySummary` 元组。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.list_issues(session_id, limit=1000)` | 返回按发现顺序、最多 5000 条问题；将可选路径恢复为 `Path`。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.delete_session(session_id)` | 删除应用拥有的一个分析会话及外键级联元数据；不删除扫描根或报告。当前仅用于临时结果生命周期，不是用户文件工具。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository.close()` | 释放引擎连接并标为未初始化；不删除数据库。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository._mark_boolean(record_ids, field_name)` | 私有布尔批量更新入口；空列表短路，非空委托统一事务函数。字段名只由受信代码传入。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository._execute_update(statement, message)` | 要求仓库已初始化，在事务内执行已构造 SQLAlchemy 语句；SQL 错误用调用方消息包装。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository._require_initialized()` | 未初始化或关闭后抛 `AnalysisResultStoreError`，防止默默使用不可信存储。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository._metadata_to_row(session_id, value)` | 把不可变 `FileMetadata` 映射为 ORM 行，保留时间、属性、分类和可选身份；初始化所有分析标志为 false。 |
+| `pc_manager_agent.persistence.analysis_results.AnalysisResultRepository._row_to_record(row)` | 把 ORM 行恢复为 `StoredFileRecord`，重建枚举、Path、可选闲置证据和整数身份；SQLite 时间由 `_as_utc` 修正。 |
+| `pc_manager_agent.persistence.analysis_results._as_utc(value)` | SQLite 返回无时区时把数值解释为原写入的 UTC；已有时区则转换 UTC，避免闲置/变更比较出现本地时区偏差。 |
+
+### 授权持久化
+
+#### `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository.__init__`
+
+```python
+AuthorizedPathRepository(database_path: Path) -> None
+```
+
+- **作用：** 创建隔离的授权 ORM 引擎/会话工厂；必须显式初始化。
+
+| 函数 | 详细作用、返回与异常 |
+|---|---|
+| `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository.initialize()` | 创建唯一规范路径的授权表并标记可用；SQL 错误包装为 `AuthorizedPathStoreError`。 |
+| `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository.add(record)` | 在事务内插入完整不可变记录并原样返回；路径或主键冲突抛“已配置”错误，其他 SQL 错误失败关闭。调用方必须先做路径策略校验。 |
+| `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository.remove(path_id)` | 按 UUID 删除一行；返回是否存在。不会删除对应目录。 |
+| `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository.list(kind=None)` | 可选按 AUTHORIZED/FORBIDDEN 筛选，按创建时间返回模型元组；无过滤时返回全部。 |
+| `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository.get(path_id)` | 返回单项模型或 `None`；不把 ORM 行泄露到业务层。 |
+| `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository.close()` | 释放连接并标为不可用，不删除设置。 |
+| `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository._require_initialized()` | 在任意 CRUD 前执行；未初始化抛 `AuthorizedPathStoreError`。 |
+| `pc_manager_agent.persistence.authorized_paths.AuthorizedPathRepository._to_model(row)` | 将字符串 UUID/路径/枚举和 UTC 时间恢复为严格 `AuthorizedPath`。 |
+| `pc_manager_agent.persistence.authorized_paths._as_utc(value)` | 恢复 SQLite 丢失的 UTC 时区信息，保证持久化前后模型可比较。 |
+
+### Windows 平台辅助
+
+| 函数 | 详细作用、输入/输出与安全约束 |
+|---|---|
+| `pc_manager_agent.platform_support.windows.explorer.WindowsExplorerService.__init__(authorization)` | 注入授权服务；构造不启动进程。Explorer 服务没有通用命令执行能力。 |
+| `pc_manager_agent.platform_support.windows.explorer.WindowsExplorerService.select_file(path)` | 先执行 `require_authorized_file`，再以固定 `explorer.exe` 和参数数组 `/select,<path>` 启动并设置超时；不使用 shell。不存在/越界/进程错误向上传播。 |
+| `pc_manager_agent.platform_support.windows.explorer.WindowsExplorerService._explorer_path()` | 通过 `GetWindowsDirectoryW` 定位系统 Explorer，验证它是现有文件并返回绝对路径；不搜索可被污染的进程 `PATH`。API/文件失败抛 `ExplorerOpenError`。 |
+| `pc_manager_agent.platform_support.windows.path_info.is_network_path(path)` | UNC/设备语法直接返回 `True`；否则调用 `GetDriveTypeW` 判断根是否 `DRIVE_REMOTE`。不确定时策略调用方可失败关闭。 |
+| `pc_manager_agent.platform_support.windows.path_info.last_access_time_reliable(root)` | 仅在 NTFS 且注册表 `NtfsDisableLastAccessUpdate` 明确为 0/1 时返回可靠布尔值；其他文件系统、自动管理值、权限/API 错误返回 `None`，促使降低置信度。 |
+| `pc_manager_agent.platform_support.windows.path_info._filesystem_name(root)` | 通过固定 Windows API 读取卷文件系统名称；任何不确定性返回空字符串，不抛出并伪称 NTFS。 |
+
+### LLM 阶段 1 接口
+
+| 函数 | 详细作用、返回与异常 |
+|---|---|
+| `pc_manager_agent.providers.llm.base.LLMProvider.create_file_analysis_intent(request)` | 供应商中立异步扩展点；返回 `ProviderIntentResult`。基类默认抛 `NotImplementedError`，实现仍需本地编译/审查。 |
+| `pc_manager_agent.providers.llm.base.LLMProvider.explain_file_analysis(request)` | 聚合说明异步扩展点；返回无数字 `ProviderNarrativeResult`。基类默认不实现。 |
+| `pc_manager_agent.providers.llm.openai_provider.OpenAILLMProvider.create_file_analysis_intent(request)` | 调用 OpenAI Responses 结构化解析为 `FileAnalysisIntentDraft`，返回供应商和请求 ID；连接、API 或空解析包装为 `OpenAIProviderError`。它不解析真实路径或执行。 |
+| `pc_manager_agent.providers.llm.openai_provider.OpenAILLMProvider.explain_file_analysis(request)` | 结构化解析 `AnalysisNarrativeDraft`；请求仅含聚合。数字声明由模型校验拒绝，SDK 错误统一包装。 |
+
+### 报告导出
+
+#### `pc_manager_agent.reporting.exporter.ReportExporter.__init__`
+
+```python
+ReportExporter(
+    results: AnalysisResultRepository,
+    *, on_export: Callable[[ReportExportResult], None] | None = None,
+) -> None
+```
+
+- **作用：** 注入分页结果源和可选审计回调；构造不创建文件。
+
+#### `pc_manager_agent.reporting.exporter.ReportExporter.export`
+
+```python
+export(target, format, plan, report) -> ReportExportResult
+```
+
+- **作用：** 验证用户选定的绝对本地新路径，流式写 CSV/JSON，读取最终文件大小，触发
+  审计并返回已验证结果。
+- **异常与安全：** 相对/模糊/网络/错误后缀/不存在父目录/已有目标均抛
+  `ReportExportError`。写入失败也包装该错误并保留可能的部分文件；从不覆盖或删除。
+
+| 私有函数 | 详细作用 |
+|---|---|
+| `pc_manager_agent.reporting.exporter.ReportExporter._validate_target(target, format)` | 检查绝对路径、无 `..`/尾点空格、目标不存在、父目录存在、本地驱动和精确 `.csv`/`.json` 后缀；返回原目标。 |
+| `pc_manager_agent.reporting.exporter.ReportExporter._write_csv(target, plan, report)` | 以 `x` 独占模式、UTF-8 BOM 和固定字段写表头，分页写所有候选，返回行数。包含时间/阈值/证据但不读文件正文。 |
+| `pc_manager_agent.reporting.exporter.ReportExporter._write_json(target, plan, report)` | 以 `x` 模式写结构化头和流式 `files` 数组，避免全量内存；返回候选行数。 |
+| `pc_manager_agent.reporting.exporter.ReportExporter._row(record, plan, report)` | 把一条真实索引记录转换为稳定导出字段，闲置和重复只使用已验证注解，不生成删除建议。 |
+
+### 阶段 1 专用安全审查与路径扩展
+
+#### `pc_manager_agent.safety.file_analysis_validator.FileAnalysisSafetyValidator.__init__`
+
+```python
+FileAnalysisSafetyValidator(reviewer, registry, authorization) -> None
+```
+
+- **作用：** 在通用 `SafetyReviewer` 外组合阶段 1 语义约束；构造不执行计划。
+
+#### `pc_manager_agent.safety.file_analysis_validator.FileAnalysisSafetyValidator.review`
+
+```python
+review(plan: FileAnalysisPlan) -> SafetyReview
+```
+
+- **作用：** 汇总通用问题，并检查零修改/删除、匹配模式摘要、授权 ID、精确 scope、四工具
+  白名单、R0/read-only manifest、会话 ID、扫描根/排除、大小/闲置阈值和分析集合。
+- **返回：** 任一问题使 `approved=False`，所有问题以机器可读代码返回；不自动修复或猜测。
+
+| 函数 | 详细作用 |
+|---|---|
+| `pc_manager_agent.safety.path_policy.path_is_within(path, root)` | 对绝对、规范大小写路径使用 `commonpath` 判断等于或位于根下；跨驱动 `ValueError` 返回 `False`，不使用易绕过的字符串前缀。 |
+| `pc_manager_agent.safety.path_policy._has_ambiguous_segment(path)` | 检查任一 Windows 段尾随空格/点，发现会被 Win32 规范化的歧义则返回 `True`。 |
+| `pc_manager_agent.safety.path_policy._is_unc_or_device_path(path)` | 在解析前识别 `\\server`、`\\?\`、`\\.\` 等 UNC/扩展设备语法。 |
+| `pc_manager_agent.safety.path_policy.PathPolicy.default_forbidden_roots()` | 基于当前用户/Windows 环境构造凭据、浏览器、密码管理器、SSH、钱包、Personal Vault 和系统安全根；返回规范元组。 |
+| `pc_manager_agent.safety.path_policy.PathPolicy.for_authorized_roots(roots, extra_forbidden=(), network_path_detector=None)` | 只从显式根创建多根策略，并合并内置/用户禁止目录和网络检测器；空根由构造器拒绝。 |
+| `pc_manager_agent.safety.path_policy.PathPolicy.validate_file(path)` | 在每次内容读取前要求绝对无穿越本地普通文件，拒绝歧义、重解析组件、越界/保护和网络路径；成功返回严格解析路径。 |
+| `pc_manager_agent.safety.path_policy.PathPolicy.canonicalize_authorization_root(path, extra_forbidden=(), network_path_detector=None)` | 通过临时精确策略复用完整根验证，返回可持久化规范目录；不会扩大到父目录。 |
+| `pc_manager_agent.safety.path_policy.PathPolicy._reject_reparse_components(path)` | 从锚点逐段检查所有已存在组件；任一符号链接/联接/重解析立即抛 `PathSecurityError`，缺失组件停止逐段检查并由严格解析处理。 |
+
+### 文件分类、扫描与分析工具
+
+#### `pc_manager_agent.tools.file_tools.classifier.FileTypeClassifier.classify`
+
+```python
+classify(path: Path) -> FileCategory
+```
+
+- **作用：** 对扩展名不区分大小写，在唯一集中映射中分类图片、视频、音频、文档、PDF、
+  压缩包、安装包、磁盘镜像、代码、数据库、备份和其他。
+- **安全：** 不打开文件、不嗅探内容；未知扩展名返回 `OTHER`。
+
+#### `DirectoryScannerTool` 阶段 1 私有辅助
+
+前文的 `DirectoryScannerTool.__init__` 现新增 `classifier`、`batch_consumer`、
+`issue_consumer` 和 `progress_callback` 注入项；`ScanRequest` 新增会话、批次和是否保留
+内存结果。公开 `execute()` 仍要求 `ScanRequest` 并在执行时复验根。
+
+| 函数 | 详细作用、错误和资源行为 |
+|---|---|
+| `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._scan.record_issue(issue)` | `_scan` 内部闭包；递增总问题数、加入有界问题批次，仅在非流式模式保留完整问题；达到批次大小即提交。 |
+| `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._validated_exclusions(paths, root)` | 要求每项为绝对、无穿越且位于当前根内，用规范本地路径返回元组；越界/相对路径抛 `ValueError`。 |
+| `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._flush_batch(request, batch)` | 非空且有消费者/会话时构造不可变 `ScanBatch`，调用消费者后清空列表；即使无消费者也清空，保证内存有界。 |
+| `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._flush_issues(request, issues)` | 以会话 ID 提交问题元组并清空工作列表；无问题短路。消费者异常向上传播，避免假装持久化成功。 |
+| `pc_manager_agent.tools.file_tools.scanner.DirectoryScannerTool._emit_progress(request, files_seen, directories_seen, total_size, issue_count)` | 构造类型化 `ScanProgress`；只有注入回调才发射。未知总数时不虚构百分比。 |
+
+#### 大文件分析器
+
+##### `pc_manager_agent.tools.file_tools.large_file_analyzer.LargeFileAnalyzer.__init__`
+
+```python
+LargeFileAnalyzer(repository, *, progress_callback=None) -> None
+```
+
+- **作用：** 注入分页结果库/进度回调并建立 R0、只读、可取消 manifest。
+
+| 函数 | 详细作用与结果 |
+|---|---|
+| `pc_manager_agent.tools.file_tools.large_file_analyzer.LargeFileAnalyzer.manifest` | 只读属性，返回 `file.analyze.large` 的不可变安全清单。 |
+| `pc_manager_agent.tools.file_tools.large_file_analyzer.LargeFileAnalyzer.execute(request, cancellation)` | 注册表入口；要求精确 `LargeFileAnalysisRequest`，否则 `TypeError`，然后委托 `analyze`。 |
+| `pc_manager_agent.tools.file_tools.large_file_analyzer.LargeFileAnalyzer.analyze(request, cancellation)` | 分页读取元数据，以“等于或大于”阈值标记，累计数量/字节和按扩展名、目录、大小带统计；每批检查取消/发进度。返回 `LargeFileAnalysisResult`。 |
+| `pc_manager_agent.tools.file_tools.large_file_analyzer.LargeFileAnalyzer._size_band(size_bytes)` | 返回 `under_1_gib`、`1_to_5_gib`、`5_to_10_gib` 或 `10_gib_and_above`，边界按二进制 GiB 计算。 |
+
+#### 疑似长期未使用分析器
+
+##### `pc_manager_agent.tools.file_tools.inactive_file_analyzer.InactiveFileAnalyzer.__init__`
+
+```python
+InactiveFileAnalyzer(
+    repository, *, atime_reliability=None, now=None, progress_callback=None,
+) -> None
+```
+
+- **作用：** 注入结果库、Windows atime 可靠性探针、UTC 时钟和进度；默认不假设 atime
+  可靠。
+
+| 函数 | 详细作用与保守语义 |
+|---|---|
+| `pc_manager_agent.tools.file_tools.inactive_file_analyzer.InactiveFileAnalyzer.manifest` | 返回 `file.analyze.inactive` 的 R0、只读、可取消清单。 |
+| `pc_manager_agent.tools.file_tools.inactive_file_analyzer.InactiveFileAnalyzer.execute(request, cancellation)` | 要求 `InactiveFileAnalysisRequest` 后委托分页分析；错误类型抛 `TypeError`。 |
+| `pc_manager_agent.tools.file_tools.inactive_file_analyzer.InactiveFileAnalyzer.analyze(request, cancellation)` | 计算 UTC 阈值，按扫描根缓存 atime 探针，对每条调用 `assess`，只保存 possibly_inactive，汇总置信度/字节并支持取消。 |
+| `pc_manager_agent.tools.file_tools.inactive_file_analyzer.InactiveFileAnalyzer.assess(metadata, threshold, inactive_days, atime_reliable)` | 只有访问和修改时间都旧才成为候选；创建时间和 atime 策略调节 HIGH/MEDIUM/LOW，证据不足返回 UNKNOWN/false。返回证据文本，不评价价值。 |
+
+#### 安全哈希器
+
+##### `pc_manager_agent.tools.file_tools.hashing.SafeFileHasher.__init__`
+
+```python
+SafeFileHasher(path_policy: PathPolicy, *, chunk_size: int = 1_048_576) -> None
+```
+
+- **作用：** 保存执行时文件策略并把块大小钳制为至少 4096 字节；不打开文件。
+
+| 函数 | 详细作用、验证与取消行为 |
+|---|---|
+| `pc_manager_agent.tools.file_tools.hashing._Digest.update(data)` | 私有协议方法，描述 hashlib 兼容摘要对象所需的最小 `update(bytes)` 接口；无实现。 |
+| `pc_manager_agent.tools.file_tools.hashing.SafeFileHasher.quick_hash(record, cancellation, sample_bytes=65536)` | 摘要包含文件大小；小文件哈希全文，大文件哈希首尾有界样本。打开前/后验证身份并在读块间检查取消；返回 SHA-256 十六进制，仅用于候选过滤。 |
+| `pc_manager_agent.tools.file_tools.hashing.SafeFileHasher.sha256(record, cancellation)` | 对已批准普通文件分块计算完整 SHA-256，读前后验证；文件变化/取消抛类型化错误，不返回部分摘要。 |
+| `pc_manager_agent.tools.file_tools.hashing.SafeFileHasher.byte_equal(left, right, cancellation)` | 尺寸不同直接 false；否则同时打开并分块比较，检查取消和双方身份。相等返回 true，不修改位置以外状态。 |
+| `pc_manager_agent.tools.file_tools.hashing.SafeFileHasher._open_verified(record)` | 拒绝 offline 占位符，经 `PathPolicy.validate_file` 后以二进制只读打开，立即用句柄复验；失败关闭句柄再抛出。 |
+| `pc_manager_agent.tools.file_tools.hashing.SafeFileHasher._hash_stream(handle, digest, cancellation)` | 分块读到 EOF，每块前检查取消并更新摘要；不缓存完整内容。 |
+| `pc_manager_agent.tools.file_tools.hashing.SafeFileHasher._verify_open_handle(handle, record)` | 用 `fstat` 比较尺寸、修改时间和可用 file/device ID；不一致抛 `FileChangedDuringScanError`。未知 ID 不伪造检查。 |
+| `pc_manager_agent.tools.file_tools.hashing.SafeFileHasher._raise_if_cancelled(cancellation)` | 已请求取消时抛 `ScanCancelledError`，供上层转为正常 CANCELLED 终态。 |
+
+#### 重复文件分析器
+
+##### `pc_manager_agent.tools.file_tools.duplicate_analyzer.DuplicateFileAnalyzer.__init__`
+
+```python
+DuplicateFileAnalyzer(repository, hasher, *, progress_callback=None) -> None
+```
+
+- **作用：** 组合分页元数据、受控内容读取和进度，建立 R0 重复分析 manifest。
+
+| 函数 | 详细作用与真实性约束 |
+|---|---|
+| `pc_manager_agent.tools.file_tools.duplicate_analyzer.DuplicateFileAnalyzer.manifest` | 返回 `file.analyze.duplicates` 的 R0、只读、可取消清单。 |
+| `pc_manager_agent.tools.file_tools.duplicate_analyzer.DuplicateFileAnalyzer.execute(request, cancellation)` | 要求 `DuplicateFileAnalysisRequest`，再执行分阶段检测；错误类型抛 `TypeError`。 |
+| `pc_manager_agent.tools.file_tools.duplicate_analyzer.DuplicateFileAnalyzer.analyze(request, cancellation)` | 查询非空同尺寸组，逐组快速哈希→完整 SHA-256→可选字节比较，写中性组 ID，汇总文件/可回收理论字节/问题；取消返回 `cancelled=True`。 |
+| `pc_manager_agent.tools.file_tools.duplicate_analyzer.DuplicateFileAnalyzer._analyze_same_size(records, cancellation, sample_bytes, byte_verify, issues)` | 先按快速指纹筛掉不同内容，再按完整 SHA-256 分组；可选以首文件为参照逐字节确认。只有至少两条验证相等才返回组。 |
+| `pc_manager_agent.tools.file_tools.duplicate_analyzer.DuplicateFileAnalyzer._safe_hash(record, cancellation, issues, quick, sample_bytes)` | 调用快速或完整哈希；取消错误原样抛出，文件变化/权限/IO 错误转成带路径 `ScanIssue` 并返回 `None`，不让单文件失败崩溃整个分析。 |
+
+### 阶段 1 GUI 控制器
+
+#### `pc_manager_agent.ui.analysis_tab.FileAnalysisTab.__init__`
+
+```python
+FileAnalysisTab(runtime: ApplicationRuntime) -> None
+```
+
+- **作用：** 初始化页面状态、建立控件/信号并从本地刷新授权列表。没有工具执行逻辑。
+- **线程：** 规划、分析和说明均委托 `QRunnable`；结果分页查询发生在 UI 操作边界。
+
+| 函数 | GUI 行为、委托边界与错误处理 |
+|---|---|
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._build_ui()` | 构造授权/禁止列表、目标、阈值/分析、计划/确认、进度、筛选、九列表格、分页/定位/导出/说明控件并连接“输入变化→失效计划”。不读取文件。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab.refresh_paths()` | 从授权服务重建两列表，保留 UUID 在 `UserRole`，默认选择首个授权根；用 `_building` 防止刷新本身使计划误失效。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._add_authorized()` | 打开目录选择器，具体确认只读授权和 favorite，调用授权服务；取消无副作用，错误用友好警告显示。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._add_forbidden()` | 选择并确认要始终阻止的目录，再调用 `add_forbidden`；不开始扫描。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._remove_authorized()` | 用固定提示委托 `_remove_selected`；只移除应用授权记录，不操作目录。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._remove_forbidden()` | 委托移除一项用户禁止记录；需要明确确认。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._remove_selected(widget, prompt)` | 要求当前项存在并二次确认，从 `UserRole` 解析 UUID 调用服务；成功刷新并使旧计划失效。无选择或异常安全提示。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab.start_planning(goal=None)` | 校验目标/根并创建服务。未配置模型时根据控件确定性编译；配置模型时先询问精确外发确认，再启动 `PlannerWorker`。不确认时不发送。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._manual_intent(root_ids)` | 将勾选分析、MB→字节、闲置天数和 ALL/ANY 转为严格 `FileAnalysisIntentDraft`；空分析由模型校验拒绝。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._planning_completed(value)` | 收窄跨线程结果；类型错误走失败 UI，成功交给 `_accept_planning_result`。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._accept_planning_result(result)` | 调用编排器审查并要求批准，创建确认，展示完整 JSON/R0 声明并启用确认/拒绝；审查问题不会被 UI 忽略。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._planning_failed(message)` | 清理工作器引用、重新启用规划并显示“生成计划失败”；不生成替代计划。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._approve_plan()` | 对当前精确确认调用编排器 resolve；成功后只启用“开始分析”，异常不执行。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._reject_plan()` | 记录拒绝并禁用执行；状态明确说明未读取文件。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._run_analysis()` | 当前有计划且无活动任务时创建 `FileAnalysisWorker`，连接进度/成功/失败，设置不确定进度并在线程池启动。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._progress_changed(value)` | 只接受 `FileAnalysisProgress`；扫描显示真实文件/目录/字节/错误，分析显示阶段和已知单位。未知总量用忙碌条而非虚构百分比。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._analysis_completed(value)` | 收窄报告、清理工作状态，显示 COMPLETED/CANCELLED，渲染确定性摘要、加载第一页并启用导出/可选说明。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._analysis_failed(message)` | 恢复按钮/进度并显示明确失败；不保留伪造完成状态。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab.cancel()` | 对活动工作器设置协作取消令牌并提示正在安全结束；不强杀线程。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._load_page()` | 从结果仓库按当前类型/搜索/大小/排序/方向加载最多 200 行，填充状态/置信度/重复组，更新分页和定位按钮；查询失败友好提示。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._reset_and_load_page()` | 筛选改变后把 offset 归零并重载，避免停在超出结果集的页。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._previous_page()` | offset 安全减去页大小且不低于零，然后查询。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._next_page()` | offset 增加固定页大小后查询；按钮只有满页时启用。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._open_selected_folder()` | 读取选中行保存的路径并委托授权限定 Explorer 服务；无行无操作，越界/不存在/启动错误提示。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._export_report()` | 要求当前计划/报告，选择 CSV/JSON 新路径、补正确后缀，委托 `ReportExporter` 并显示真实行数；取消无副作用。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._explain_report()` | 要求说明器/计划/报告，显示聚合外发确认；批准后在线程池调用，拒绝时不发送，结果只更新摘要视图。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._selected_root_ids()` | 从当前多选项的 `UserRole` 返回 UUID 元组，不从显示路径反解析权限。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._invalidate_plan()` | 控件/选择变化且已有计划时清除计划/确认、禁用执行并显示旧确认失效；构建/刷新期间短路。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab.shutdown()` | 应用退出前调用 `cancel()`；线程池的有界等待由主窗口负责。 |
+| `pc_manager_agent.ui.analysis_tab.FileAnalysisTab._show_error(message)` | 统一显示“不执行”警告；仅呈现错误，不吞掉业务层安全判断。 |
+| `pc_manager_agent.ui.main_window.MainWindow._build_analysis_tab()` | 创建正式 `FileAnalysisTab`，把状态信号接到主状态栏，并加入“文件分析”标签。 |
+
+### 阶段 1 Qt 工作器与类型收窄
+
+#### `pc_manager_agent.ui.workers.FileAnalysisWorker.__init__`
+
+```python
+FileAnalysisWorker(runtime: ApplicationRuntime, plan: FileAnalysisPlan) -> None
+```
+
+- **作用：** 创建信号、取消令牌，并以信号发射器为进度回调构建本次分析服务。构造不会
+  执行计划，但会复验当前授权以组合服务。
+
+| 函数 | 跨线程行为与异常边界 |
+|---|---|
+| `pc_manager_agent.ui.workers.FileAnalysisWorker.run()` | 在线程池调用已确认计划的编排器；成功发射 `completed(report)`，任何线程边界异常发射类型+消息的 `failed`。底层已负责失败审计。 |
+| `pc_manager_agent.ui.workers.FileAnalysisWorker.cancel()` | 线程安全、幂等设置令牌；扫描/哈希/分析循环协作检查。 |
+
+#### `pc_manager_agent.ui.workers.PlannerWorker.__init__`
+
+```python
+PlannerWorker(planner, user_goal, confirmation_id, root_ids) -> None
+```
+
+- **作用：** 保存已经显示并确认的规划输入，不解析或扩大根 ID。
+
+| 函数 | 跨线程行为 |
+|---|---|
+| `pc_manager_agent.ui.workers.PlannerWorker.run()` | 在线程中用 `asyncio.run` 调用 `planner.plan`；成功发射结构化结果，异常转换为 failed 文本。确认复验发生在 planner 内。 |
+
+#### `pc_manager_agent.ui.workers.ExplanationWorker.__init__`
+
+```python
+ExplanationWorker(explainer, plan, report, confirmation_id) -> None
+```
+
+- **作用：** 保存聚合说明所需不可变对象和确认 ID；不复制候选行。
+
+| 函数 | 跨线程行为 |
+|---|---|
+| `pc_manager_agent.ui.workers.ExplanationWorker.run()` | 异步调用说明器并发射最终本地数字文本；确认/网络/Schema 错误发射 failed，不把失败当说明。 |
+| `pc_manager_agent.ui.workers.require_analysis_report(value)` | `Signal(object)` 运行时收窄；只有 `FileAnalysisReport` 原样返回，否则 `TypeError`。 |
+| `pc_manager_agent.ui.workers.require_planning_result(value)` | 只有 `FileAnalysisPlanningResult` 原样返回，否则 `TypeError`，防止错误载荷进入确认 UI。 |
+
+## 阶段 1 典型调用顺序
+
+```text
+AuthorizedPathService.add_authorized
+  -> FileAnalysisPlanner.request_external_consent (可选)
+  -> FileAnalysisPlanner.plan / FileAnalysisPlanCompiler.compile
+  -> FileAnalysisSafetyValidator.review
+  -> FileAnalysisOrchestrator.request_plan_confirmation
+  -> FileAnalysisOrchestrator.resolve_plan_confirmation
+  -> FileAnalysisOrchestrator.execute
+  -> ToolRegistry.execute
+  -> DirectoryScannerTool / analyzers
+  -> AnalysisResultRepository
+  -> FileAnalysisTab paged results / ReportExporter
+  -> FileAnalysisExplainer.request_external_consent (可选)
+  -> AuditRepository.record
+```
+
+任何调用方都不得以直接调用私有扫描/哈希函数来绕过授权、计划、安全审查或确认。API
+文档中的私有函数仅用于维护和安全评审，不是稳定扩展点。
