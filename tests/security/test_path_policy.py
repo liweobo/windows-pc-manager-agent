@@ -113,7 +113,7 @@ def test_scan_root_reparse_branch_fails_closed(
         "pc_manager_agent.safety.path_policy.is_reparse_point",
         lambda _path: True,
     )
-    with pytest.raises(PathSecurityError, match="reparse"):
+    with pytest.raises(PathSecurityError, match="component cannot be a link or reparse"):
         policy.validate_scan_root(tmp_path)
 
 
@@ -127,7 +127,7 @@ def test_real_symlink_is_rejected_when_supported(tmp_path: Path) -> None:
     except OSError as exc:
         pytest.skip(f"Windows symlink creation is unavailable: {exc}")
     policy = PathPolicy((link,))
-    with pytest.raises(PathSecurityError, match="reparse"):
+    with pytest.raises(PathSecurityError, match="component cannot be a link or reparse"):
         policy.validate_scan_root(link)
 
 

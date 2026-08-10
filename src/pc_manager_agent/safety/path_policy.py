@@ -178,6 +178,11 @@ class PathPolicy:
             expanded = path.expanduser()
             self._reject_reparse_components(expanded)
             candidate = expanded.resolve(strict=True)
+        except PathSecurityError:
+            # Preserve the precise security reason. PathSecurityError derives from
+            # PermissionError/OSError, so the generic filesystem branch must not
+            # accidentally relabel a detected reparse point as merely unavailable.
+            raise
         except OSError as exc:
             msg = f"Scan root is unavailable: {path}"
             raise PathSecurityError(msg) from exc

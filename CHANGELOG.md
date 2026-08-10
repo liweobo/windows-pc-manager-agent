@@ -54,3 +54,5 @@ once release tags are introduced.
   Windows directory-enumeration file IDs as unknown before duplicate hashing.
 - Audit the exact registered tool on execution failure and preserve incomplete
   report artifacts instead of deleting any file in Stage 1.
+- Preserve the precise reparse-point denial instead of relabeling it as a generic
+  unavailable-path error on Windows runners that can create symbolic links.
