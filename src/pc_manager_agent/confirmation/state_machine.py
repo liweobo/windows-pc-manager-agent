@@ -21,6 +21,8 @@ class ConfirmationError(RuntimeError):
 class ConfirmationService:
     """Issue and resolve confirmations without trusting UI state."""
 
+    """负责把用户点击“批准”转换成一份与具体计划、具体步骤、具体参数和确认期限绑定的可验证授权.解决的核心问题：执行器不能只相信界面上的“已确认”状态，而必须能够证明用户批准的就是当前准备执行的这份计划。"""
+
     def __init__(
         self,
         ttl_seconds: int = 300,
@@ -34,6 +36,14 @@ class ConfirmationService:
 
     def request_plan(self, plan: TaskPlan, object_summary: str) -> ConfirmationRequest:
         """Create a new expiring plan-confirmation request."""
+        """
+        创建计划确认，生成的确认请求会绑定：
+            plan_id
+            plan_digest--计划摘要
+            object_summary--操作对象摘要
+            expires_at--过期时间
+            唯一的confirmation_id
+        """
         request = ConfirmationRequest(
             kind=ConfirmationKind.PLAN,
             plan_id=plan.plan_id,
@@ -51,6 +61,16 @@ class ConfirmationService:
         object_summary: str,
     ) -> ConfirmationRequest:
         """Create immediate confirmation for an already plan-approved step."""
+        """
+        创建即时确认请求:
+            plan_id：所属计划
+            plan_digest：完整计划摘要
+            step_id：准备执行的具体步骤
+            arguments_digest：该步骤参数摘要
+            object_summary：让用户看到的操作对象描述
+            expires_at：确认过期时间
+            kind=RUNTIME：标明是执行前即时确认
+        """
         self.require_plan_approved(plan)
         request = ConfirmationRequest(
             kind=ConfirmationKind.RUNTIME,
@@ -100,11 +120,13 @@ class ConfirmationService:
 
     def require_plan_approved(self, plan: TaskPlan) -> None:
         """Fail if no approval exists for the exact current plan snapshot."""
+        """执行前检查总体授权"""
         if self._approved_plan_digests.get(plan.plan_id) != plan.canonical_digest():
             raise ConfirmationError("Plan is not confirmed or has changed")
 
     def require_runtime_approved(self, plan: TaskPlan, step: PlanStep) -> None:
         """Fail if immediate confirmation does not match exact step arguments."""
+        """执行前检查步骤授权"""
         self.require_plan_approved(plan)
         binding = (plan.plan_id, step.step_id, step.arguments_digest())
         if binding not in self._approved_runtime:

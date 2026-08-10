@@ -29,6 +29,7 @@ from pc_manager_agent.confirmation.models import ConfirmationRequest
 from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.domain.reports import ScanReport
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
 from pc_manager_agent.ui.workers import ScanWorker, require_scan_report
 
@@ -45,11 +46,12 @@ class MainWindow(QMainWindow):
         self._worker: ScanWorker | None = None
         self._tray: SystemTrayController | None = None
         self._quitting = False
-        self.setWindowTitle("Windows PC Manager Agent — 安全基础版")
+        self.setWindowTitle("Windows PC Manager Agent — 只读文件分析")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
         self._build_chat_tab()
+        self._build_analysis_tab()
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
@@ -64,12 +66,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         self._conversation = QTextBrowser()
         self._conversation.setPlainText(
-            "Agent：这是阶段 0 安全基础版。聊天不会直接执行系统操作。\n"
-            "请在“只读扫描”页选择目录并检查结构化计划。"
+            "Agent：这是阶段 1 只读文件分析版。聊天不会直接执行系统操作。\n"
+            "请在“文件分析”页授权目录、检查结构化计划并确认后再扫描。"
         )
         input_row = QHBoxLayout()
         self._chat_input = QLineEdit()
-        self._chat_input.setPlaceholderText("输入目标（阶段 0 仅本地显示，不发送给模型）")
+        self._chat_input.setPlaceholderText("输入只读文件分析目标")
         send_button = QPushButton("发送")
         send_button.clicked.connect(self._handle_chat)
         self._chat_input.returnPressed.connect(self._handle_chat)
@@ -138,6 +140,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._results, 3)
         self._tabs.addTab(page, "只读扫描")
 
+    def _build_analysis_tab(self) -> None:
+        """Attach the formal Stage 1 workflow as an independent UI controller."""
+        self._analysis_tab = FileAnalysisTab(self._runtime)
+        self._analysis_tab.status_message.connect(self.statusBar().showMessage)
+        self._tabs.addTab(self._analysis_tab, "文件分析")
+
     def _build_audit_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -163,7 +171,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("API Key：仅从环境变量读取，界面和日志不会显示"))
         layout.addWidget(QLabel(f"本地数据目录：{self._runtime.settings.data_directory}"))
         layout.addWidget(QLabel(f"扫描文件上限：{self._runtime.settings.scan_max_files}"))
-        layout.addWidget(QLabel("阶段 0 不执行移动、重命名、回收站或系统修改。"))
+        layout.addWidget(QLabel("阶段 1 不执行移动、重命名、回收站或系统修改。"))
         layout.addStretch(1)
         self._tabs.addTab(page, "设置")
 
@@ -173,11 +181,20 @@ class MainWindow(QMainWindow):
         if not text:
             return
         self._conversation.append(f"你：{text}")
-        self._conversation.append(
-            "Agent：阶段 0 不会把聊天内容发送给外部模型，也不会直接执行。"
-            "请使用只读扫描页生成可审查计划。"
-        )
         self._chat_input.clear()
+        self._analysis_tab.goal_input.setText(text)
+        self._tabs.setCurrentWidget(self._analysis_tab)
+        if not self._runtime.authorized_paths.list_authorized():
+            self._conversation.append(
+                "Agent：尚未授权扫描目录，因此不会把聊天内容发送给模型，"
+                "也不会读取文件。请先在“文件分析”页添加授权目录。"
+            )
+            return
+        self._conversation.append(
+            "Agent：已转到文件分析页。任何模型调用都会先显示外部数据确认，"
+            "扫描仍需结构化计划、安全审查和计划确认。"
+        )
+        self._analysis_tab.start_planning(text)
 
     @Slot()
     def _choose_directory(self) -> None:
@@ -348,6 +365,7 @@ class MainWindow(QMainWindow):
 
     def shutdown(self) -> None:
         """Request cancellation and wait a bounded time for workers."""
+        self._analysis_tab.shutdown()
         if self._worker:
             self._worker.cancel()
         QThreadPool.globalInstance().waitForDone(5_000)

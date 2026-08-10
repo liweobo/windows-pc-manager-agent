@@ -23,13 +23,13 @@ _INLINE_SECRET = re.compile(
 )
 
 
-def is_sensitive_key(key: str) -> bool:
+def is_sensitive_key(key: str) -> bool:  # 判断是否存在敏感的key字符
     """Return whether a key name could contain credentials."""
     normalized = key.casefold().replace("-", "_")
     return any(part in normalized for part in _SENSITIVE_KEY_PARTS)
 
 
-def redact_text(value: str) -> str:
+def redact_text(value: str) -> str:  # 替换敏感的key字符的值
     """Remove obvious inline secret assignments from free text."""
     return _INLINE_SECRET.sub(lambda match: f"{match.group(1)}={REDACTED}", value)
 

@@ -14,20 +14,23 @@ class QtSingleInstanceGuard:
         self._acquired = False
 
     @property
+    # 将方法转换为只读的属性
     def server(self) -> QLocalServer:
         """Expose the server signal so the UI may react to a second launch."""
         return self._server
 
     def acquire(self) -> bool:
-        """Detect an active owner, removing only a demonstrably stale endpoint."""
+        """检查旧服务端; 存在时返回 False, 否则注册并监听本地端点."""
         probe = QLocalSocket()
         probe.connectToServer(self._server_name)
         if probe.waitForConnected(150):
             probe.disconnectFromServer()
             return False
-        probe.abort()
-        QLocalServer.removeServer(self._server_name)
-        self._acquired = self._server.listen(self._server_name)
+        probe.abort()  # 强制重置探针状态---客户端
+        QLocalServer.removeServer(
+            self._server_name
+        )  # 移除已确认失效的本地服务注册信息 (或物理管道文件).
+        self._acquired = self._server.listen(self._server_name)  # 开启监听----服务端
         return self._acquired
 
     def close(self) -> None:
