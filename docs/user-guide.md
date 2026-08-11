@@ -43,6 +43,35 @@ manually. Stage 1 never deletes it automatically.
 **生成模型说明** requires another confirmation and sends aggregate totals only. Every
 number displayed in the explanation comes from local deterministic results.
 
+## Safe file operations and Undo
+
+In the analysis table, check only the rows you want and select **移动勾选项** or
+**重命名勾选项**. The **安全文件操作** page also accepts explicit files/directories.
+For a move, choose a destination that is itself inside an authorized root. For rename,
+choose one finite rule: prefix, suffix, sequence, upper/lower case, literal replacement,
+or modification-date prefix. The app never evaluates code or a regular expression.
+
+Generating Preview is read-only. Review every final path and the totals for READY,
+CONFLICT, BLOCKED, bytes, directory creation, R1, and FULL rollback. Existing target names,
+unsafe/redirected paths, changed sources, permission errors, cross-volume moves, and batch
+limits are displayed and are not silently fixed. Confirmation shows the concrete item and
+byte impact. You must then separately start execution; changing/restarting invalidates it.
+
+During execution, **停止后续操作** means the currently active Windows operation finishes
+and is verified, then later items do not start. Completed items remain real and have Undo;
+the result accurately shows success, failure, skipped, and pending counts.
+
+To undo, select the exact transaction in history and generate **回滚 Preview**. The manager
+uses stored Undo—not model guesses—and displays changed results, occupied original paths,
+revoked scope, or non-empty created directories. Approve the separate rollback confirmation
+only after checking it. A conflict is never overwritten; it requires manual resolution and
+a fresh Preview.
+
+Natural-language move/rename/organize requests require a configured provider and external
+data confirmation. Only goal text, labels, opaque root IDs, enums, and tool names leave the
+computer. Source discovery, metadata, years, real paths, Preview, safety and execution stay
+local. With the provider disabled, the explicit selection/rule controls remain fully usable.
+
 ## Audit and local data
 
 Open **审计** and refresh to view authorization, external consent, plan review, confirmation,
@@ -57,6 +86,11 @@ are not intentionally stored in audit events.
   its parent to bypass protection.
 - **reparse point**: select the physical directory, not a shortcut, symlink, or junction.
 - **Network-backed paths unavailable**: Stage 1 accepts local drives only.
+- **NAME_CONFLICT**: another object owns the target; Stage 2A never overwrites or auto-renames.
+- **CROSS_VOLUME_MOVE**: choose a destination on the same volume; copy-plus-delete is absent.
+- **SOURCE_CHANGED / RESULT_CHANGED**: regenerate Preview after inspecting the current file.
+- **INTERRUPTED**: the app stopped during a transaction and did not resume; inspect history
+  and generate a rollback Preview.
 - **old confirmation invalid**: regenerate and reconfirm after any scope/threshold change.
 - **OpenAI configuration incomplete**: either disable the provider or set provider, model,
   and API key in the same PowerShell environment. Never paste a key into chat.

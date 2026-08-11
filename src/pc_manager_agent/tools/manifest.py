@@ -54,6 +54,8 @@ class ToolManifest:
     max_batch_size: int
     audit_fields: tuple[str, ...]
     supported_platforms: tuple[str, ...]
+    requires_confirmation: bool = True
+    supports_preview: bool = False
     scope_argument_names: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -70,6 +72,12 @@ class ToolManifest:
         if self.risk_level is RiskLevel.R0 and not self.read_only:
             msg = "R0 tools must be read-only"
             raise ValueError(msg)
+        if not self.read_only and not self.requires_confirmation:
+            raise ValueError("Write tools must require confirmation")
+        if not self.read_only and not self.supports_preview:
+            raise ValueError("Write tools must support Preview")
+        if not self.read_only and self.rollback_level is RollbackLevel.NONE:
+            raise ValueError("Write tools must declare a rollback capability")
 
 
 class RegisteredTool(Protocol):

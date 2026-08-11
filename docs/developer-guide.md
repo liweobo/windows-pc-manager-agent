@@ -37,6 +37,45 @@ rollback, plan/compiler validation, and registry boundaries with a 95% combined 
 - `reporting/exporter.py`: bounded exclusive-create exports without overwrite/delete.
 - `ui/analysis_tab.py` and `ui/workers.py`: presentation and non-blocking workers only.
 
+## Stage 2A implementation map
+
+- `domain/file_operations.py`, `domain/transactions.py`: immutable plan/Preview/identity and
+  explicit transaction/item models; no provider or Qt dependency.
+- `orchestration/file_operation_planner.py`: optional path-free model intent, bounded local
+  source resolution, and concrete deterministic move/rename/organization compilation.
+- `safety/file_operation_validator.py`, `safety/operation_preview.py`: independent R1 graph
+  review and real read-only filesystem impact/conflict snapshot.
+- `confirmation/file_operations.py`: expiring, plan+Preview-bound, one-time forward and
+  rollback confirmations.
+- `persistence/file_operations.py`: additive SQLite transaction/item/argument reservation
+  and checksum-protected write-ahead Undo journal; startup invalidates stale work safely.
+- `tools/file_tools/{create_directory,move,rename,remove_created_directory}.py`: registered
+  single-object operations with execution-time revalidation and typed verification.
+- `platform_support/windows/file_operations.py`: Unicode long-path Win32 identity, move,
+  create-directory and rollback-only empty-directory primitives without shell/elevation.
+- `orchestration/transaction_executor.py`: fail-safe STOP policy, per-item persistence,
+  audit and verified terminal reports.
+- `rollback/manager.py`: persisted reverse-order plans, live conflicts, independent
+  confirmation and registered reverse execution.
+- `ui/operation_tab.py`, `ui/workers.py`: Preview/history/progress/rollback presentation and
+  non-blocking execution only.
+
+## Adding a write operation
+
+1. Confirm it is inside the current stage/risk boundary; do not generalize Stage 2A.
+2. Define strict immutable plan, input, output, postcondition, and Undo fields.
+3. Add a complete R1 manifest with Preview, confirmation, batch, permission, platform and
+   truthful rollback declarations. Register it only in runtime composition.
+4. Extend the deterministic compiler and independent validator; never accept a path/tool,
+   risk, code, or command directly from a model.
+5. Make Preview read-only and bind every execution-relevant value, identity and final path.
+6. Persist RUNNING + PREPARED Undo before calling the platform adapter. Invoke through
+   `ToolRegistry` with `ExecutionAuthorization`, then verify before COMPLETED/AVAILABLE.
+7. Define a reverse registered operation, reverse conflict checks, fresh confirmation and
+   postcondition verification. FULL must have testable validity conditions.
+8. Test normal, conflict, source/target change, permission/lock, cancellation, batch,
+   crash, partial failure, reverse order, rollback conflict, audit failure, and GUI flow.
+
 ## Adding or changing analysis
 
 1. Define strict provider-neutral Pydantic input/output and result annotations.

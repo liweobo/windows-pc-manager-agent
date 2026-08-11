@@ -30,6 +30,7 @@ from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.domain.reports import ScanReport
 from pc_manager_agent.orchestration.service import ScanOrchestrator
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
+from pc_manager_agent.ui.operation_tab import FileOperationTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
 from pc_manager_agent.ui.workers import ScanWorker, require_scan_report
 
@@ -46,16 +47,17 @@ class MainWindow(QMainWindow):
         self._worker: ScanWorker | None = None
         self._tray: SystemTrayController | None = None
         self._quitting = False
-        self.setWindowTitle("Windows PC Manager Agent — 只读文件分析")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 2A 安全文件操作")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
         self._build_chat_tab()
         self._build_analysis_tab()
+        self._build_operation_tab()
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
-        self.statusBar().showMessage("就绪：默认不会修改任何文件")
+        self.statusBar().showMessage("就绪：写操作默认不执行，必须先 Preview 并确认")
 
     def attach_tray(self, tray: SystemTrayController) -> None:
         """Attach tray presentation after both objects are constructed."""
@@ -66,8 +68,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         self._conversation = QTextBrowser()
         self._conversation.setPlainText(
-            "Agent：这是阶段 1 只读文件分析版。聊天不会直接执行系统操作。\n"
-            "请在“文件分析”页授权目录、检查结构化计划并确认后再扫描。"
+            "Agent：当前支持阶段 1 只读分析和 Stage 2A 安全移动/重命名/回滚。\n"
+            "聊天不会直接执行系统操作；所有写操作都要经过真实 Preview 和明确确认。"
         )
         input_row = QHBoxLayout()
         self._chat_input = QLineEdit()
@@ -146,6 +148,14 @@ class MainWindow(QMainWindow):
         self._analysis_tab.status_message.connect(self.statusBar().showMessage)
         self._tabs.addTab(self._analysis_tab, "文件分析")
 
+    def _build_operation_tab(self) -> None:
+        """Attach Stage 2A Preview, confirmed execution, transaction, and rollback UI."""
+        self._operation_tab = FileOperationTab(self._runtime)
+        self._operation_tab.status_message.connect(self.statusBar().showMessage)
+        self._analysis_tab.move_selected_requested.connect(self._open_move_for_paths)
+        self._analysis_tab.rename_selected_requested.connect(self._open_rename_for_paths)
+        self._tabs.addTab(self._operation_tab, "安全文件操作")
+
     def _build_audit_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -171,7 +181,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("API Key：仅从环境变量读取，界面和日志不会显示"))
         layout.addWidget(QLabel(f"本地数据目录：{self._runtime.settings.data_directory}"))
         layout.addWidget(QLabel(f"扫描文件上限：{self._runtime.settings.scan_max_files}"))
-        layout.addWidget(QLabel("阶段 1 不执行移动、重命名、回收站或系统修改。"))
+        layout.addWidget(
+            QLabel("Stage 2A 仅支持已授权目录内的同卷移动、同父重命名、mkdir 和回滚。")
+        )
+        layout.addWidget(QLabel("不覆盖、不跨卷、不进回收站、不永久删除、不执行系统修改。"))
         layout.addStretch(1)
         self._tabs.addTab(page, "设置")
 
@@ -182,6 +195,22 @@ class MainWindow(QMainWindow):
             return
         self._conversation.append(f"你：{text}")
         self._chat_input.clear()
+        operation_terms = ("移动", "重命名", "改名", "整理", "撤销", "回滚")
+        if any(term in text for term in operation_terms):
+            self._tabs.setCurrentWidget(self._operation_tab)
+            if any(term in text for term in ("撤销", "回滚")):
+                self._conversation.append(
+                    "Agent：已转到“安全文件操作”历史页。请选择具体事务并生成回滚 Preview；"
+                    "系统不会让模型猜测反向路径。"
+                )
+                self._operation_tab.refresh_history()
+            else:
+                self._conversation.append(
+                    "Agent：已转到 Stage 2A。模型只生成受限意图；具体路径由本地代码计算，"
+                    "写操作必须经过真实 Preview 和明确确认。"
+                )
+                self._operation_tab.start_planning(text)
+            return
         self._analysis_tab.goal_input.setText(text)
         self._tabs.setCurrentWidget(self._analysis_tab)
         if not self._runtime.authorized_paths.list_authorized():
@@ -195,6 +224,28 @@ class MainWindow(QMainWindow):
             "扫描仍需结构化计划、安全审查和计划确认。"
         )
         self._analysis_tab.start_planning(text)
+
+    @Slot(object)
+    def _open_move_for_paths(self, value: object) -> None:
+        paths = (
+            tuple(path for path in value if isinstance(path, Path))
+            if isinstance(value, tuple)
+            else ()
+        )
+        self._operation_tab.set_sources(paths)
+        self._tabs.setCurrentWidget(self._operation_tab)
+        self.statusBar().showMessage("已传入勾选结果；请选择目标并生成移动 Preview")
+
+    @Slot(object)
+    def _open_rename_for_paths(self, value: object) -> None:
+        paths = (
+            tuple(path for path in value if isinstance(path, Path))
+            if isinstance(value, tuple)
+            else ()
+        )
+        self._operation_tab.set_sources(paths)
+        self._tabs.setCurrentWidget(self._operation_tab)
+        self.statusBar().showMessage("已传入勾选结果；选择有限规则并生成重命名 Preview")
 
     @Slot()
     def _choose_directory(self) -> None:
@@ -366,6 +417,7 @@ class MainWindow(QMainWindow):
     def shutdown(self) -> None:
         """Request cancellation and wait a bounded time for workers."""
         self._analysis_tab.shutdown()
+        self._operation_tab.shutdown()
         if self._worker:
             self._worker.cancel()
         QThreadPool.globalInstance().waitForDone(5_000)

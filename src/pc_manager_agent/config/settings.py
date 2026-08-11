@@ -28,6 +28,8 @@ class AppSettings(BaseModel):
     scan_timeout_seconds: float = Field(default=300.0, gt=0, le=3_600)
     analysis_batch_size: int = Field(default=250, ge=10, le=2_000)
     confirmation_ttl_seconds: int = Field(default=300, ge=30, le=3_600)
+    operation_max_objects: int = Field(default=500, ge=1, le=5_000)
+    operation_max_total_bytes: int = Field(default=50 * 1024**3, ge=1)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -63,6 +65,10 @@ class AppSettings(BaseModel):
             "scan_max_files": os.getenv("PC_MANAGER_SCAN_MAX_FILES", "50000"),
             "scan_timeout_seconds": os.getenv("PC_MANAGER_SCAN_TIMEOUT_SECONDS", "300"),
             "analysis_batch_size": os.getenv("PC_MANAGER_ANALYSIS_BATCH_SIZE", "250"),
+            "operation_max_objects": os.getenv("PC_MANAGER_OPERATION_MAX_OBJECTS", "500"),
+            "operation_max_total_bytes": os.getenv(
+                "PC_MANAGER_OPERATION_MAX_TOTAL_BYTES", str(50 * 1024**3)
+            ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
         if data_directory:

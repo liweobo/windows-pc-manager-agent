@@ -11,7 +11,7 @@
 
 ## Threats, controls, and residual risk
 
-| Threat | Example | Stage 1 controls | Residual risk |
+| Threat | Example | Stage 2A controls | Residual risk |
 |---|---|---|---|
 | Prompt injection | Filename says “delete everything” | Names/content remain data; no delete or shell tool; registry only | Future content analysis needs the same separation |
 | Model scope expansion | Provider returns `C:\` or invented tool | Provider schema accepts opaque root IDs; compiler resolves locally; validator requires exact registry/scope | A compromised process can attack in-memory objects |
@@ -27,6 +27,13 @@
 | Report overwrite/deletion | Export replaces a document or removes partial output | Absolute local path, exact suffix, exclusive create, no cleanup deletion | Partial export can require manual removal |
 | Privilege abuse | Tool elevates or edits system settings | No elevation API, R3/R4 denial, ordinary-user runtime | Future privileged broker requires a separate threat model |
 | Supply-chain drift | Action tag or package changes | GitHub actions pinned by SHA, `uv.lock`, vulnerability/static/secret scans | Trusted registries and upstream maintainers remain dependencies |
+| Preview/use race | Source is replaced or target appears after approval | Handle-based volume/File ID plus metadata and target/scope/reparse checks immediately before each write | A compromised process/kernel remains outside the boundary |
+| Silent overwrite | Move or rollback targets an occupied name | STOP conflict policy, no replace flag, target recheck, exact Preview | User must resolve conflicts manually |
+| Cross-volume data loss | Move becomes copy plus source deletion | Compare source and destination-parent volume; Win32 call omits copy-across-volume flag | Mapped/storage behavior depends on Windows reporting; failures stop |
+| Forged write call | UI/model directly invokes a registered tool | Registry demands RUNNING transaction/item, matching IDs, tool, and exact argument digest | In-process memory compromise is excluded |
+| Crash during write | App exits after filesystem mutation | PREPARED Undo persisted first; stale RUNNING becomes INTERRUPTED; never auto-resume | A crash between Win32 completion and final journal update requires user inspection |
+| Unsafe rollback | Original path now occupied or result changed | Live reverse Preview, independent confirmation, identity/metadata checks, no overwrite, reverse order | Later user changes can reduce FULL to conflict/manual handling |
+| Directory rollback deletes new data | User adds content to transaction-created folder | Remove only exact transaction-created identity after managed children reverse and directory is empty | User must manually handle unmanaged content |
 
 ## Security verification
 
@@ -35,14 +42,17 @@ name ambiguity, scope mismatch, symlink/reparse behavior, changed directory/file
 permission errors, count/timeout/cancellation, plan and threshold mutation, unknown tools,
 external payload mutation/expiry, provider schema errors, audit redaction/unavailability,
 duplicate content and hash cancellation, report no-overwrite, GUI invalidation, and rollback
-records. Overall core coverage is enforced at 85%; the combined high-risk boundary suite is
-enforced at 95%. A real symlink test may skip where Windows denies symlink creation, while
+records. Stage 2A adds move/rename/mkdir, conflict, source/target mutation, one-time
+confirmation, transaction interruption, failure-stop, persisted capability, reverse-order
+rollback, rollback conflict, cancellation, and GUI tests. Overall core coverage is enforced
+at 85%; the high-risk boundary target remains 95%. A real symlink test may skip where Windows denies symlink creation, while
 deterministic reparse branches remain tested.
 
 ## Explicit exclusions
 
 The MVP does not claim protection against a compromised kernel, an attacker already able
 to modify this process, physical disk attacks, or malicious dependency infrastructure.
-Installed-software inventory is not yet implemented. File mutation, recycle-bin actions,
+Installed-software inventory is not yet implemented. Stage 2A file mutation is limited to
+the documented R1 tools. Recycle-bin/permanent deletion, overwrite, cross-volume move,
 system changes, arbitrary commands, browser automation, and privilege elevation remain
-outside Stage 1 and cannot be triggered through placeholder interfaces.
+outside this stage and cannot be triggered through placeholder interfaces.

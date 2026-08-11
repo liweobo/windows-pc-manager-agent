@@ -57,6 +57,8 @@ class FileAnalysisTab(QWidget):
     """Present authorization, planning, confirmation, progress, and paged results."""
 
     status_message = Signal(str)
+    move_selected_requested = Signal(object)
+    rename_selected_requested = Signal(object)
 
     def __init__(self, runtime: ApplicationRuntime) -> None:
         super().__init__()
@@ -221,17 +223,23 @@ class FileAnalysisTab(QWidget):
         self.open_folder_button = QPushButton("打开所在目录")
         self.export_button = QPushButton("导出 CSV/JSON")
         self.explain_button = QPushButton("生成模型说明")
+        self.move_selected_button = QPushButton("移动勾选项")
+        self.rename_selected_button = QPushButton("重命名勾选项")
         self.previous_button.clicked.connect(self._previous_page)
         self.next_button.clicked.connect(self._next_page)
         self.open_folder_button.clicked.connect(self._open_selected_folder)
         self.export_button.clicked.connect(self._export_report)
         self.explain_button.clicked.connect(self._explain_report)
+        self.move_selected_button.clicked.connect(self._request_move_selected)
+        self.rename_selected_button.clicked.connect(self._request_rename_selected)
         for button in (
             self.previous_button,
             self.next_button,
             self.open_folder_button,
             self.export_button,
             self.explain_button,
+            self.move_selected_button,
+            self.rename_selected_button,
         ):
             button.setEnabled(False)
             page_actions.addWidget(button)
@@ -652,12 +660,41 @@ class FileAnalysisTab(QWidget):
                 item = QTableWidgetItem(text)
                 if column == 0:
                     item.setData(Qt.ItemDataRole.UserRole, str(metadata.path))
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    item.setCheckState(Qt.CheckState.Unchecked)
                 if column == 2:
                     item.setData(Qt.ItemDataRole.UserRole, metadata.size_bytes)
                 self.results_table.setItem(row_index, column, item)
         self.previous_button.setEnabled(self._page_offset > 0)
         self.next_button.setEnabled(len(rows) == self._page_size)
         self.open_folder_button.setEnabled(bool(rows))
+        self.move_selected_button.setEnabled(bool(rows))
+        self.rename_selected_button.setEnabled(bool(rows))
+
+    @Slot()
+    def _request_move_selected(self) -> None:
+        paths = self._checked_result_paths()
+        if not paths:
+            self._show_error("请先勾选准备移动的分析结果。")
+            return
+        self.move_selected_requested.emit(paths)
+
+    @Slot()
+    def _request_rename_selected(self) -> None:
+        paths = self._checked_result_paths()
+        if not paths:
+            self._show_error("请先勾选准备重命名的分析结果。")
+            return
+        self.rename_selected_requested.emit(paths)
+
+    def _checked_result_paths(self) -> tuple[Path, ...]:
+        """Return only explicitly checked result paths from the currently visible page."""
+        paths: list[Path] = []
+        for row in range(self.results_table.rowCount()):
+            item = self.results_table.item(row, 0)
+            if item is not None and item.checkState() is Qt.CheckState.Checked:
+                paths.append(Path(str(item.data(Qt.ItemDataRole.UserRole))))
+        return tuple(paths)
 
     @Slot()
     def _reset_and_load_page(self) -> None:
