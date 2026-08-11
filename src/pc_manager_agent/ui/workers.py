@@ -7,16 +7,20 @@ from uuid import UUID
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
-from pc_manager_agent.app.runtime import ApplicationRuntime
+from pc_manager_agent.app.runtime import ApplicationRuntime, FileOperationServices
 from pc_manager_agent.domain.file_analysis import FileAnalysisPlan, FileAnalysisReport
+from pc_manager_agent.domain.file_operations import FileOperationPlan
 from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.domain.reports import ScanReport
+from pc_manager_agent.domain.transactions import OperationExecutionReport, OperationTransaction
 from pc_manager_agent.orchestration.explanation import FileAnalysisExplainer
 from pc_manager_agent.orchestration.file_analysis_planner import (
     FileAnalysisPlanner,
     FileAnalysisPlanningResult,
 )
+from pc_manager_agent.orchestration.file_operation_service import PreparedFileOperation
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.rollback.manager import PreparedRollback, RollbackManager
 from pc_manager_agent.tools.manifest import CancellationToken
 
 
@@ -189,4 +193,156 @@ def require_planning_result(value: object) -> FileAnalysisPlanningResult:
     """Narrow a provider planning result transported through a Qt signal."""
     if not isinstance(value, FileAnalysisPlanningResult):
         raise TypeError("Worker emitted an invalid file analysis planning result")
+    return value
+
+
+class OperationWorkerSignals(QObject):
+    """Thread-safe Stage 2A planning, Preview, execution, and rollback signals."""
+
+    completed = Signal(object)
+    failed = Signal(str)
+
+
+class FileOperationPlanningWorker(QRunnable):
+    """Resolve one provider intent into a concrete local file-operation plan."""
+
+    def __init__(
+        self,
+        services: FileOperationServices,
+        user_goal: str,
+        confirmation_id: UUID,
+    ) -> None:
+        super().__init__()
+        if services.planner is None:
+            raise ValueError("A model provider is not configured")
+        self.signals = OperationWorkerSignals()
+        self._services = services
+        self._user_goal = user_goal
+        self._confirmation_id = confirmation_id
+
+    @Slot()
+    def run(self) -> None:
+        """Request typed intent, discover authorized sources, and compile exact paths."""
+        planner = self._services.planner
+        if planner is None:
+            self.signals.failed.emit("ValueError: A model provider is not configured")
+            return
+        try:
+            intent_result = asyncio.run(
+                planner.plan_intent(
+                    self._user_goal,
+                    self._confirmation_id,
+                )
+            )
+            sources = self._services.source_resolver.resolve(intent_result.intent.selection)
+            plan = self._services.compiler.compile(
+                self._user_goal,
+                intent_result.intent,
+                sources,
+            )
+        except Exception as exc:
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.signals.completed.emit(plan)
+
+
+class OperationPreviewWorker(QRunnable):
+    """Perform live Preview and persistence away from the GUI thread."""
+
+    def __init__(self, services: FileOperationServices, plan: FileOperationPlan) -> None:
+        super().__init__()
+        self.signals = OperationWorkerSignals()
+        self._services = services
+        self._plan = plan
+
+    @Slot()
+    def run(self) -> None:
+        """Review and Preview without executing a filesystem mutation."""
+        try:
+            prepared = self._services.service.prepare(self._plan)
+        except Exception as exc:
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.signals.completed.emit(prepared)
+
+
+class OperationExecutionWorker(QRunnable):
+    """Execute one confirmed transaction and stop before every cancelled future item."""
+
+    def __init__(
+        self,
+        services: FileOperationServices,
+        prepared: PreparedFileOperation,
+    ) -> None:
+        super().__init__()
+        self.signals = OperationWorkerSignals()
+        self.cancellation = CancellationToken()
+        self._services = services
+        self._prepared = prepared
+
+    @Slot()
+    def run(self) -> None:
+        """Execute registered tools and emit only a verified persistent report."""
+        try:
+            report = self._services.service.execute(self._prepared, self.cancellation)
+        except Exception as exc:
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.signals.completed.emit(report)
+
+    def cancel(self) -> None:
+        """Stop future operations; an already-started Win32 call is not interrupted."""
+        self.cancellation.cancel()
+
+
+class RollbackExecutionWorker(QRunnable):
+    """Execute a separately confirmed rollback away from the GUI thread."""
+
+    def __init__(self, manager: RollbackManager, prepared: PreparedRollback) -> None:
+        super().__init__()
+        self.signals = OperationWorkerSignals()
+        self.cancellation = CancellationToken()
+        self._manager = manager
+        self._prepared = prepared
+
+    @Slot()
+    def run(self) -> None:
+        """Execute reverse operations in persisted descending sequence."""
+        try:
+            transaction = self._manager.execute(self._prepared, self.cancellation)
+        except Exception as exc:
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.signals.completed.emit(transaction)
+
+    def cancel(self) -> None:
+        """Stop future rollback items without interrupting an active Win32 call."""
+        self.cancellation.cancel()
+
+
+def require_operation_plan(value: object) -> FileOperationPlan:
+    """Narrow an operation plan transported through a Qt signal."""
+    if not isinstance(value, FileOperationPlan):
+        raise TypeError("Worker emitted an invalid file-operation plan")
+    return value
+
+
+def require_prepared_operation(value: object) -> PreparedFileOperation:
+    """Narrow a prepared operation transported through a Qt signal."""
+    if not isinstance(value, PreparedFileOperation):
+        raise TypeError("Worker emitted an invalid operation Preview")
+    return value
+
+
+def require_operation_report(value: object) -> OperationExecutionReport:
+    """Narrow an operation execution report transported through a Qt signal."""
+    if not isinstance(value, OperationExecutionReport):
+        raise TypeError("Worker emitted an invalid file-operation report")
+    return value
+
+
+def require_operation_transaction(value: object) -> OperationTransaction:
+    """Narrow a rollback transaction transported through a Qt signal."""
+    if not isinstance(value, OperationTransaction):
+        raise TypeError("Worker emitted an invalid rollback result")
     return value

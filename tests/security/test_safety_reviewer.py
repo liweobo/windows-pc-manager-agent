@@ -116,13 +116,14 @@ class HighRiskTool:
             read_only=False,
             idempotent=False,
             supports_cancellation=False,
-            rollback_level=RollbackLevel.NONE,
+            rollback_level=RollbackLevel.MANUAL,
             preconditions=(),
             postconditions=(),
             timeout_seconds=1,
             max_batch_size=1,
             audit_fields=(),
             supported_platforms=("windows",),
+            supports_preview=True,
         )
 
     @property

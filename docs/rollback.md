@@ -14,7 +14,38 @@ stale RUNNING session is cleaned at startup. This is database housekeeping, not 
 undoing analysis. An incomplete report remains for manual inspection if streaming export
 fails; automatic cleanup would violate the Stage 1 no-deletion boundary.
 
-## Future write-command contract
+## Stage 2A file-operation rollback
+
+| Operation | Risk | Normal rollback | Valid only while |
+|---|---|---|---|
+| Create ordinary directory | R1 | FULL | Same directory identity remains and is empty after earlier reverse steps |
+| Same-volume file/directory move | R1 | FULL | Result identity/metadata unchanged and original path absent |
+| Same-parent structured rename | R1 | FULL | Renamed identity/metadata unchanged and original name absent |
+| Conflict/blocked Preview item | R1 | NONE needed | It was persisted as SKIPPED and never executed |
+
+`UndoRecord` is written as PREPARED before the Win32 mutation and promoted to AVAILABLE
+only after postcondition verification. It stores operation/transaction IDs, sequence,
+operation type, original/result paths, before/after stable identity and metadata, rollback
+level, validity conditions, checksum, timestamps, and result state. Audit answers “what
+happened”; Undo answers “how this verified operation may be restored”. They are separate.
+
+Rollback is not a blind reverse move. `RollbackManager` reads Undo in descending sequence,
+rechecks authorization/reparse points/current identity/current metadata/original-path
+availability, accounts for managed children that earlier reverse steps will vacate, and
+produces a new immutable Preview. The user must confirm that exact digest. Execution then
+reserves reverse arguments in SQLite and invokes only registered tools through the same
+write guard. Any unexpected error stops later reverse operations.
+
+FULL is conditional. If the user edits the result, creates a new object at the original
+path, revokes authorization, changes permissions, or adds unmanaged content to a created
+directory, the Preview reports CONFLICT/BLOCKED and does not overwrite or remove it.
+
+On restart, RUNNING/ROLLING_BACK becomes INTERRUPTED and is never continued automatically.
+PREVIEWED/AWAITING_CONFIRMATION/CONFIRMED becomes CANCELLED because the one-time in-memory
+confirmation is intentionally unavailable. The history page can inspect interrupted
+records and generate a rollback Preview from whatever valid Undo records exist.
+
+## Write-command contract
 
 Every future user-file write must implement `OperationCommand`:
 
@@ -31,14 +62,16 @@ prohibited.
 
 ## Code rollback
 
-After Stage 1 is committed, use a new branch and revert its commit(s) newest first:
+After Stage 2A is committed, use a new branch and revert its commit(s) newest first:
 
 ```powershell
-git switch -c fix/revert-stage-1
-git revert <newest-stage-1-sha> <older-stage-1-sha>
-git push -u origin fix/revert-stage-1
+git switch -c fix/revert-stage-2a
+git revert <stage-2a-sha>
+git push -u origin fix/revert-stage-2a
 ```
 
 Review and test the revert before merging. Do not force-push or use `git reset --hard` as
-the normal recovery procedure. Reverting code does not automatically remove local SQLite
-schema/data or reports; keep or back up those files according to user intent.
+the normal recovery procedure. Reverting code does not move user files back and does not
+automatically remove additive SQLite tables. First use the running Stage 2A rollback Preview
+for any desired user-file restoration, verify it, then revert code. Keep/back up local state
+according to user intent.

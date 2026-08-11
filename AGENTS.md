@@ -100,10 +100,10 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-Stage 1 implements the GUI/tray shell, provider abstraction, authorized and
-forbidden roots, structured file-analysis plans, independent review, exact
-confirmation, streaming R0 scanning, large/inactive/duplicate analysis, paged
-results, CSV/JSON export, aggregate-only model explanation, audit storage, and
-rollback interfaces. File mutation, recycle-bin operations, installed-software
+Stage 2A includes Stage 1 plus Previewed R1 ordinary-directory creation, same-volume
+file/directory move, same-parent finite-rule rename, persistent transactions, verified
+Undo, and separately confirmed reverse-order rollback. It never overwrites and may
+remove only an unchanged empty directory that the same transaction created during
+rollback. Recycle-bin/permanent deletion, cross-volume move, installed-software
 inventory, system mutation, elevation, arbitrary command execution, voice, and
 browser/office automation remain out of scope.

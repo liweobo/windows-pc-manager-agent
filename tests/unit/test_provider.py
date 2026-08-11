@@ -15,12 +15,20 @@ from pc_manager_agent.domain.file_analysis import (
     FileAnalysisIntentDraft,
     FileAnalysisSummary,
 )
+from pc_manager_agent.domain.file_operations import (
+    FileOperationIntentDraft,
+    FileSelectionRule,
+    OperationType,
+    OrganizationGroup,
+    RenameRuleType,
+)
 from pc_manager_agent.domain.reports import ScanStatus
 from pc_manager_agent.providers.llm.base import (
     AnalysisExplanationRequest,
     AnalysisNarrativeDraft,
     AuthorizedRootOption,
     FileAnalysisPlannerRequest,
+    FileOperationPlannerRequest,
     PlannerRequest,
 )
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider, OpenAIProviderError
@@ -175,3 +183,34 @@ def test_openai_provider_parses_file_intent_and_qualitative_narrative() -> None:
 def test_provider_narrative_rejects_invented_numeric_claims() -> None:
     with pytest.raises(ValueError, match="numeric"):
         AnalysisNarrativeDraft(observations=("There are 99 matching files",))
+
+
+def test_openai_provider_parses_file_operation_intent() -> None:
+    root_id = "00000000-0000-0000-0000-000000000001"
+    intent = FileOperationIntentDraft(
+        selection=FileSelectionRule(root_ids=(root_id,), extensions=(".pdf",)),
+        destination_root_id=root_id,
+        destination_subdirectory=("PDF",),
+        group_by=OrganizationGroup.MODIFIED_YEAR,
+        requested_operation=OperationType.MOVE_FILE,
+    )
+    responses = FakeResponses(intent)
+    provider = OpenAILLMProvider(
+        model="test-model",
+        api_key="test-key",
+        client=FakeClient(responses),
+    )
+    result = asyncio.run(
+        provider.create_file_operation_intent(
+            FileOperationPlannerRequest(
+                user_goal="organize PDFs",
+                authorized_roots=(AuthorizedRootOption(root_id=root_id, label="Downloads"),),
+                allowed_operations=tuple(OperationType),
+                allowed_rename_rules=tuple(RenameRuleType),
+                allowed_grouping=tuple(OrganizationGroup),
+                allowed_tools=("file.mkdir", "file.move", "file.rename"),
+            )
+        )
+    )
+    assert result.intent.group_by is OrganizationGroup.MODIFIED_YEAR
+    assert responses.arguments["model"] == "test-model"

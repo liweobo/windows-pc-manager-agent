@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ValidationError
 
+from pc_manager_agent.tools.execution import ExecutionAuthorization, WriteExecutionGuard
 from pc_manager_agent.tools.manifest import CancellationToken, RegisteredTool, ToolManifest
 
 
@@ -25,11 +26,16 @@ class ToolOutputError(ToolRegistryError):
     """Raised when a tool violates its declared output schema."""
 
 
+class WriteAuthorizationError(ToolRegistryError):
+    """Raised when an R1 tool lacks an exact confirmed transaction capability."""
+
+
 class ToolRegistry:
     """Registry that is the only route to deterministic tool execution."""
 
-    def __init__(self) -> None:
+    def __init__(self, write_guard: WriteExecutionGuard | None = None) -> None:
         self._tools: dict[str, RegisteredTool] = {}
+        self._write_guard = write_guard
 
     def register(self, tool: RegisteredTool) -> None:
         """Register one tool and reject name collisions."""
@@ -59,6 +65,7 @@ class ToolRegistry:
         name: str,
         arguments: Mapping[str, object],
         cancellation: CancellationToken | None = None,
+        authorization: ExecutionAuthorization | None = None,
     ) -> BaseModel:
         """Validate input, execute an allow-listed tool, and validate output."""
         try:
@@ -66,6 +73,13 @@ class ToolRegistry:
         except KeyError as exc:
             raise UnknownToolError(name) from exc
         request = self.validate_input(name, arguments)
+        if not tool.manifest.read_only:
+            if authorization is None or self._write_guard is None:
+                raise WriteAuthorizationError(
+                    f"Write tool {name} requires a confirmed transaction capability"
+                )
+            json_arguments = request.model_dump(mode="json")
+            self._write_guard.require(authorization, name, json_arguments)
         token = cancellation or CancellationToken()
         result = tool.execute(request, token)
         if not isinstance(result, tool.manifest.output_model):

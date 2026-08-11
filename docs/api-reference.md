@@ -2004,3 +2004,270 @@ AuthorizedPathService.add_authorized
 
 任何调用方都不得以直接调用私有扫描/哈希函数来绕过授权、计划、安全审查或确认。API
 文档中的私有函数仅用于维护和安全评审，不是稳定扩展点。
+
+## Stage 2A：安全文件操作 API
+
+以下 API 首次修改用户文件。除纯模型/Preview 外，调用顺序必须是“本地编译 → 独立审查
+→ 真实 Preview → 精确确认 → 持久化事务能力 → 注册工具 → 验证 → Undo/Audit”。私有方法
+在此列出是为了安全评审，不代表允许外部调用绕过编排器。
+
+### 操作、事务和回滚数据模型
+
+| 函数 | 详细作用、输入/返回和失败语义 |
+|---|---|
+| `FileState.identity_matches(other)` | 比较对象类型、Volume Serial Number 和 File ID；路径可以因移动改变。返回布尔值，不读取文件；缺少稳定身份的对象不能构造有效 `FileState`。 |
+| `FileState.unchanged_since(earlier)` | 在身份相同基础上比较大小、创建/修改时间和 Windows 属性，供 Preview/执行/回滚 TOCTOU 复验；路径不参与。 |
+| `RenameRule.validate_arguments()` | Pydantic 后置校验；prefix/suffix/replace 必须有字面值，replace 还需 replacement。失败抛 `ValidationError`，绝不接受代码/正则。 |
+| `FileSelectionRule.normalize_extensions(values)` | 去空白、小写化、补点、去重；拒绝通配符、分隔符、空值和超长扩展名，返回不可变元组。 |
+| `FileSelectionRule.require_scope()` | 要求至少一个授权根 ID，且有扩展名或本地结果 ID；空选择拒绝。根 ID 尚不等于授权，稍后仍由服务解析。 |
+| `FileOperationIntentDraft.validate_intent_shape()` | 限制有限意图组合：move/organize 需目标根，rename 需结构化规则；只验证意图形状，不授予路径权限。 |
+| `PlannedFileOperation.validate_operation_shape()` | mkdir 必须无 source/identity 且固定 `file.mkdir`；move/rename 必须有 source/identity 并使用对应注册工具。矛盾计划拒绝。 |
+| `FileOperationPlan.validate_plan()` | 强制 R1、确认、FULL 目标、非空授权/操作、连续顺序、唯一操作 ID 和唯一目标；阻止两个步骤争用同一路径。 |
+| `FileOperationPlan.canonical_digest()` | 对完整 JSON（含身份、路径、顺序、规则结果）稳定排序并计算 SHA-256；返回 64 字符十六进制，供 Preview/确认绑定。 |
+| `FileOperationPreview.validate_totals()` | 复算 READY/CONFLICT/BLOCKED 和 FULL 数量，任何展示汇总与项目不一致都拒绝。 |
+| `FileOperationPreview.canonical_digest()` | 哈希实时 Preview 的路径、身份、状态、问题和数量；文件或规则变化会得到不同摘要。 |
+| `UndoRecord.canonical_digest()` | 对 Undo 内容计算完整性 SHA-256，排除会在回滚后写入的结果文本；数据库读取时必须复验。 |
+| `RollbackPlan.canonical_digest()` | 哈希逆序项目、当前/恢复路径、当前身份、冲突和时间，用于独立回滚确认。 |
+
+`OperationType` 只包含 CREATE_DIRECTORY、MOVE_FILE、MOVE_DIRECTORY、RENAME_FILE、
+RENAME_DIRECTORY。`TransactionState` 和 `OperationItemState` 是显式状态机；不存在可绕过的
+`is_done` 布尔组合。
+
+### Windows 平台接口和实现
+
+| 函数 | 详细作用、输入/返回和安全约束 |
+|---|---|
+| `FileOperationPlatform.inspect(path)` | 平台协议：返回稳定 `FileState`；实现必须拒绝重解析、系统、离线和不支持对象。 |
+| `FileOperationPlatform.move_same_volume(source, destination)` | 平台协议：同卷、失败即停、不得覆盖的单次移动；无返回，失败抛 `OSError`。 |
+| `FileOperationPlatform.create_directory(destination)` | 平台协议：只创建一个叶目录，不隐式创建父级或覆盖。 |
+| `FileOperationPlatform.remove_empty_directory(path)` | 平台协议：仅供经验证的事务创建空目录回滚；不是通用删除接口。 |
+| `_extended_path(path)` | 把已验证本地绝对路径转为 `\\?\` Unicode 长路径；拒绝相对、UNC 和设备路径。 |
+| `_raise_windows_error(action, path, error_code=None)` | 把 Win32 last-error 映射为 FileNotFound/FileExists/Permission 或 `WindowsFileOperationError`，消息只含当前操作路径。 |
+| `WindowsFileOperationPlatform.__init__()` | 仅在 `os.name == "nt"` 时装载 `kernel32`；非 Windows 立即失败，不提供模拟生产写。 |
+| `WindowsFileOperationPlatform.inspect(path)` | 用 `GetFileAttributesW` 和带 `OPEN_REPARSE_POINT` 的句柄读取 `FileIdInfo`，结合 `os.stat` 返回身份/元数据；拒绝 reparse/system/offline/非普通对象/零 ID。 |
+| `WindowsFileOperationPlatform.move_same_volume(source, destination)` | 调用 `MoveFileExW`，只设置 WRITE_THROUGH；不设置 REPLACE_EXISTING、COPY_ALLOWED 或延迟重启。调用者必须先复验同卷和目标空闲。 |
+| `WindowsFileOperationPlatform.create_directory(destination)` | 调用 `CreateDirectoryW` 创建一个叶目录；目标存在、父级缺失、权限等按 Win32 错误抛出。 |
+| `WindowsFileOperationPlatform.remove_empty_directory(path)` | 调用 `RemoveDirectoryW`；只由 rollback 注册工具在身份/类型/空目录复验后使用。 |
+
+### 工具能力和执行授权
+
+| 函数 | 详细作用、输入/返回和安全约束 |
+|---|---|
+| `arguments_digest(arguments)` | 把 Pydantic JSON 参数稳定序列化并计算 SHA-256；事务预留和执行能力必须完全相同。 |
+| `WriteExecutionGuard.require(authorization, tool_name, arguments)` | 抽象防线；无具体持久化证明时不得授权写，默认接口抛 `NotImplementedError`。 |
+| `CreateDirectoryTool.__init__(path_policy, platform)` | 注入路径策略/平台并建立 `file.mkdir` R1、确认、Preview、FULL manifest；每次只允许一个叶目录。 |
+| `CreateDirectoryTool.manifest` | 返回不可变清单，无副作用。 |
+| `CreateDirectoryTool.execute(request, cancellation)` | 要求 `CreateDirectoryRequest`，写前检查取消、授权、目标不存在和父目录；创建后读取身份验证。类型/冲突/权限/验证失败不返回成功。 |
+| `MoveTool.__init__(path_policy, platform)` | 建立 `file.move` 单对象同卷、无覆盖 R1 工具。 |
+| `MoveTool.manifest` | 返回包含 source/destination 审计字段、前后条件和 FULL rollback 的清单。 |
+| `MoveTool.execute(request, cancellation)` | 复验 source 身份/元数据、destination 授权且不存在、目标父卷；调用同卷 Win32 移动，再验证源消失、目标身份保持。取消仅在开始前生效。 |
+| `RenameTool.__init__(path_policy, platform)` | 建立 `file.rename` 同父目录 R1 工具；不允许把 rename 当 move。 |
+| `RenameTool.manifest` | 返回有限重命名的确认/Preview/FULL 清单。 |
+| `RenameTool.execute(request, cancellation)` | 复验身份、同父和目标冲突；普通名称一步移动，大小写专用 rename 走 Preview 绑定的唯一临时名两步并在第二步失败时尽力恢复原名；最终验证身份。 |
+| `RemoveCreatedDirectoryTool.__init__(path_policy, platform)` | 建立内部 `file.rollback.rmdir-empty`；能力仍需关联原事务 Undo，不能供 UI 直接删目录。 |
+| `RemoveCreatedDirectoryTool.manifest` | 返回回滚专用 R1/FULL、单对象清单。 |
+| `RemoveCreatedDirectoryTool.execute(request, cancellation)` | 立即复验授权、目录类型、身份/元数据和空状态，调用 checked remove 后确认路径消失；任何新内容或变化拒绝。 |
+| `ToolManifest.__post_init__()` | 除原名称/超时/R0检查外，强制所有写工具 `requires_confirmation`、`supports_preview` 且声明非 NONE rollback。 |
+| `ToolRegistry.__init__(write_guard=None)` | 建立空白名单和可选写能力验证器；未配置 guard 的注册写工具仍不能执行。 |
+| `ToolRegistry.execute(name, arguments, cancellation=None, authorization=None)` | 先校验输入；写工具再要求 authorization + guard 和规范化参数摘要；执行注册实现并验证输出类型。未知/参数/授权/输出错误分别抛类型化异常。 |
+
+### Preview、独立安全审查与确认
+
+| 函数 | 详细作用、输入/返回和失败语义 |
+|---|---|
+| `FileOperationSafetyValidator.__init__(registry, path_policy, max_operations=500)` | 保存独立注册表/路径边界和正批量上限；无文件写入。 |
+| `FileOperationSafetyValidator.review(plan)` | 检查批量、R1/确认/FULL、工具存在及 manifest、来源/目标授权、rename 同父、mkdir 父依赖、no-op、自移、重复/重叠 source；返回全部 `ReviewIssue`，不自动修复。 |
+| `OperationPreviewEngine.__init__(path_policy, platform, max_objects=500, max_total_bytes=50GiB)` | 注入只读身份观察器和正数量/容量限制；无写副作用。 |
+| `OperationPreviewEngine.generate(plan, transaction_id=None)` | 对每项实时复验并生成不可变 Preview；报告目标冲突、源变化、跨卷、不可访问、批量和回滚数量。即使冲突也保留项目，不执行写。 |
+| `OperationPreviewEngine._impact(source, kind)` | 文件返回 1/大小；目录用 `scandir` 有界遍历，不跟随重解析，累计对象/字节，遇拒绝项整项 BLOCKED。 |
+| `OperationPreviewEngine._inspect_nearest_parent(destination)` | 对计划中尚未创建的多级目录向上找最近现存父级并读取卷身份；无现存父级抛 `FileNotFoundError`。 |
+| `PathPolicy.validate_operation_source(path)` | 写前要求绝对无穿越、已存在、授权、非保护/网络/重解析的普通文件或目录；严格 resolve 后返回 canonical Path，任何变化/缺失抛 `PathSecurityError`。 |
+| `PathPolicy.validate_operation_destination(path)` | 对可缺失目标做词法/名称/授权检查，从父级向上寻找现存目录并拒绝重解析/网络/越界；不会解析缺失叶子，也不会把“目标已存在”当授权。 |
+| `PathPolicy.validate_rename_destination(source, destination)` | 复用目标检查并要求两者父目录规范相等、名称确实变化；阻止 `..` 或 rename 跨目录移动。 |
+| `PathPolicy.validate_windows_name(name)` | 拒绝空/点段、超过 255 字符、尾随空格/点、控制符、Windows 非法字符和 CON/PRN/AUX/NUL/COM1..9/LPT1..9（含扩展名）。 |
+| `PathPolicy._validate_operation_syntax(path)` | 私有公共前置：要求绝对无 `..`、非 UNC/device、无歧义段且词法路径位于授权非保护范围；不跟随缺失目标。 |
+| `OperationConfirmationService.__init__(ttl_seconds=300, now=None)` | 建立内存一次性 R1 确认库和可测试 UTC 时钟；非正 TTL 拒绝。重启不会恢复令牌。 |
+| `OperationConfirmationService.request(plan, preview)` | 要求 plan/摘要/项目数一致且至少一个 READY，生成绑定 transaction/plan/preview/摘要/数量/时限的 PENDING 确认。 |
+| `OperationConfirmationService.resolve(id, approved, plan, preview)` | 仅处理未过期 PENDING 且全部绑定仍一致的确认，变为 APPROVED/REJECTED；批准记录时间。未知、重复、过期、变化均抛 `OperationConfirmationError`。 |
+| `OperationConfirmationService.consume(id, plan, preview)` | 执行开始时一次性把 APPROVED 变为 CONSUMED；拒绝重放、过期和任何摘要变化。 |
+| `OperationConfirmationService._get_pending(id)` | 私有精确查找；未知或非 PENDING 失败。 |
+| `OperationConfirmationService._require_matching(plan, preview)` | 校验 Preview plan ID/digest 和项目数，防止“确认 A 执行 B”。 |
+| `OperationConfirmationService._require_current(request, plan, preview)` | 比较确认保存的七项绑定与当前对象；任一差异视为 stale。 |
+| `RollbackConfirmationService.__init__(ttl_seconds=300, now=None)` | 建立与正向确认完全独立的回滚一次性确认库。 |
+| `RollbackConfirmationService.request(plan)` | 只有回滚 Preview 至少一个 READY 才生成绑定事务、回滚计划/digest、数量和到期时间的确认；纯冲突 Preview 仍可展示但不可确认。 |
+| `RollbackConfirmationService.resolve(id, approved, plan)` | 对当前精确回滚 Preview 批准/拒绝；重复、未知、过期或变化失败。 |
+| `RollbackConfirmationService.consume(id, plan)` | 回滚开始时一次性消费批准；不允许复用正向确认或重放。 |
+| `RollbackConfirmationService._get(id)` | 私有字典查找，未知抛类型化错误。 |
+| `RollbackConfirmationService._require_current(request, plan)` | 比较事务、计划 ID、完整 digest 和 READY 数，任一差异拒绝。 |
+
+### 意图解析、确定性编译和应用服务
+
+| 函数 | 详细作用、输入/返回和失败语义 |
+|---|---|
+| `FileOperationSourceResolver.__init__(authorization, max_sources=500)` | 注入授权服务和正来源上限；不保存路径或扫描。 |
+| `FileOperationSourceResolver.resolve(selection)` | 由 opaque root IDs 本地构造策略，使用 `scandir` 查找字面扩展名，不跟链接；去重排序并逐项路径复验。超限/record-only/IO/授权错误失败。 |
+| `FileOperationPlanCompiler.__init__(authorization, platform, max_operations=500)` | 注入权限解析和真实身份观察器；限制最终操作总数。 |
+| `FileOperationPlanCompiler.compile(user_goal, intent, sources)` | 把未可信 provider intent + 本地发现路径编译成具体 R1 plan；本地计算 modified year、目录和名称，模型不能指定工具外命令。无 source、缺目标或超限失败。 |
+| `FileOperationPlanCompiler.compile_selected_move(user_goal, source_paths, destination_directory, root_ids)` | GUI 确定性入口；不用模型，复验所有选择/目标，补必要 mkdir，再生成最终 move。空选/超限/越界失败。 |
+| `FileOperationPlanCompiler.compile_selected_rename(user_goal, source_paths, rule, root_ids)` | GUI 确定性入口；应用一个有限规则，保留文件扩展名，生成同父最终名称和 case-only 临时名。 |
+| `FileOperationPlanCompiler._compile_moves(policy, sources, destination_base, group_by=None)` | 读取每个 source 身份，按规范路径排序；可用修改时间 UTC 年分组，先放 mkdir 再放 file/directory move。 |
+| `FileOperationPlanCompiler._compile_renames(policy, sources, rule)` | 按规范路径稳定排序并逐项生成名称；根据真实对象类型选择 RENAME_FILE/DIRECTORY，大小写专用操作预留 UUID 临时路径。 |
+| `FileOperationPlanCompiler._append_missing_directories(policy, destination, planned, operations)` | 从最近现存父级向下依序加入单层 mkdir；防止隐式 `parents=True`，并避免重复计划目录。 |
+| `FileOperationPlanCompiler._apply_rename_rule(state, rule, index)` | 实现 prefix/suffix/sequence/lower/upper/literal replace/date prefix；保留文件扩展，日期来自 mtime；no-op 拒绝。 |
+| `FileOperationPlanner.__init__(provider, authorization, registry, external_consent)` | 组合可替换 provider 与本地边界；不执行文件发现或写操作。 |
+| `FileOperationPlanner.build_provider_request(user_goal)` | 构造无真实路径/文件名的请求：goal、label、UUID、有限 enum、注册工具；缺授权或必需工具失败。 |
+| `FileOperationPlanner.request_external_consent(user_goal)` | 对上述精确 JSON 请求外发确认，摘要明确不会发送路径、名称、内容、结果或 Undo。 |
+| `FileOperationPlanner.plan_intent(user_goal, confirmation_id)` | 异步复验外发确认，调用 provider，返回类型化 intent + trace；不解析具体路径，也不扩大授权。 |
+| `LLMProvider.create_file_operation_intent(request)` | provider-neutral 异步扩展点；返回 `ProviderFileOperationIntentResult`。基类无实现，调用者仍须本地编译/审查。 |
+| `OpenAILLMProvider.create_file_operation_intent(request)` | 用 Responses strict parse 请求 `FileOperationIntentDraft`；固定系统说明禁止路径/命令/删除/覆盖。API/Schema 错误包装为 `OpenAIProviderError`。 |
+| `ApplicationRuntime.create_file_operation_services(progress_callback=None)` | 为当前所有授权根构造一次 Stage 2A 策略、带持久化 guard 的注册表、四工具、audit、validator、Preview、executor、compiler、resolver、可选 planner 和 rollback manager；无授权失败。 |
+| `FileOperationService.__init__(validator, preview_engine, confirmations, repository, executor, audit)` | 注入完整安全链，不自行创建全局状态。 |
+| `FileOperationService.prepare(plan)` | 独立审查→真实 Preview→构造全部精确参数→原子持久化→AWAITING→请求确认→审计。审查拒绝或无 READY 不创建可执行确认；不写文件。 |
+| `FileOperationService.resolve_confirmation(prepared, approved)` | 对同一个 `PreparedFileOperation` 解析确认，持久化 CONFIRMED/CANCELLED 并审计；不能换计划/Preview。 |
+| `FileOperationService.execute(prepared, cancellation=None)` | 委托事务执行器；只接受已经批准的同一个 prepared 对象，返回验证后的 terminal report。 |
+| `FileOperationService.get_transaction(transaction_id)` | 只读返回一个持久化事务；未知/数据库错误失败。 |
+
+### 事务执行、SQLite 和审计
+
+| 函数 | 详细作用、输入/返回和一致性语义 |
+|---|---|
+| `build_operation_arguments(operation, preview_item)` | 用具体 operation + 实时 Preview source state 构造严格 mkdir/move/rename 请求 JSON；缺 move/rename 身份拒绝。 |
+| `build_all_operation_arguments(plan, preview)` | 按 operation ID 为计划每项生成不可变参数预留映射；缺 Preview 项失败。 |
+| `TransactionExecutor.__init__(repository, registry, confirmations, audit, progress_callback=None)` | 注入持久化、唯一执行入口、一次性确认、强制审计和可选线程安全进度。 |
+| `TransactionExecutor.execute(plan, preview, confirmation_id, cancellation=None)` | 消费确认、复验持久 digest、转 RUNNING；对 READY 项逐一先写 PREPARED Undo/审计，再用持久 capability 调注册工具，验证后完成。取消停止未来项，异常 fail-safe 停止并返回准确终态。 |
+| `TransactionExecutor._emit_progress(transaction, current_path)` | 有回调时发不可变进度；无回调短路，不虚构总量。 |
+| `TransactionExecutor._report(transaction, preview)` | 从数据库重读所有 item，计算可回滚 COMPLETED 数和 Preview 字节，构造 terminal `OperationExecutionReport`。 |
+| `OperationRepository.__init__(database_path)` | 创建独立 SQLAlchemy engine/session factory；尚未建表，任何业务调用需 initialize。 |
+| `OperationRepository.initialize()` | 加法建表；开启恢复审计：RUNNING/ROLLING_BACK→INTERRUPTED 并返回 ID，失去内存确认的 PREVIEWED/AWAITING/CONFIRMED→CANCELLED。绝不自动续跑。 |
+| `OperationRepository.create_from_preview(plan, preview, argument_payloads)` | 在一个 SQLite 事务中写父事务和全部 item/操作/Preview/参数摘要；先 flush 父以满足 FK。冲突/阻止项为 SKIPPED，重复目标/ID 原子失败。 |
+| `OperationRepository.transition(transaction_id, new_state, confirmation_id=None, confirmed_at=None, error_message=None)` | 只允许 `_ALLOWED_TRANSITIONS`；比较当前状态后更新 UTC/确认/错误，再重读返回。非法/未知/DB错误失败。 |
+| `OperationRepository.begin_operation(transaction_id, operation_id, undo_record)` | 要求事务 RUNNING、item PENDING 且 Undo ID/事务匹配；在同一数据库事务把 item 置 RUNNING 并插 PREPARED checksum Undo，之后才可写文件。 |
+| `OperationRepository.complete_operation(operation_id, after_state)` | 要求 item RUNNING 和 PREPARED Undo；原子写 after state、AVAILABLE/checksum、item COMPLETED、事务成功计数，返回 item/Undo。 |
+| `OperationRepository.fail_operation(operation_id, error_code, error_message)` | 仅 RUNNING item 可失败；原子写类型化错误、完成时间和事务失败计数，不声称 Undo AVAILABLE。 |
+| `OperationRepository.mark_item_rolled_back(operation_id, success, result)` | 仅 ROLLING_BACK item；原子更新 item 和 Undo 为 ROLLED_BACK/ROLLBACK_FAILED、结果/checksum。 |
+| `OperationRepository.begin_rollback_operation(operation_id, tool_name, argument_payload)` | 要求事务 ROLLING_BACK 且 item 可回滚；保存逆向注册工具和精确参数摘要，再置 ROLLING_BACK。 |
+| `OperationRepository.get_transaction(transaction_id)` | 只读返回强类型事务；未知/DB错误抛 `OperationStoreError`。 |
+| `OperationRepository.get_item(operation_id)` | 返回一个强类型 item；未知失败。 |
+| `OperationRepository.get_operation(operation_id)` | 从不可变 `operation_data` 恢复原计划项；模型校验失败向上传播。 |
+| `OperationRepository.list_items(transaction_id)` | 按正向 sequence 升序返回 item 元组，用于报告。 |
+| `OperationRepository.list_recent(limit=100)` | 按创建时间倒序，limit 钳制 1..500；只读历史。 |
+| `OperationRepository.list_undo(transaction_id)` | 按 sequence 降序返回并逐条 checksum 复验的 Undo，正好是回滚顺序。 |
+| `OperationRepository.get_undo(operation_id)` | 返回单条 checksum 通过的 Undo；缺失/篡改/DB错误失败关闭。 |
+| `OperationRepository.require_execution_authorization(authorization, tool_name, argument_payload)` | 同时要求事务/item 正处于 forward 或 rollback RUNNING，IDs/plan/preview/tool/digest 与行内预留完全匹配；任何 stale/cross-item/replay 拒绝。 |
+| `OperationRepository.close()` | dispose engine 并把 repository 标为未初始化；后续调用失败。 |
+| `OperationRepository._require_initialized()` | 私有 fail-closed guard，未初始化抛 `OperationStoreError`。 |
+| `OperationRepository._transaction_to_row(value)` | 把不可变领域事务转换为 ORM row，包括 UTC、计数和确认字段。 |
+| `OperationRepository._row_to_transaction(row)` | 把 SQLite row 恢复为强类型事务，并恢复 SQLite 丢失的 UTC tzinfo。 |
+| `OperationRepository._row_to_item(row)` | 恢复 UUID、Path、enum、错误和时间的 `TransactionItem`。 |
+| `OperationRepository._validate_undo_row(row)` | Pydantic 恢复 Undo 并比较 checksum；不一致抛完整性错误。 |
+| `TransactionExecutionGuard.__init__(repository)` | 保存可信操作 journal；不缓存授权结果。 |
+| `TransactionExecutionGuard.require(authorization, tool_name, arguments)` | 每次注册写调用实时委托 repository 精确验证，不允许 UI/模型 token 代替。 |
+| `_as_utc(value)` | SQLite naive datetime 按 UTC 恢复；已有时区转换 UTC。 |
+| `OperationAuditLogger.__init__(repository, app_version, git_commit)` | 注入独立审计库和版本追踪；不持有 Undo。 |
+| `OperationAuditLogger.previewed(plan, preview)` | 记录原请求、完整计划、IDs/digests、各状态/字节和“未执行写”；审计不可用使 prepare 失败。 |
+| `OperationAuditLogger.confirmation_resolved(plan, confirmation)` | 记录精确正向确认绑定、决定和时间。 |
+| `OperationAuditLogger.operation_started(transaction, operation, confirmation_id, before_state)` | 在文件写前记录 transaction/operation/tool/source/target/R1/已消费确认和 before state；失败时执行器不继续写。 |
+| `OperationAuditLogger.operation_completed(transaction, operation, after_state, undo)` | 只在工具验证和 Undo AVAILABLE 后记录成功、after state、Undo ID/等级和 verification。 |
+| `OperationAuditLogger.operation_failed(transaction, operation, error)` | 记录脱敏类型/消息和 verified=false；不伪造 after/rollback。 |
+| `OperationAuditLogger.rollback_result(transaction, undo, success, message)` | 对每个逆向项记录验证成功或明确失败，引用 Undo 而不复制文件内容。 |
+| `OperationAuditLogger.rollback_previewed(transaction, plan)` | 记录逆向 digest 和 READY/CONFLICT/BLOCKED，明确 mutation=false。 |
+| `OperationAuditLogger.rollback_confirmation_resolved(transaction, confirmation)` | 记录独立回滚批准/拒绝、ID/digest/时间。 |
+
+### Rollback Manager
+
+| 函数 | 详细作用、输入/返回和冲突语义 |
+|---|---|
+| `RollbackManager.__init__(repository, path_policy, platform, registry, confirmations, audit)` | 注入 Undo 来源、实时路径/身份、同一注册执行边界、独立确认和审计；不接收模型。 |
+| `RollbackManager.prepare(transaction_id)` | 仅允许已停止/完成/中断/部分回滚事务；读取 Undo 降序，实时评估每项，并考虑更早逆向步骤会腾空的受管路径。返回 Preview；无 READY 时 confirmation 为 None。 |
+| `RollbackManager.resolve_confirmation(prepared, approved)` | 要求 prepared 有可确认项，解析独立回滚确认并审计；不改变事务到 ROLLING_BACK。 |
+| `RollbackManager.execute(prepared, cancellation=None)` | 消费一次性回滚确认，转 ROLLING_BACK，按降序对 READY 项重新验证/预留/注册执行/验证/审计；取消停止未来项，异常停止并产生 ROLLED_BACK/PARTIAL/FAILED。 |
+| `RollbackManager._preview_undo(undo, paths_vacated_by_earlier_reverse_steps)` | 检查 Undo 状态、结果存在/身份/元数据、original 冲突和创建目录内容；仅当内容都将由更早 reverse 移走时允许目录 READY。 |
+| `RollbackManager._build_reverse_arguments(undo, temporary_path)` | 执行前再次检查结果；mkdir 构造 rollback-rmdir，rename 构造反向同父请求，move 构造反向 move。原路径缺失或结果变化拒绝。 |
+| `RollbackManager._verify_reverse_result(undo, result)` | mkdir 要求类型化 verified 且目录消失；move/rename 要求类型化 verified 且恢复身份匹配。失败不能标记 ROLLED_BACK。 |
+
+### Stage 2A GUI
+
+`FileOperationTab` 只呈现/收集状态并启动 worker。它不会直接调用 Win32、`Path.rename`、
+工具 `execute` 或数据库状态迁移。
+
+| 函数 | GUI 行为和委托边界 |
+|---|---|
+| `FileAnalysisTab._start_planning_from_button(_checked)` | 忽略 Qt checked 布尔参数，调用只读规划入口，防止布尔值被误作目标。 |
+| `FileAnalysisTab._request_move_selected()` | 收集当前页显式勾选路径；空选提示，否则发 `move_selected_requested`，不移动。 |
+| `FileAnalysisTab._request_rename_selected()` | 同上，发 rename 请求，不重命名。 |
+| `FileAnalysisTab._checked_result_paths()` | 仅返回 checkState=Checked 行保存在 UserRole 的 Path 元组；不把选择行或模型建议视为勾选。 |
+| `MainWindow._build_operation_tab()` | 创建 Stage 2A 页面、连接状态和 Stage 1 勾选信号并加标签。 |
+| `MainWindow._open_move_for_paths(value)` | 收窄 tuple 中 Path，传给操作页并切换标签；只预填，不执行。 |
+| `MainWindow._open_rename_for_paths(value)` | 同上，提示选择有限规则并生成 Preview。 |
+| `FileOperationTab.__init__(runtime)` | 初始化所有不可变业务引用/worker 状态，构建 UI、连接跨线程进度并加载历史；显示启动发现的 INTERRUPTED。 |
+| `FileOperationTab._build_ui()` | 构造选择、目标、有限 rename、Preview 明细、确认/执行/停止、事务历史和回滚控件；所有执行按钮初始禁用。 |
+| `FileOperationTab.set_sources(paths)` | 替换待处理列表并保存 Path 到 UserRole；只改变 UI，明确“尚未执行”。 |
+| `FileOperationTab.start_planning(goal)` | 创建 Stage 2A 服务；配置 provider 时请求精确外发确认并启动 intent worker。provider disabled 时提示使用本地控件，不发送。 |
+| `FileOperationTab._add_files()` | 打开多文件选择器后调用 `set_sources`；取消无副作用。授权稍后由 compiler 复验。 |
+| `FileOperationTab._add_directory()` | 选择一个目录并加入来源；不递归读取，Preview worker 后台计算影响。 |
+| `FileOperationTab._choose_destination()` | 选择已有目标目录并填文本；不因此授权或创建。 |
+| `FileOperationTab._prepare_move()` | 校验选择/目标，创建当前授权范围服务并确定性编译，随后启动只读 Preview worker。 |
+| `FileOperationTab._prepare_rename()` | 从控件构造严格 `RenameRule`，确定性编译并启动 Preview；空/非法/no-op 只提示。 |
+| `FileOperationTab._start_preview(services, plan)` | 清除旧确认，保存本次服务/计划，禁用规划按钮并在线程池启动安全审查+Preview。 |
+| `FileOperationTab._natural_plan_completed(value)` | 收窄 worker 输出为 `FileOperationPlan`，再走同一 Preview；类型/服务错误安全失败。 |
+| `FileOperationTab._preview_completed(value)` | 收窄 prepared，显示精确数量/字节/冲突/FULL/无覆盖声明，填表并只启用确认/拒绝。 |
+| `FileOperationTab._populate_forward_preview(prepared)` | 每项显示状态、操作、源、最终目标和问题；无写副作用。 |
+| `FileOperationTab._confirm_forward()` | 显示对象数/字节/冲突/回滚的具体对话框；Yes 后调用 service resolve，只启用单独“执行”。 |
+| `FileOperationTab._reject_forward()` | 持久化 CANCELLED/拒绝审计并禁用执行；不写文件。 |
+| `FileOperationTab._execute_forward()` | 为当前已确认 prepared 创建 worker，显示“停止仅阻止未来项”并启动线程池。 |
+| `FileOperationTab._progress_changed(value)` | 只接受 `OperationProgress`，显示成功/失败/跳过/当前路径；不据 UI 计数判断成功。 |
+| `FileOperationTab._execution_completed(value)` | 收窄数据库报告，显示 terminal、成功/失败/跳过/PENDING/Undo 数并刷新历史。 |
+| `FileOperationTab.refresh_history()` | 只读加载最近 100 事务，保存 transaction ID 到 UserRole；数据库错误提示。 |
+| `FileOperationTab._prepare_rollback()` | 从选中历史 ID 创建当前授权服务并调用 RollbackManager.prepare；展示真实逆序 Preview，无写。 |
+| `FileOperationTab._populate_rollback_preview(prepared)` | 显示当前/恢复路径、状态和冲突；mkdir 显示“仅事务创建空目录”。 |
+| `FileOperationTab._confirm_and_execute_rollback()` | 显示具体 READY/冲突/复验说明；独立确认后创建 rollback worker，不复用正向授权。 |
+| `FileOperationTab._rollback_completed(value)` | 收窄持久化事务并显示回滚终态/刷新历史；不把 PARTIAL/FAILED 写成完成。 |
+| `FileOperationTab.cancel()` | 对正向/回滚 worker 设置 cooperative token；不终止正在执行的 Win32 调用。 |
+| `FileOperationTab.shutdown()` | 退出前调用 cancel；全局线程池有界等待由主窗口负责。 |
+| `FileOperationTab._source_paths()` | 从列表 UserRole 返回 Path 元组，不从显示文字推断。 |
+| `FileOperationTab._all_root_ids()` | 返回当前授权记录 UUID；无授权抛友好错误。 |
+| `FileOperationTab._invalidate_prepared()` | 清除 prepared 并禁用确认/拒绝/执行，使旧 Preview 不可用。 |
+| `FileOperationTab._set_planning_busy(busy, message)` | 控制规划按钮、忙碌/完成进度和文本；只是展示状态。 |
+| `FileOperationTab._worker_failed(message)` | 清理全部 worker 引用/取消按钮，显示“未执行或安全停止”并刷新数据库历史；不伪造报告。 |
+| `FileOperationTab._show_error(message)` | 统一“不执行”警告和状态信号。 |
+
+### Stage 2A Qt workers
+
+| 函数 | 跨线程作用、返回和错误边界 |
+|---|---|
+| `FileOperationPlanningWorker.__init__(services, user_goal, confirmation_id)` | 要求已配置 planner，保存已确认外发信息；不调用 provider。 |
+| `FileOperationPlanningWorker.run()` | 在线程中请求受限 intent，本地 resolve sources 并 compile；成功发 plan，任何异常发类型+消息。 |
+| `OperationPreviewWorker.__init__(services, plan)` | 保存不可变计划和服务；不 Preview。 |
+| `OperationPreviewWorker.run()` | 在线程调用 service.prepare；成功发 `PreparedFileOperation`，审查/IO/DB/audit 失败发 failed。 |
+| `OperationExecutionWorker.__init__(services, prepared)` | 创建独立取消令牌并保存精确 prepared；不消费确认。 |
+| `OperationExecutionWorker.run()` | 在线程执行事务并发验证报告；异常不当成功发射。 |
+| `OperationExecutionWorker.cancel()` | 设置 stop-future token，幂等。 |
+| `RollbackExecutionWorker.__init__(manager, prepared)` | 保存独立回滚 manager/Preview 和取消令牌。 |
+| `RollbackExecutionWorker.run()` | 在线程执行逆序回滚，成功只发强类型 terminal transaction。 |
+| `RollbackExecutionWorker.cancel()` | 设置回滚 stop-future token。 |
+| `require_operation_plan(value)` | `Signal(object)` 收窄；非 `FileOperationPlan` 抛 `TypeError`。 |
+| `require_prepared_operation(value)` | 只接受 `PreparedFileOperation`。 |
+| `require_operation_report(value)` | 只接受 `OperationExecutionReport`。 |
+| `require_operation_transaction(value)` | 只接受 `OperationTransaction`。 |
+
+## Stage 2A 典型调用顺序
+
+```text
+FileOperationPlanner.plan_intent (可选)
+  -> FileOperationSourceResolver.resolve
+  -> FileOperationPlanCompiler.compile / compile_selected_*
+  -> FileOperationService.prepare
+       -> FileOperationSafetyValidator.review
+       -> OperationPreviewEngine.generate
+       -> OperationRepository.create_from_preview
+       -> OperationConfirmationService.request
+  -> FileOperationService.resolve_confirmation
+  -> TransactionExecutor.execute
+       -> OperationRepository.begin_operation (PREPARED Undo)
+       -> ToolRegistry.execute + TransactionExecutionGuard
+       -> Win32 adapter + tool verify
+       -> OperationRepository.complete_operation (AVAILABLE Undo)
+  -> RollbackManager.prepare
+  -> RollbackManager.resolve_confirmation
+  -> RollbackManager.execute (reverse sequence, same registered boundary)
+```

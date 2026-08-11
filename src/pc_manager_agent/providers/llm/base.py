@@ -13,6 +13,12 @@ from pc_manager_agent.domain.file_analysis import (
     FileAnalysisIntentDraft,
     FileAnalysisSummary,
 )
+from pc_manager_agent.domain.file_operations import (
+    FileOperationIntentDraft,
+    OperationType,
+    OrganizationGroup,
+    RenameRuleType,
+)
 from pc_manager_agent.domain.plans import TaskPlan
 
 
@@ -63,6 +69,29 @@ class ProviderIntentResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     intent: FileAnalysisIntentDraft
+    provider: str
+    request_id: str | None = None
+
+
+class FileOperationPlannerRequest(BaseModel):
+    """Minimal root-ID-only data proposed for Stage 2A intent planning."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    user_goal: str = Field(min_length=1, max_length=2_000)
+    authorized_roots: tuple[AuthorizedRootOption, ...]
+    allowed_operations: tuple[OperationType, ...]
+    allowed_rename_rules: tuple[RenameRuleType, ...]
+    allowed_grouping: tuple[OrganizationGroup, ...]
+    allowed_tools: tuple[str, ...]
+
+
+class ProviderFileOperationIntentResult(BaseModel):
+    """Validated but untrusted Stage 2A intent plus provider trace metadata."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    intent: FileOperationIntentDraft
     provider: str
     request_id: str | None = None
 
@@ -122,6 +151,13 @@ class LLMProvider(ABC):
         request: FileAnalysisPlannerRequest,
     ) -> ProviderIntentResult:
         """Return an untrusted intent draft that still needs deterministic compilation."""
+        raise NotImplementedError
+
+    async def create_file_operation_intent(
+        self,
+        request: FileOperationPlannerRequest,
+    ) -> ProviderFileOperationIntentResult:
+        """Return an untrusted finite Stage 2A intent that still needs local compilation."""
         raise NotImplementedError
 
     async def explain_file_analysis(

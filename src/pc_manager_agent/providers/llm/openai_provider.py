@@ -7,13 +7,16 @@ from typing import Protocol, cast
 from openai import APIError, AsyncOpenAI
 
 from pc_manager_agent.domain.file_analysis import FileAnalysisIntentDraft
+from pc_manager_agent.domain.file_operations import FileOperationIntentDraft
 from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.providers.llm.base import (
     AnalysisExplanationRequest,
     AnalysisNarrativeDraft,
     FileAnalysisPlannerRequest,
+    FileOperationPlannerRequest,
     LLMProvider,
     PlannerRequest,
+    ProviderFileOperationIntentResult,
     ProviderIntentResult,
     ProviderNarrativeResult,
     ProviderPlanResult,
@@ -40,6 +43,16 @@ _EXPLANATION_INSTRUCTIONS = """Describe qualitative patterns in aggregate file-a
 statistics. Never include digits, quantities, paths, filenames, deletion advice, or
 claims that a file is useless. Use the phrase 'possibly inactive' rather than unused.
 Deterministic application code will insert every measured number separately.
+"""
+
+_FILE_OPERATION_INSTRUCTIONS = """You produce an untrusted Stage 2A file-operation intent.
+Use only opaque authorized root IDs and the finite operations, grouping rules, rename
+rules, and registered tools supplied in the request. Never return a concrete path,
+filename, shell command, code, deletion, overwrite, recycle-bin action, cross-volume
+request, elevation, or system change. Moving and renaming are R1 and require local
+Preview plus confirmation. The application, not you, selects concrete files and computes
+modified years, sequence numbers, destinations, risk, conflicts, and rollback data.
+Return only the requested schema.
 """
 
 
@@ -152,6 +165,29 @@ class OpenAILLMProvider(LLMProvider):
             raise OpenAIProviderError("OpenAI returned an invalid analysis narrative")
         return ProviderNarrativeResult(
             narrative=response.output_parsed,
+            provider=self.name,
+            request_id=response._request_id,
+        )
+
+    async def create_file_operation_intent(
+        self,
+        request: FileOperationPlannerRequest,
+    ) -> ProviderFileOperationIntentResult:
+        """Parse a root-ID-only finite intent without granting filesystem authority."""
+        try:
+            raw = await self._client.responses.parse(
+                model=self._model,
+                instructions=_FILE_OPERATION_INSTRUCTIONS,
+                input=request.model_dump_json(),
+                text_format=FileOperationIntentDraft,
+            )
+        except APIError as exc:
+            raise OpenAIProviderError("OpenAI file-operation planning request failed") from exc
+        response = cast(_ParsedResponse, raw)
+        if not isinstance(response.output_parsed, FileOperationIntentDraft):
+            raise OpenAIProviderError("OpenAI returned an invalid file-operation intent")
+        return ProviderFileOperationIntentResult(
+            intent=response.output_parsed,
             provider=self.name,
             request_id=response._request_id,
         )

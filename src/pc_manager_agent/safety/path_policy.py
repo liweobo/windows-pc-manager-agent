@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -13,12 +14,12 @@ class PathSecurityError(PermissionError):
 
 
 def _absolute_lexical(path: Path) -> Path:
-    """Normalize dot segments without resolving links or junctions."""
+    """Remove dot segments and return an absolute path without resolving redirects."""
     return Path(os.path.abspath(os.path.normpath(os.fspath(path))))
 
 
 def _is_within(path: Path, root: Path) -> bool:
-    """Compare canonical path strings with Windows case folding."""
+    """Compare canonical components with Windows case folding, not string prefixes."""
     candidate = os.path.normcase(os.fspath(_absolute_lexical(path)))
     boundary = os.path.normcase(os.fspath(_absolute_lexical(root)))
     try:
@@ -46,7 +47,7 @@ def _is_unc_or_device_path(path: Path) -> bool:
 
 
 def is_reparse_point(path: Path) -> bool:
-    """Detect symlinks, junctions, and other Windows reparse points."""
+    """Detect symbolic links, junctions, mount points, and other reparse points."""
     try:
         metadata = os.lstat(path)
     except OSError:
@@ -62,6 +63,9 @@ class PathPolicy:
     _FORBIDDEN_NAMES = frozenset(
         {"$recycle.bin", ".ssh", "personal vault", "system volume information"}
     )
+    _RESERVED_WINDOWS_NAMES = frozenset({"con", "prn", "aux", "nul"})
+    _INVALID_NAME_CHARACTERS = frozenset('<>:"/\\|?*')
+    _RESERVED_PORT_PATTERN = re.compile(r"^(?:com|lpt)[1-9]$", re.IGNORECASE)
 
     def __init__(
         self,
@@ -200,6 +204,93 @@ class PathPolicy:
             raise PathSecurityError(msg)
         return candidate
 
+    def validate_operation_source(self, path: Path) -> Path:
+        """Validate an existing regular file or directory immediately before mutation."""
+        candidate = self._validate_operation_syntax(path)
+        self._reject_reparse_components(candidate)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except PathSecurityError:
+            raise
+        except OSError as exc:
+            raise PathSecurityError(f"Operation source is unavailable: {path}") from exc
+        if not resolved.is_file() and not resolved.is_dir():
+            raise PathSecurityError(f"Unsupported operation source type: {resolved}")
+        if self.entry_rejection_reason(resolved) is not None:
+            raise PathSecurityError(f"Operation source is outside approved scope: {resolved}")
+        if self._network_path_detector(resolved):
+            raise PathSecurityError(f"Network-backed operation sources are unavailable: {resolved}")
+        return resolved
+
+    def validate_operation_destination(self, path: Path) -> Path:
+        """Validate a possibly absent target without resolving it through a redirect."""
+        candidate = self._validate_operation_syntax(path)
+        self.validate_windows_name(candidate.name)
+        self._reject_reparse_components(candidate)
+        # Validate the containing scope independently from whether the leaf is absent,
+        # a file, or a directory. Callers need a safe canonical target in order to report
+        # an existing leaf as NAME_CONFLICT rather than misclassifying it as an unsafe path.
+        existing_ancestor = candidate.parent
+        while not existing_ancestor.exists():
+            parent = existing_ancestor.parent
+            if parent == existing_ancestor:
+                raise PathSecurityError(
+                    f"Operation destination has no existing ancestor: {candidate}"
+                )
+            existing_ancestor = parent
+        self._reject_reparse_components(existing_ancestor)
+        try:
+            resolved_ancestor = existing_ancestor.resolve(strict=True)
+        except OSError as exc:
+            raise PathSecurityError(
+                f"Operation destination ancestor is unavailable: {existing_ancestor}"
+            ) from exc
+        if not resolved_ancestor.is_dir():
+            raise PathSecurityError(
+                f"Operation destination ancestor is not a directory: {resolved_ancestor}"
+            )
+        if not self.is_approved(resolved_ancestor):
+            raise PathSecurityError(
+                f"Operation destination ancestor is outside approved scope: {resolved_ancestor}"
+            )
+        if self._network_path_detector(resolved_ancestor):
+            raise PathSecurityError(
+                f"Network-backed operation destinations are unavailable: {resolved_ancestor}"
+            )
+        return candidate
+
+    def validate_rename_destination(self, source: Path, destination: Path) -> Path:
+        """Validate that rename changes only the final name inside the same directory."""
+        source_candidate = self._validate_operation_syntax(source)
+        destination_candidate = self.validate_operation_destination(destination)
+        if _absolute_lexical(source_candidate.parent) != _absolute_lexical(
+            destination_candidate.parent
+        ):
+            raise PathSecurityError("Rename cannot change the parent directory")
+        if source_candidate.name == destination_candidate.name:
+            raise PathSecurityError("Rename must change the name")
+        return destination_candidate
+
+    @classmethod
+    def validate_windows_name(cls, name: str) -> str:
+        """Reject traversal, reserved devices, controls, ambiguity, and invalid characters."""
+        if not name or name in {".", ".."}:
+            raise PathSecurityError("A file or directory name is required")
+        if len(name) > 255:
+            raise PathSecurityError("A file or directory name is longer than 255 characters")
+        if name.rstrip(" .") != name:
+            raise PathSecurityError("Windows names cannot end with a space or dot")
+        if any(ord(character) < 32 for character in name):
+            raise PathSecurityError("Windows names cannot contain control characters")
+        if any(character in cls._INVALID_NAME_CHARACTERS for character in name):
+            raise PathSecurityError("Windows name contains an invalid character")
+        device_stem = name.split(".", maxsplit=1)[0].casefold()
+        if device_stem in cls._RESERVED_WINDOWS_NAMES or cls._RESERVED_PORT_PATTERN.fullmatch(
+            device_stem
+        ):
+            raise PathSecurityError(f"Windows reserved device name is unavailable: {name}")
+        return name
+
     def validate_file(self, path: Path) -> Path:
         """Validate an existing regular file immediately before content reading."""
         if not path.is_absolute() or ".." in path.parts:
@@ -245,6 +336,19 @@ class PathPolicy:
         if is_reparse_point(candidate):
             return "reparse-point"
         return None
+
+    def _validate_operation_syntax(self, path: Path) -> Path:
+        """Apply lexical Stage 2A checks without resolving an absent destination."""
+        if not path.is_absolute() or ".." in path.parts:
+            raise PathSecurityError(f"Operation path must be absolute without traversal: {path}")
+        if _is_unc_or_device_path(path):
+            raise PathSecurityError(f"UNC, network, and device paths are unavailable: {path}")
+        if _has_ambiguous_segment(path):
+            raise PathSecurityError(f"Operation path contains an ambiguous segment: {path}")
+        candidate = _absolute_lexical(path.expanduser())
+        if not self.is_approved(candidate):
+            raise PathSecurityError(f"Operation path is outside approved scope: {candidate}")
+        return candidate
 
     @staticmethod
     def _reject_reparse_components(path: Path) -> None:

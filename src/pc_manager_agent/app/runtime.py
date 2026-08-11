@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
 from pc_manager_agent import __version__
+from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
 from pc_manager_agent.audit.repository import AuditRepository
 from pc_manager_agent.authorization.models import AuthorizedPath
@@ -17,20 +19,39 @@ from pc_manager_agent.confirmation.external_data import (
     ExternalDataConsentRequest,
     ExternalDataConsentService,
 )
+from pc_manager_agent.confirmation.file_operations import (
+    OperationConfirmationService,
+    RollbackConfirmationService,
+)
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
 from pc_manager_agent.domain.file_analysis import FileAnalysisProgress
 from pc_manager_agent.domain.reports import ScanProgress
 from pc_manager_agent.domain.risk import RiskLevel
+from pc_manager_agent.domain.transactions import OperationProgress
 from pc_manager_agent.orchestration.explanation import FileAnalysisExplainer
 from pc_manager_agent.orchestration.file_analysis import FileAnalysisOrchestrator
 from pc_manager_agent.orchestration.file_analysis_planner import (
     FileAnalysisPlanCompiler,
     FileAnalysisPlanner,
 )
+from pc_manager_agent.orchestration.file_operation_planner import (
+    FileOperationPlanCompiler,
+    FileOperationPlanner,
+    FileOperationSourceResolver,
+)
+from pc_manager_agent.orchestration.file_operation_service import FileOperationService
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.orchestration.transaction_executor import TransactionExecutor
 from pc_manager_agent.persistence.analysis_results import AnalysisResultRepository
 from pc_manager_agent.persistence.authorized_paths import AuthorizedPathRepository
+from pc_manager_agent.persistence.file_operations import (
+    OperationRepository,
+    TransactionExecutionGuard,
+)
 from pc_manager_agent.platform_support.windows.explorer import WindowsExplorerService
+from pc_manager_agent.platform_support.windows.file_operations import (
+    WindowsFileOperationPlatform,
+)
 from pc_manager_agent.platform_support.windows.path_info import (
     is_network_path,
     last_access_time_reliable,
@@ -38,13 +59,22 @@ from pc_manager_agent.platform_support.windows.path_info import (
 from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
 from pc_manager_agent.reporting.exporter import ReportExporter, ReportExportResult
+from pc_manager_agent.rollback.manager import RollbackManager
 from pc_manager_agent.safety.file_analysis_validator import FileAnalysisSafetyValidator
+from pc_manager_agent.safety.file_operation_validator import FileOperationSafetyValidator
+from pc_manager_agent.safety.operation_preview import OperationPreviewEngine
 from pc_manager_agent.safety.path_policy import PathPolicy
 from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
+from pc_manager_agent.tools.file_tools.create_directory import CreateDirectoryTool
 from pc_manager_agent.tools.file_tools.duplicate_analyzer import DuplicateFileAnalyzer
 from pc_manager_agent.tools.file_tools.hashing import SafeFileHasher
 from pc_manager_agent.tools.file_tools.inactive_file_analyzer import InactiveFileAnalyzer
 from pc_manager_agent.tools.file_tools.large_file_analyzer import LargeFileAnalyzer
+from pc_manager_agent.tools.file_tools.move import MoveTool
+from pc_manager_agent.tools.file_tools.remove_created_directory import (
+    RemoveCreatedDirectoryTool,
+)
+from pc_manager_agent.tools.file_tools.rename import RenameTool
 from pc_manager_agent.tools.file_tools.scanner import DirectoryScannerTool
 from pc_manager_agent.tools.registry import ToolRegistry
 
@@ -64,15 +94,23 @@ class FileAnalysisServices:
     explainer: FileAnalysisExplainer | None
 
 
+@dataclass(frozen=True, slots=True)
+class FileOperationServices:
+    """Dependency bundle for the Stage 2A Preview, execution, and rollback workflow."""
+
+    registry: ToolRegistry
+    compiler: FileOperationPlanCompiler
+    source_resolver: FileOperationSourceResolver
+    service: FileOperationService
+    rollback: RollbackManager
+    planner: FileOperationPlanner | None
+
+
 class ApplicationRuntime:
     """Own shared infrastructure and create root-scoped orchestrators."""
 
     def __init__(self, settings: AppSettings) -> None:
-        """
-        1.保存应用配置,settings 包含审计数据库路径、扫描数量上限、超时时间、确认有效期以及模型配置等
-        2.初始化审计数据库
-        3.创建确认服务
-        """
+        """保存配置并初始化审计、确认、授权目录和分析结果等共享服务。"""
         self.settings = settings
         self.audit = AuditRepository(settings.database_path)
         self.audit.initialize()
@@ -90,6 +128,13 @@ class ApplicationRuntime:
         )
         self.analysis_results = AnalysisResultRepository(settings.database_path)
         self.analysis_results.initialize()
+        self.operation_repository = OperationRepository(settings.database_path)
+        self.interrupted_operation_ids = self.operation_repository.initialize()
+        self.operation_confirmation = OperationConfirmationService(
+            settings.confirmation_ttl_seconds
+        )
+        self.rollback_confirmation = RollbackConfirmationService(settings.confirmation_ttl_seconds)
+        self.file_operation_platform = WindowsFileOperationPlatform()
         self.report_exporter = ReportExporter(
             self.analysis_results,
             on_export=self._audit_report_export,
@@ -97,8 +142,7 @@ class ApplicationRuntime:
         self.explorer = WindowsExplorerService(self.authorized_paths)
 
     def create_scan_orchestrator(self, root: Path) -> ScanOrchestrator:
-        """Create a new registry and reviewer limited to exactly one user-selected root."""
-        """当用户选择目录并生成计划时,会被调用"""
+        """为一个用户选择的根目录创建独立路径策略、注册表和扫描编排器。"""
         policy = PathPolicy.for_scan_root(root)
         registry = ToolRegistry()
         registry.register(DirectoryScannerTool(policy))
@@ -244,8 +288,86 @@ class ApplicationRuntime:
             explainer=explainer,
         )
 
+    def create_file_operation_services(
+        self,
+        progress_callback: Callable[[OperationProgress], None] | None = None,
+    ) -> FileOperationServices:
+        """Build Stage 2A services over exactly the currently authorized roots."""
+        records = self.authorized_paths.list_authorized()
+        if not records:
+            raise ValueError("Add at least one authorized directory before file operations")
+        root_ids = tuple(record.path_id for record in records)
+        policy = self.authorized_paths.build_policy(root_ids)
+        guard = TransactionExecutionGuard(self.operation_repository)
+        registry = ToolRegistry(write_guard=guard)
+        registry.register(CreateDirectoryTool(policy, self.file_operation_platform))
+        registry.register(MoveTool(policy, self.file_operation_platform))
+        registry.register(RenameTool(policy, self.file_operation_platform))
+        registry.register(RemoveCreatedDirectoryTool(policy, self.file_operation_platform))
+        audit = OperationAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        validator = FileOperationSafetyValidator(
+            registry,
+            policy,
+            max_operations=self.settings.operation_max_objects,
+        )
+        preview = OperationPreviewEngine(
+            policy,
+            self.file_operation_platform,
+            max_objects=self.settings.operation_max_objects,
+            max_total_bytes=self.settings.operation_max_total_bytes,
+        )
+        executor = TransactionExecutor(
+            self.operation_repository,
+            registry,
+            self.operation_confirmation,
+            audit,
+            progress_callback=progress_callback,
+        )
+        service = FileOperationService(
+            validator,
+            preview,
+            self.operation_confirmation,
+            self.operation_repository,
+            executor,
+            audit,
+        )
+        provider = self.create_llm_provider()
+        planner = (
+            FileOperationPlanner(provider, self.authorized_paths, registry, self.external_consent)
+            if provider is not None
+            else None
+        )
+        rollback = RollbackManager(
+            self.operation_repository,
+            policy,
+            self.file_operation_platform,
+            registry,
+            self.rollback_confirmation,
+            audit,
+        )
+        return FileOperationServices(
+            registry=registry,
+            compiler=FileOperationPlanCompiler(
+                self.authorized_paths,
+                self.file_operation_platform,
+                max_operations=self.settings.operation_max_objects,
+            ),
+            source_resolver=FileOperationSourceResolver(
+                self.authorized_paths,
+                max_sources=self.settings.operation_max_objects,
+            ),
+            service=service,
+            rollback=rollback,
+            planner=planner,
+        )
+
     def close(self) -> None:
         """Release local persistence resources."""
+        self.operation_repository.close()
         self.analysis_results.close()
         self.authorized_path_repository.close()
         self.audit.close()

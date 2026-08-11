@@ -6,19 +6,26 @@ Trusted deterministic code owns path authorization, schemas, risk, confirmation,
 execution, verification, audit, and rollback claims. Model output, UI text, file names,
 file contents, documents, and web pages are untrusted data. They never become commands.
 
-## Stage 1 risk policy
+## Stage 2A risk policy
 
-| Level | Meaning | Stage 1 behavior |
+| Level | Meaning | Stage 2A behavior |
 |---|---|---|
 | R0 | Read-only | Scanner and three analyzers, inside a reviewed and confirmed plan |
-| R1 | Low-risk reversible app/user data | Authorized-path configuration and explicit new report export |
+| R1 | Low-risk reversible app/user data | Configuration/export plus Previewed same-volume move, rename, mkdir and rollback |
 | R2 | Destructive or external disclosure | No file operation; external model transfer needs exact immediate consent |
 | R3 | High-risk system change | No executable tool is registered |
 | R4 | Prohibited | Always denied |
 
-The registered Stage 1 tools are `file.scan`, `file.analyze.large`,
+The registered read tools are `file.scan`, `file.analyze.large`,
 `file.analyze.inactive`, and `file.analyze.duplicates`. All manifests are R0,
 read-only, cancellable, bounded, and rollback `NONE`.
+
+The registered write tools are `file.mkdir`, `file.move`, `file.rename`, and the
+rollback-only `file.rollback.rmdir-empty`. They are R1, non-overwriting, Preview-enabled,
+ordinary-user tools with truthful FULL rollback preconditions. The rollback-only tool
+cannot remove an arbitrary directory: its operation/identity/argument digest must match
+an Undo record of a directory created by the same transaction, and the directory must be
+unchanged and empty immediately before the checked Win32 call.
 
 ## Authorization and path controls
 
@@ -46,6 +53,20 @@ modifications, and zero deletions.
 
 Plan confirmation includes the canonical SHA-256 digest and expiry. Execution repeats
 review and calls `require_plan_approved`; any plan/UI change invalidates approval.
+
+For Stage 2A, a second confirmation type binds both the immutable operation plan and the
+live Preview, including file identities, final paths, operation/ready counts, transaction
+ID and expiry. It is consumed once. A durable transaction guard additionally matches the
+registered tool and exact Pydantic-validated argument digest. Neither UI state nor model
+output alone can authorize a write. Rollback uses an independent confirmation bound to a
+new live reverse Preview.
+
+Stage 2A path controls add reserved device-name/invalid-character/name-length checks,
+same-parent enforcement for rename, same-volume checks for move, target-absence checks,
+and execution-time revalidation. Stable Windows identity combines volume serial and File
+ID; metadata must also remain unchanged. Any missing identity, permission change, target
+appearance, reparse component, source change, or volume change stops that item and all
+later writes. No silent auto-rename or overwrite policy exists.
 
 External model confirmation is separate. It binds purpose, provider, exact JSON payload
 digest, object summary, and expiry. Planning sends a goal, labels, opaque IDs, allowed
@@ -75,3 +96,9 @@ before every audit insert. CI performs pinned dependency installation, Bandit,
 User-file analysis changes nothing, so rollback is `NONE` (nothing to undo). Authorized
 path configuration records a FULL inverse action. Export is MANUAL: the application does
 not claim it can automatically remove the report. No administrator privilege is used.
+
+Successful Stage 2A writes have a PREPARED Undo record before mutation and an AVAILABLE
+record only after postcondition verification. Undo and audit are separate tables and
+purposes. Reverse execution refuses changed results, occupied original paths, unsafe
+scope, and non-empty created directories. `FULL` describes the normal verified case,
+not a promise that later user changes cannot create a rollback conflict.

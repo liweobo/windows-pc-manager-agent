@@ -2,10 +2,11 @@
 
 ## Objective and boundary
 
-Stage 1 delivers one complete read-only vertical slice without granting the model
-filesystem authority. Core logic runs without Qt and without a provider. Stage 1
-never moves, renames, deletes, hydrates, overwrites, or edits a user file and never
-requests administrator privileges.
+Stage 2A preserves the complete Stage 1 read-only slice and adds the first narrow R1
+write slice. Core logic still runs without Qt and without a provider. Only ordinary
+directory creation, same-volume move, same-parent finite-rule rename, and verified
+rollback are executable. Overwrite, cross-volume copy/delete, recycle bin, permanent
+deletion, arbitrary commands, system mutation, and elevation remain unavailable.
 
 ## Layer ownership
 
@@ -50,7 +51,82 @@ Chat / FileAnalysisTab / headless caller
 - `ui` only changes presentation state and starts `QRunnable` workers. It never
   executes a scanner or analyzer directly.
 - `platform_support.windows` contains mapped-drive/atime checks, Explorer selection,
-  single-instance behavior, and future Windows-specific adapters.
+  single-instance behavior, and checked Win32 identity/move/directory primitives.
+
+## Stage 2A write boundary
+
+```text
+Natural language / checked Stage 1 rows / manual selection
+                 |
+    FileOperationPlanner (optional, intent only)
+                 |
+ FileOperationSourceResolver + PlanCompiler (local paths)
+                 |
+       FileOperationSafetyValidator
+                 |
+     OperationPreviewEngine (read-only live state)
+                 |
+       plan + preview digest confirmation
+                 |
+ FileOperationService -> OperationRepository write-ahead journal
+                 |
+ TransactionExecutor -> ToolRegistry + TransactionExecutionGuard
+                 |
+ file.mkdir / file.move / file.rename -> Win32 -> verify
+                 |
+        available Undo + audit + terminal report
+                 |
+ RollbackManager -> reverse live Preview -> separate confirmation
+                 |
+ registered reverse tools -> verify -> rollback terminal state
+```
+
+The model sees only goal text, non-sensitive root labels, opaque root IDs, and finite
+enums. It cannot provide concrete paths, a command, Python code, risk, confirmation,
+or execution policy. `FileOperationSourceResolver` discovers literal extensions only
+inside those IDs. The compiler observes Windows file identity and computes every final
+path, including modified-year directories and finite rename results.
+
+Preview is a real filesystem snapshot. It classifies every item `READY`, `CONFLICT`,
+or `BLOCKED`, counts directory-tree impact without following reparse points, checks
+target presence and nearest-parent volume, and reports truthful FULL rollback counts.
+Conflicts stay visible but are persisted as `SKIPPED`; only READY arguments are eligible.
+
+`OperationConfirmation` binds transaction ID, plan ID/digest, preview ID/digest, item
+counts, approval time, and expiry. Approval is held in memory, consumed once, and lost
+on restart. `OperationRepository` separately reserves the exact tool and argument digest.
+The registry requires both the one-time approval workflow and a durable RUNNING item
+capability before invoking any write tool.
+
+Immediately before mutation, tools repeat lexical/canonical scope checks, reject any
+reparse component, re-open a handle to compare Volume Serial Number, 128-bit File ID,
+size/timestamps/attributes, recheck target absence, and reject a volume change. The
+Windows adapter uses `MoveFileExW` with only write-through; it does not request replace,
+copy-across-volume, delayed reboot, or shell behavior.
+
+## Stage 2A transaction and recovery model
+
+Transactions use explicit states: `PREVIEWED → AWAITING_CONFIRMATION → CONFIRMED →
+RUNNING → COMPLETED/PARTIALLY_COMPLETED/FAILED/CANCELLED`. Rollback uses `ROLLING_BACK →
+ROLLED_BACK/PARTIALLY_ROLLED_BACK/ROLLBACK_FAILED`. Each item independently records
+`PENDING/RUNNING/COMPLETED/FAILED/SKIPPED` and rollback states.
+
+Before every write, the repository atomically changes the item to RUNNING and stores a
+checksum-protected PREPARED Undo record. After Win32 returns, deterministic verification
+must pass before the item becomes COMPLETED and Undo becomes AVAILABLE. Unexpected error
+stops all later PENDING items. Cancellation means “stop future items”; it never kills an
+active filesystem call.
+
+At startup, stale RUNNING/ROLLING_BACK transactions become `INTERRUPTED` and are shown
+to the user; they are never resumed. PREVIEWED/AWAITING_CONFIRMATION/CONFIRMED transactions
+become `CANCELLED` because their memory-only authorization cannot survive restart.
+
+Rollback reads only persisted Undo records, orders them by descending original sequence,
+and evaluates live identity, modification, restored-path conflicts, authorization, and
+created-directory contents. It does not ask a model to guess reverse paths. A directory
+created by the transaction may be removed only after earlier reverse steps vacate its
+managed children and no unmanaged entry remains. Rollback receives a new digest-bound
+confirmation and traverses the same registry/transaction guard/verification boundaries.
 
 ## Data flow
 
@@ -91,4 +167,5 @@ New providers implement `LLMProvider`. New tools require strict input/output mod
 a complete `ToolManifest`, deterministic implementation, cancellation/bounds, safety
 validation, audit, and tests. A future write tool additionally needs `OperationCommand`,
 a truthful `UndoRecord`, conflict rules, verification, and the correct confirmation tier.
-R2/R3 tools remain unregistered in Stage 1.
+R2/R3 tools remain unregistered in Stage 2A. Stage 2B recycle-bin work requires a
+separate R2 design and is not implied by the rollback-only empty-directory primitive.

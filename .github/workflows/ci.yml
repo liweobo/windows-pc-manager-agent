@@ -41,7 +41,12 @@ jobs:
         run: >-
           uv run pytest tests/security tests/unit/test_confirmation.py
           tests/unit/test_rollback.py tests/unit/test_authorized_paths.py
-          tests/unit/test_registry.py --cov=pc_manager_agent.safety
+          tests/unit/test_registry.py tests/unit/test_file_operation_models.py
+          tests/unit/test_file_operation_tools.py
+          tests/unit/test_file_operation_planner.py
+          tests/integration/test_file_operations_flow.py
+          tests/integration/test_operation_transactions.py
+          --cov=pc_manager_agent.safety
           --cov=pc_manager_agent.confirmation --cov=pc_manager_agent.rollback
           --cov=pc_manager_agent.authorization.service
           --cov=pc_manager_agent.orchestration.file_analysis_planner
