@@ -34,7 +34,7 @@ def test_stage1_tab_plans_confirms_runs_filters_and_invalidates(
     tab.minimum_size_mb.setValue(1)
     tab.inactive_checkbox.setChecked(False)
 
-    tab.start_planning()
+    tab.plan_button.click()
     assert tab.confirm_button.isEnabled()
     assert "R0" in tab.risk_label.text()
     assert "不会" in tab.plan_view.toPlainText() or "files_modified" in tab.plan_view.toPlainText()
@@ -58,6 +58,24 @@ def test_stage1_tab_plans_confirms_runs_filters_and_invalidates(
     tab.minimum_size_mb.setValue(2)
     assert not tab.run_button.isEnabled()
     assert "旧确认已失效" in tab.risk_label.text()
+
+
+@pytest.mark.gui
+def test_stage1_tab_accepts_goal_from_programmatic_entry(
+    qtbot: QtBot,
+    runtime: ApplicationRuntime,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "Downloads"
+    root.mkdir()
+    runtime.authorized_paths.add_authorized(root)
+    tab = FileAnalysisTab(runtime)
+    qtbot.addWidget(tab)
+
+    tab.start_planning("来自聊天页的文件分析目标")
+
+    assert tab.goal_input.text() == "来自聊天页的文件分析目标"
+    assert tab.confirm_button.isEnabled()
 
 
 @pytest.mark.gui

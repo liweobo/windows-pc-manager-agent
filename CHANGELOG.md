@@ -46,6 +46,8 @@ once release tags are introduced.
 
 ### Fixed
 
+- Prevent the file-analysis plan button's checked state from being passed to the
+  goal text field as a boolean value.
 - Use one Windows directory-identity API for discovery and execution-time
   revalidation, and make scanner timeout tests independent of clock resolution.
 - Allow the secret-scanning job to read pull-request commit metadata without

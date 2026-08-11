@@ -108,7 +108,7 @@ class FileAnalysisTab(QWidget):
             "例如：找出 Downloads 中大于 500MB 且疑似三个月未使用的文件"
         )
         self.plan_button = QPushButton("生成只读分析计划")
-        self.plan_button.clicked.connect(self.start_planning)
+        self.plan_button.clicked.connect(self._start_planning_from_button)
         goal_row.addWidget(self.goal_input)
         goal_row.addWidget(self.plan_button)
 
@@ -357,7 +357,11 @@ class FileAnalysisTab(QWidget):
         self.refresh_paths()
         self._invalidate_plan()
 
-    @Slot()
+    @Slot(bool)
+    def _start_planning_from_button(self, _checked: bool) -> None:
+        """Start planning without forwarding the button's checked state."""
+        self.start_planning()
+
     def start_planning(self, goal: str | None = None) -> None:
         """Create a manual plan or start a consented provider planning worker."""
         if goal is not None:
