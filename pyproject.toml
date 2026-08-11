@@ -71,6 +71,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-config --strict-markers"
 markers = [
   "gui: requires a Qt application",
+  "performance: creates a large synthetic filesystem workload",
   "security: exercises a security boundary",
   "windows: requires Windows-specific behaviour",
 ]

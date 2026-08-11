@@ -17,7 +17,8 @@ def test_main_window_has_safe_default_tabs_and_local_chat(
 ) -> None:
     window = MainWindow(runtime)
     qtbot.addWidget(window)
-    assert window._tabs.count() == 4
+    assert window._tabs.count() == 5
+    assert window._tabs.tabText(1) == "文件分析"
     assert not window._scan_button.isEnabled()
     window._chat_input.setText("delete everything")
     qtbot.keyClick(window._chat_input, Qt.Key.Key_Return)

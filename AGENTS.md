@@ -63,7 +63,8 @@ uv run ruff format .
 uv run ruff check .
 uv run mypy src
 $env:QT_QPA_PLATFORM = "offscreen"
-uv run pytest --cov=pc_manager_agent --cov-report=term-missing --cov-fail-under=85
+uv run pytest -m "not performance" --cov=pc_manager_agent --cov-report=term-missing --cov-fail-under=85
+uv run pytest tests/performance/test_large_scan.py -q -s
 uv run bandit -q -r src
 uv run pip-audit
 uv build
@@ -99,8 +100,10 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-The current foundation implements a GUI/tray shell, provider abstraction,
-structured plans, registry, risk review, confirmation, audit storage, rollback
-interfaces, and one R0 metadata-only directory scanner. File mutation, recycle
-bin operations, system mutation, elevation, arbitrary command execution, voice,
-and browser/office automation remain out of scope.
+Stage 1 implements the GUI/tray shell, provider abstraction, authorized and
+forbidden roots, structured file-analysis plans, independent review, exact
+confirmation, streaming R0 scanning, large/inactive/duplicate analysis, paged
+results, CSV/JSON export, aggregate-only model explanation, audit storage, and
+rollback interfaces. File mutation, recycle-bin operations, installed-software
+inventory, system mutation, elevation, arbitrary command execution, voice, and
+browser/office automation remain out of scope.

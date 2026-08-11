@@ -9,7 +9,20 @@ from openai import APIConnectionError
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, ProviderConfigurationError
 from pc_manager_agent.config.settings import AppSettings
-from pc_manager_agent.providers.llm.base import PlannerRequest
+from pc_manager_agent.domain.file_analysis import (
+    AnalysisType,
+    FileAnalysisFilters,
+    FileAnalysisIntentDraft,
+    FileAnalysisSummary,
+)
+from pc_manager_agent.domain.reports import ScanStatus
+from pc_manager_agent.providers.llm.base import (
+    AnalysisExplanationRequest,
+    AnalysisNarrativeDraft,
+    AuthorizedRootOption,
+    FileAnalysisPlannerRequest,
+    PlannerRequest,
+)
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider, OpenAIProviderError
 from tests.unit.test_models import build_plan
 
@@ -108,3 +121,57 @@ def test_runtime_provider_factory(tmp_path: Path) -> None:
     disabled.close()
     missing.close()
     configured.close()
+
+
+def test_openai_provider_parses_file_intent_and_qualitative_narrative() -> None:
+    intent = FileAnalysisIntentDraft(
+        authorized_root_ids=("00000000-0000-0000-0000-000000000001",),
+        analyses=(AnalysisType.LARGE_FILES,),
+    )
+    intent_responses = FakeResponses(intent)
+    provider = OpenAILLMProvider(
+        model="test-model",
+        api_key="test-key",
+        client=FakeClient(intent_responses),
+    )
+    intent_result = asyncio.run(
+        provider.create_file_analysis_intent(
+            FileAnalysisPlannerRequest(
+                user_goal="find large files",
+                authorized_roots=(AuthorizedRootOption(root_id="opaque", label="Downloads"),),
+                allowed_analyses=(AnalysisType.LARGE_FILES,),
+                allowed_tools=("file.scan", "file.analyze.large"),
+            )
+        )
+    )
+    assert intent_result.intent.analyses == (AnalysisType.LARGE_FILES,)
+
+    narrative = AnalysisNarrativeDraft(observations=("Video files are the main category",))
+    provider = OpenAILLMProvider(
+        model="test-model",
+        api_key="test-key",
+        client=FakeClient(FakeResponses(narrative)),
+    )
+    narrative_result = asyncio.run(
+        provider.explain_file_analysis(
+            AnalysisExplanationRequest(
+                summary=FileAnalysisSummary(
+                    files_scanned=2,
+                    directories_scanned=1,
+                    total_bytes=10,
+                    matching_files=1,
+                    matching_bytes=8,
+                    errors=0,
+                    status=ScanStatus.COMPLETED,
+                ),
+                filters=FileAnalysisFilters(),
+                analyses=(AnalysisType.LARGE_FILES,),
+            )
+        )
+    )
+    assert narrative_result.narrative == narrative
+
+
+def test_provider_narrative_rejects_invented_numeric_claims() -> None:
+    with pytest.raises(ValueError, match="numeric"):
+        AnalysisNarrativeDraft(observations=("There are 99 matching files",))

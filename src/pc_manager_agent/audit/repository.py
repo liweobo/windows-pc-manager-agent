@@ -57,17 +57,24 @@ class AuditEventRow(Base):
 
 
 class AuditRepository:
-    """Append and query redacted audit events; failures are never swallowed."""
+    """Append redacted plan, confirmation, execution, verification, and error events."""
 
     def __init__(self, database_path: Path) -> None:
         self._engine = create_sqlite_engine(database_path)
-        self._sessions = sessionmaker(self._engine, expire_on_commit=False)
+        self._sessions = sessionmaker(
+            self._engine, expire_on_commit=False
+        )  # 创建会话工厂; expire_on_commit=False 表示事务结束后对象不过期
         self._initialized = False
 
     def initialize(self) -> None:
         """Create schema and verify that SQLite accepts a query."""
+        """
+        1.创建“audit_events”数据表
+        2.执行简单查询，确认数据库可用
+        3.标记仓库已经完成初始化
+        """
         try:
-            Base.metadata.create_all(self._engine)
+            Base.metadata.create_all(self._engine)  # 创建所有继承了Base类的表
             with self._engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
         except SQLAlchemyError as exc:
@@ -76,6 +83,15 @@ class AuditRepository:
 
     def record(self, event: AuditEvent) -> None:
         """Append one event after recursive redaction."""
+        """
+        1.记录审计记录，目前包括：
+            plan.reviewed:计划已审查
+            confirmation.resolved:用户批准或拒绝计划
+            tool.started:工具开始执行
+            tool.completed:工具执行并验证成功
+            tool.failed:工具执行或验证失败
+        2.记录在保存前先执行_to_row(),_to_row()会对敏感的数据执行_redact_mapping()方法，进行脱敏
+        """
         if not self._initialized:
             raise AuditUnavailableError("Audit repository is not initialized")
         row = self._to_row(event)
@@ -87,6 +103,9 @@ class AuditRepository:
 
     def list_recent(self, limit: int = 100) -> tuple[AuditEventRow, ...]:
         """Return newest events with a strict upper bound."""
+        """
+        1.查询审计页面最近的记录
+        """
         if not self._initialized:
             raise AuditUnavailableError("Audit repository is not initialized")
         bounded_limit = max(1, min(limit, 500))
@@ -103,14 +122,14 @@ class AuditRepository:
 
     def close(self) -> None:
         """Release pooled SQLite connections deterministically."""
-        self._engine.dispose()
+        self._engine.dispose()  # 清除所有连接
         self._initialized = False
 
     @staticmethod
     def _redact_mapping(value: dict[str, JsonValue] | None) -> dict[str, Any] | None:
         if value is None:
             return None
-        redacted = redact_json(value)
+        redacted = redact_json(value)  # 判断 value 是否含敏感 key; 如有则替换对应值
         if not isinstance(redacted, dict):
             raise TypeError("Redacted audit mapping changed shape")
         return redacted

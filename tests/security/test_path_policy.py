@@ -113,7 +113,7 @@ def test_scan_root_reparse_branch_fails_closed(
         "pc_manager_agent.safety.path_policy.is_reparse_point",
         lambda _path: True,
     )
-    with pytest.raises(PathSecurityError, match="reparse"):
+    with pytest.raises(PathSecurityError, match="component cannot be a link or reparse"):
         policy.validate_scan_root(tmp_path)
 
 
@@ -127,7 +127,7 @@ def test_real_symlink_is_rejected_when_supported(tmp_path: Path) -> None:
     except OSError as exc:
         pytest.skip(f"Windows symlink creation is unavailable: {exc}")
     policy = PathPolicy((link,))
-    with pytest.raises(PathSecurityError, match="reparse"):
+    with pytest.raises(PathSecurityError, match="component cannot be a link or reparse"):
         policy.validate_scan_root(link)
 
 
@@ -139,3 +139,83 @@ def test_missing_root_and_empty_policy_fail(tmp_path: Path) -> None:
     policy = PathPolicy((missing,))
     with pytest.raises(PathSecurityError, match="unavailable"):
         policy.validate_scan_root(missing)
+
+
+@pytest.mark.security
+def test_relative_unc_ambiguous_and_network_roots_fail_closed(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    relative = Path("relative-root")
+    policy = PathPolicy.for_scan_root(root)
+    with pytest.raises(PathSecurityError, match="Relative"):
+        policy.validate_scan_root(relative)
+    with pytest.raises(PathSecurityError, match="UNC"):
+        policy.validate_scan_root(Path(r"\\server\share"))
+    with pytest.raises(PathSecurityError, match="trailing"):
+        policy.validate_scan_root(root / "ambiguous. ")
+    network_policy = PathPolicy.for_authorized_roots(
+        (root,),
+        network_path_detector=lambda _path: True,
+    )
+    with pytest.raises(PathSecurityError, match="Network"):
+        network_policy.validate_scan_root(root)
+
+
+@pytest.mark.security
+def test_validate_file_requires_regular_authorized_file(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    allowed = root / "allowed.txt"
+    denied = outside / "denied.txt"
+    allowed.write_text("allowed", encoding="utf-8")
+    denied.write_text("denied", encoding="utf-8")
+    policy = PathPolicy.for_scan_root(root)
+
+    assert policy.validate_file(allowed) == allowed.resolve()
+    with pytest.raises(PathSecurityError, match="outside"):
+        policy.validate_file(denied)
+
+
+@pytest.mark.security
+def test_validate_file_rejects_relative_ambiguous_missing_directory_and_network(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    file = root / "allowed.txt"
+    file.write_text("allowed", encoding="utf-8")
+    policy = PathPolicy.for_scan_root(root)
+
+    with pytest.raises(PathSecurityError, match="absolute"):
+        policy.validate_file(Path("relative.txt"))
+    with pytest.raises(PathSecurityError, match="ambiguous"):
+        policy.validate_file(root / "ambiguous. ")
+    with pytest.raises(PathSecurityError, match="unavailable"):
+        policy.validate_file(root / "missing.txt")
+    with pytest.raises(PathSecurityError, match="regular file"):
+        policy.validate_file(root)
+
+    network_policy = PathPolicy.for_authorized_roots(
+        (root,),
+        network_path_detector=lambda candidate: candidate == file.resolve(),
+    )
+    with pytest.raises(PathSecurityError, match="Network-backed files"):
+        network_policy.validate_file(file)
+
+
+@pytest.mark.security
+def test_scan_root_post_resolution_reparse_check_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    policy = PathPolicy.for_scan_root(tmp_path)
+    monkeypatch.setattr(policy, "_reject_reparse_components", lambda _path: None)
+    monkeypatch.setattr(
+        "pc_manager_agent.safety.path_policy.is_reparse_point",
+        lambda _path: True,
+    )
+
+    with pytest.raises(PathSecurityError, match="link or reparse"):
+        policy.validate_scan_root(tmp_path)

@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_application(settings: AppSettings, *, smoke_test: bool = False) -> int:
     """Construct and run one guarded Qt application instance."""
-    existing_application = QApplication.instance()
+    existing_application = QApplication.instance()  # 检查当前进程是否已经创建了QApplication实例
     application = (
         cast(QApplication, existing_application)
         if existing_application is not None
@@ -41,9 +41,10 @@ def run_application(settings: AppSettings, *, smoke_test: bool = False) -> int:
     )
     application.setApplicationName("Windows PC Manager Agent")
     application.setOrganizationName("liweobo")
-    application.setQuitOnLastWindowClosed(False)
+    application.setQuitOnLastWindowClosed(False)  # False表示用户关闭最后一个gui窗口时程序不结束
     guard = QtSingleInstanceGuard()
     if not guard.acquire():
+        """如果有旧的服务端，则执行return 0；如果没有就的服务端则跳过if"""
         return 0
     try:
         runtime = ApplicationRuntime(settings)
@@ -80,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         with TemporaryDirectory(prefix="pc-manager-agent-smoke-") as temporary_directory:
             settings = AppSettings.from_environment().model_copy(
                 update={"data_directory": Path(temporary_directory)}
-            )
+            )  # 临时目录保存冒烟测试数据库; 上下文结束后自动清除.
             return run_application(settings, smoke_test=True)
     return run_application(AppSettings.from_environment())
 
