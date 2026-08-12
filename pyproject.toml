@@ -25,6 +25,7 @@ dependencies = [
   "platformdirs>=4.3,<5",
   "pydantic>=2.11,<3",
   "pyside6>=6.10,<7",
+  "pywin32>=311,<313 ; sys_platform == 'win32'",
   "sqlalchemy>=2.0,<3",
 ]
 
@@ -42,6 +43,7 @@ dev = [
   "pytest-cov>=6,<8",
   "pytest-qt>=4.5,<5",
   "ruff>=0.12,<1",
+  "types-pywin32>=311,<312 ; sys_platform == 'win32'",
 ]
 
 [tool.hatch.build.targets.wheel]

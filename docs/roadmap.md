@@ -22,11 +22,13 @@ rollback, separate rollback confirmation, GUI history, and Windows integration t
 
 Overwrite, cross-volume move, arbitrary rename code, and deletion are deliberately absent.
 
-## Stage 2B — Windows recycle bin (planned)
+## Stage 2B — Windows recycle bin (complete)
 
-Windows recycle-bin integration requires a separate R2 object-specific confirmation,
-truthful MANUAL/PARTIAL restoration semantics, and operation verification. Permanent
-deletion remains prohibited.
+Explicitly selected files/directories can be moved to the Windows Recycle Bin after
+strict local-volume capability checks, recursive identity snapshots, R2 plan approval,
+fresh revalidation, and a second short-lived object-specific confirmation. Each item has
+write-ahead MANUAL recovery evidence and Shell callback verification. Automatic restore,
+permanent deletion, emptying the Recycle Bin, and non-system volumes remain prohibited.
 
 ## Stage 3 — system status
 

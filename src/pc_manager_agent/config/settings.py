@@ -30,6 +30,12 @@ class AppSettings(BaseModel):
     confirmation_ttl_seconds: int = Field(default=300, ge=30, le=3_600)
     operation_max_objects: int = Field(default=500, ge=1, le=5_000)
     operation_max_total_bytes: int = Field(default=50 * 1024**3, ge=1)
+    trash_max_selected: int = Field(default=100, ge=1, le=500)
+    trash_max_contained_objects: int = Field(default=10_000, ge=1, le=100_000)
+    trash_max_total_bytes: int = Field(default=50 * 1024**3, ge=1)
+    trash_high_impact_objects: int = Field(default=100, ge=1)
+    trash_high_impact_bytes: int = Field(default=10 * 1024**3, ge=1)
+    trash_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -68,6 +74,20 @@ class AppSettings(BaseModel):
             "operation_max_objects": os.getenv("PC_MANAGER_OPERATION_MAX_OBJECTS", "500"),
             "operation_max_total_bytes": os.getenv(
                 "PC_MANAGER_OPERATION_MAX_TOTAL_BYTES", str(50 * 1024**3)
+            ),
+            "trash_max_selected": os.getenv("PC_MANAGER_TRASH_MAX_SELECTED", "100"),
+            "trash_max_contained_objects": os.getenv(
+                "PC_MANAGER_TRASH_MAX_CONTAINED_OBJECTS", "10000"
+            ),
+            "trash_max_total_bytes": os.getenv(
+                "PC_MANAGER_TRASH_MAX_TOTAL_BYTES", str(50 * 1024**3)
+            ),
+            "trash_high_impact_objects": os.getenv("PC_MANAGER_TRASH_HIGH_IMPACT_OBJECTS", "100"),
+            "trash_high_impact_bytes": os.getenv(
+                "PC_MANAGER_TRASH_HIGH_IMPACT_BYTES", str(10 * 1024**3)
+            ),
+            "trash_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_TRASH_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
             ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")

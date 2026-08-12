@@ -1,5 +1,21 @@
 # Threat model
 
+## Stage 2B additions
+
+| Threat | Boundary | Mitigation |
+|---|---|---|
+| Model or filename selects a victim | Planner | Only explicit local selection enters `TrashPlan`; provider has no path field |
+| First approval is mistaken for execution | Confirmation | Independent PLAN and short-lived RUNTIME confirmation services and dialogs |
+| File/directory changes between dialogs | Preview/executor | File ID plus metadata and complete recursive tree digest revalidated twice |
+| Parent and child are both selected | Safety reviewer | Overlap is rejected, avoiding duplicate/ambiguous Shell operations |
+| Protected/system content is selected | `TrashPathPolicy` | R2-only Windows/program/application-data/root/attribute exclusions |
+| Network/removable volume lacks safe bin | Capability adapter | System-volume fixed writable NTFS and successful Shell query required |
+| Windows silently destroys instead of recycles | Shell callback | Explicit recycle flag, pre-delete recycle transfer flag, WANTNUKEWARNING, and non-null post-delete Recycle Bin item required |
+| Crash after Shell call | Journal | PREPARED recovery first; restart marks item UNKNOWN and never retries |
+| UI double click or stale dialog | Service/SQLite | One-time tokens, digest bindings, state transitions, durable PLAN+RUNTIME proof |
+| User assumes automatic restore | Domain/UI | MANUAL level everywhere, no Undo button, exact Explorer recovery instructions |
+| Developer adds permanent deletion | CI | AST security test rejects `unlink`, `rmtree`, and `os.remove`; adapter test rejects legacy/empty-bin APIs |
+
 ## Protected assets
 
 - User files, file metadata, and the meaning of “authorized directory”.

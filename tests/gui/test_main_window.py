@@ -17,13 +17,20 @@ def test_main_window_has_safe_default_tabs_and_local_chat(
 ) -> None:
     window = MainWindow(runtime)
     qtbot.addWidget(window)
-    assert window._tabs.count() == 6
+    assert window._tabs.count() == 7
+    assert window._tabs.tabText(3) == "Windows 回收站"
     assert window._tabs.tabText(1) == "文件分析"
     assert window._tabs.tabText(2) == "安全文件操作"
     assert not window._scan_button.isEnabled()
     window._chat_input.setText("delete everything")
     qtbot.keyClick(window._chat_input, Qt.Key.Key_Return)
-    assert "不会把聊天内容发送" in window._conversation.toPlainText()
+    assert window._tabs.currentWidget() is window._trash_tab
+    assert "回收站页面" in window._conversation.toPlainText()
+
+    window._chat_input.setText("永久删除这个文件")
+    qtbot.keyClick(window._chat_input, Qt.Key.Key_Return)
+    assert "已拒绝永久删除" in window._conversation.toPlainText()
+    assert runtime.audit.list_recent(1)[0].event_type == "trash.request_refused"
 
 
 @pytest.mark.gui

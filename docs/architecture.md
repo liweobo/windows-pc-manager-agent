@@ -1,5 +1,30 @@
 # Architecture
 
+## Stage 2B R2 Recycle Bin boundary
+
+Stage 2B is deliberately parallel to, rather than hidden inside, the Stage 2A R1 service:
+
+`explicit selection -> TrashPlanCompiler -> TrashSafetyValidator -> TrashPreviewEngine ->`
+`PLAN confirmation -> fresh tree revalidation -> RUNTIME confirmation -> PREPARED recovery ->`
+`ToolRegistry/transaction guard -> Windows IFileOperation -> callback verification -> audit`
+
+`TrashPlan` and `TrashPreview` cannot claim FULL rollback. `TrashPathPolicy` composes the
+ordinary authorization policy with system/application-data exclusions. Complete directory
+snapshots hash relative path, file ID, kind, size, timestamps, and attributes; a changed
+tree invalidates confirmation. The provider layer is absent from this data flow and cannot
+select targets.
+
+The shared transaction journal gains additive confirmation and recovery tables instead of
+changing existing Stage 2A rows in place. PLAN and RUNTIME proof is checked again by the
+registry write guard. `TrashRecoveryRecord` is separate from `UndoRecord`; restart turns
+an in-flight trash item into UNKNOWN and never automatically resumes it.
+
+`WindowsRecycleBinPlatform` runs one `IFileOperation` in a worker-thread STA per item. It
+sets recycle/undo/early-failure flags and implements `IFileOperationProgressSink`.
+Success requires a zero operation HRESULT, no abort, a recycle-capable transfer flag, a
+non-null newly created Recycle Bin Shell item, and absence of the original path. No legacy
+Shell API, command line, `unlink`, recursive deletion, or permanent fallback exists.
+
 ## Objective and boundary
 
 Stage 2A preserves the complete Stage 1 read-only slice and adds the first narrow R1

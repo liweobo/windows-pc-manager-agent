@@ -35,6 +35,15 @@ once release tags are introduced.
 - Stage 2A GUI for checked analysis results, manual/natural-language planning,
   operation Preview, progress, stop-future behavior, history, and rollback.
 - Stage 2A unit, Windows integration, security, failure, recovery, rollback, and GUI tests.
+- Stage 2B deterministic `TrashPlan`, directory-tree snapshots, local fixed-NTFS
+  capability checks, and the registered R2 `file.trash` tool using Windows
+  `IFileOperation` with per-item result callbacks.
+- Two independent one-time R2 confirmations, additive SQLite confirmation/recovery
+  records, crash reconciliation to UNKNOWN, MANUAL recovery guidance, and an
+  independent Windows Recycle Bin GUI page.
+- Stage 2B unit, integration, security, COM progress-sink, persistence, cancellation,
+  and GUI tests, including a production-source permanent-delete API guard and an
+  opt-in disposable real-Windows Recycle Bin probe.
 
 ### Changed
 
@@ -44,6 +53,10 @@ once release tags are introduced.
   disabled model configuration falls back to deterministic manual planning.
 - Chat now routes move/rename/organize/rollback goals to Stage 2A; concrete paths and
   file selection remain local and deterministic.
+- Chat refuses permanent-delete/empty-Recycle-Bin wording locally and only routes
+  Recycle Bin intent to a page where the user must explicitly select objects.
+- Informational Windows copy-engine success HRESULTs now use COM `SUCCEEDED` semantics;
+  positive recycle evidence remains mandatory.
 
 ### Security
 
@@ -61,9 +74,18 @@ once release tags are introduced.
 - Move/rename/create revalidate authorization, reparse components, source identity,
   target absence and volume immediately before use; overwrite and cross-volume copy
   behavior are absent. Rollback applies the same checks in reverse order.
+- Stage 2B blocks protected/system/application-data roots, authorized roots themselves,
+  links/reparse points, system/offline objects, network/removable/non-system volumes,
+  overlapping selections, stale directory trees, and unavailable Recycle Bins.
+- Recycle execution requires persisted PLAN approval plus consumed RUNTIME approval,
+  writes MANUAL recovery evidence before the Shell call, never invokes a legacy or
+  permanent-delete fallback, and stops the batch on an ambiguous result.
+- Permanent-delete, Recycle Bin bypass, and empty-bin requests are refused and audited
+  as R4; an ambiguous first result also marks its parent transaction UNKNOWN.
 
 ### Fixed
 
+- Pin uv 0.11.32 in CI so setup does not depend on a latest-release API lookup.
 - Prevent the file-analysis plan button's checked state from being passed to the
   goal text field as a boolean value.
 - Use one Windows directory-identity API for discovery and execution-time

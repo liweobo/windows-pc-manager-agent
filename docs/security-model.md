@@ -1,5 +1,26 @@
 # Security model
 
+## Stage 2B controls
+
+- `file.trash` is R2, non-idempotent, Preview-required, double-confirmed, and MANUAL.
+- Only current explicit GUI selections become paths; the LLM cannot name or choose targets.
+- PLAN approval binds plan/Preview/object-set digests, counts, bytes, and expiry.
+- RUNTIME approval is issued only after a fresh snapshot, has a shorter expiry, and is
+  consumed once. SQLite must contain approved PLAN and consumed RUNTIME evidence.
+- Before every Shell call, source authorization, handle identity, metadata, and complete
+  directory snapshot are rechecked. Any change stops execution.
+- Windows, Program Files, ProgramData, AppData, other users, credentials, `$Recycle.Bin`,
+  authorized roots, reparse points, SYSTEM, and OFFLINE objects are blocked.
+- The first implementation permits only writable fixed NTFS on the Windows system volume
+  with a queryable Recycle Bin. Unknown/removable/network/non-system volumes fail closed.
+- Each item receives PREPARED recovery and mandatory audit before execution. Ambiguous
+  results make both the item and an otherwise-empty parent transaction UNKNOWN, stop the
+  batch, and require manual inspection.
+- Permanent deletion, emptying the bin, fallback APIs, automatic restore, and administrator
+  elevation remain unavailable.
+- Permanent-delete, Recycle Bin bypass, and empty-bin language is refused locally and
+  recorded as an R4 audit event without invoking a model or platform tool.
+
 ## Trust boundaries
 
 Trusted deterministic code owns path authorization, schemas, risk, confirmation,

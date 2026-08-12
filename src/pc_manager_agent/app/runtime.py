@@ -12,6 +12,7 @@ from pc_manager_agent import __version__
 from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
 from pc_manager_agent.audit.repository import AuditRepository
+from pc_manager_agent.audit.trash import TrashAuditLogger
 from pc_manager_agent.authorization.models import AuthorizedPath
 from pc_manager_agent.authorization.service import AuthorizedPathService
 from pc_manager_agent.config.settings import AppSettings
@@ -24,10 +25,12 @@ from pc_manager_agent.confirmation.file_operations import (
     RollbackConfirmationService,
 )
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
+from pc_manager_agent.confirmation.trash import TrashConfirmationService
 from pc_manager_agent.domain.file_analysis import FileAnalysisProgress
 from pc_manager_agent.domain.reports import ScanProgress
 from pc_manager_agent.domain.risk import RiskLevel
 from pc_manager_agent.domain.transactions import OperationProgress
+from pc_manager_agent.domain.trash import TrashExecutionReport
 from pc_manager_agent.orchestration.explanation import FileAnalysisExplainer
 from pc_manager_agent.orchestration.file_analysis import FileAnalysisOrchestrator
 from pc_manager_agent.orchestration.file_analysis_planner import (
@@ -42,6 +45,8 @@ from pc_manager_agent.orchestration.file_operation_planner import (
 from pc_manager_agent.orchestration.file_operation_service import FileOperationService
 from pc_manager_agent.orchestration.service import ScanOrchestrator
 from pc_manager_agent.orchestration.transaction_executor import TransactionExecutor
+from pc_manager_agent.orchestration.trash_planner import TrashPlanCompiler
+from pc_manager_agent.orchestration.trash_service import TrashService
 from pc_manager_agent.persistence.analysis_results import AnalysisResultRepository
 from pc_manager_agent.persistence.authorized_paths import AuthorizedPathRepository
 from pc_manager_agent.persistence.file_operations import (
@@ -56,6 +61,7 @@ from pc_manager_agent.platform_support.windows.path_info import (
     is_network_path,
     last_access_time_reliable,
 )
+from pc_manager_agent.platform_support.windows.recycle_bin import WindowsRecycleBinPlatform
 from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
 from pc_manager_agent.reporting.exporter import ReportExporter, ReportExportResult
@@ -65,6 +71,9 @@ from pc_manager_agent.safety.file_operation_validator import FileOperationSafety
 from pc_manager_agent.safety.operation_preview import OperationPreviewEngine
 from pc_manager_agent.safety.path_policy import PathPolicy
 from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
+from pc_manager_agent.safety.trash_policy import TrashPathPolicy
+from pc_manager_agent.safety.trash_preview import TrashPreviewEngine
+from pc_manager_agent.safety.trash_validator import TrashSafetyValidator
 from pc_manager_agent.tools.file_tools.create_directory import CreateDirectoryTool
 from pc_manager_agent.tools.file_tools.duplicate_analyzer import DuplicateFileAnalyzer
 from pc_manager_agent.tools.file_tools.hashing import SafeFileHasher
@@ -76,6 +85,7 @@ from pc_manager_agent.tools.file_tools.remove_created_directory import (
 )
 from pc_manager_agent.tools.file_tools.rename import RenameTool
 from pc_manager_agent.tools.file_tools.scanner import DirectoryScannerTool
+from pc_manager_agent.tools.file_tools.trash import TrashTool
 from pc_manager_agent.tools.registry import ToolRegistry
 
 
@@ -106,6 +116,15 @@ class FileOperationServices:
     planner: FileOperationPlanner | None
 
 
+@dataclass(frozen=True, slots=True)
+class TrashServices:
+    """Dependency bundle for deterministic Stage 2B planning and R2 execution."""
+
+    registry: ToolRegistry
+    compiler: TrashPlanCompiler
+    service: TrashService
+
+
 class ApplicationRuntime:
     """Own shared infrastructure and create root-scoped orchestrators."""
 
@@ -134,7 +153,12 @@ class ApplicationRuntime:
             settings.confirmation_ttl_seconds
         )
         self.rollback_confirmation = RollbackConfirmationService(settings.confirmation_ttl_seconds)
+        self.trash_confirmation = TrashConfirmationService(
+            settings.confirmation_ttl_seconds,
+            settings.trash_runtime_confirmation_ttl_seconds,
+        )
         self.file_operation_platform = WindowsFileOperationPlatform()
+        self.recycle_bin_platform = WindowsRecycleBinPlatform()
         self.report_exporter = ReportExporter(
             self.analysis_results,
             on_export=self._audit_report_export,
@@ -363,6 +387,81 @@ class ApplicationRuntime:
             service=service,
             rollback=rollback,
             planner=planner,
+        )
+
+    def create_trash_services(
+        self,
+        _progress_callback: Callable[[TrashExecutionReport], None] | None = None,
+    ) -> TrashServices:
+        """Build Stage 2B services without granting a model any path-selection authority."""
+        records = self.authorized_paths.list_authorized()
+        if not records:
+            raise ValueError("Add at least one authorized directory before Recycle Bin operations")
+        root_ids = tuple(record.path_id for record in records)
+        base_policy = self.authorized_paths.build_policy(root_ids)
+        policy = TrashPathPolicy(base_policy)
+        guard = TransactionExecutionGuard(self.operation_repository)
+        registry = ToolRegistry(write_guard=guard)
+        preview = TrashPreviewEngine(
+            policy,
+            self.file_operation_platform,
+            self.recycle_bin_platform,
+            max_selected=self.settings.trash_max_selected,
+            max_contained_objects=self.settings.trash_max_contained_objects,
+            max_total_bytes=self.settings.trash_max_total_bytes,
+            high_impact_objects=self.settings.trash_high_impact_objects,
+            high_impact_bytes=self.settings.trash_high_impact_bytes,
+        )
+        registry.register(
+            TrashTool(
+                policy,
+                self.file_operation_platform,
+                self.recycle_bin_platform,
+                preview.snapshot,
+            )
+        )
+        validator = TrashSafetyValidator(
+            registry,
+            policy,
+            max_selected=self.settings.trash_max_selected,
+        )
+        audit = TrashAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        service = TrashService(
+            validator,
+            preview,
+            self.trash_confirmation,
+            self.operation_repository,
+            registry,
+            audit,
+        )
+        return TrashServices(
+            registry=registry,
+            compiler=TrashPlanCompiler(
+                self.authorized_paths,
+                policy,
+                self.file_operation_platform,
+                max_selected=self.settings.trash_max_selected,
+            ),
+            service=service,
+        )
+
+    def audit_prohibited_request(self, original_request: str, reason: str) -> None:
+        """Record a local R4 refusal without invoking a model or registered tool."""
+        self.audit.record(
+            AuditEvent(
+                event_type="trash.request_refused",
+                original_request=original_request,
+                agent_decision=reason,
+                risk_level=RiskLevel.R4,
+                confirmation_required=False,
+                result={"executed": False, "tool_registered": False},
+                app_version=__version__,
+                git_commit=os.getenv("GITHUB_SHA"),
+            )
         )
 
     def close(self) -> None:

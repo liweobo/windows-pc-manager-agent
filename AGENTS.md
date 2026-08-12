@@ -100,10 +100,10 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-Stage 2A includes Stage 1 plus Previewed R1 ordinary-directory creation, same-volume
-file/directory move, same-parent finite-rule rename, persistent transactions, verified
-Undo, and separately confirmed reverse-order rollback. It never overwrites and may
-remove only an unchanged empty directory that the same transaction created during
-rollback. Recycle-bin/permanent deletion, cross-volume move, installed-software
-inventory, system mutation, elevation, arbitrary command execution, voice, and
-browser/office automation remain out of scope.
+Stage 2B includes Stage 2A plus explicitly selected file/directory placement in the
+Windows Recycle Bin through `IFileOperation`. It requires an R2 plan confirmation, fresh
+identity/tree revalidation, a second short-lived runtime confirmation, fixed local NTFS
+capability proof, write-ahead MANUAL recovery evidence, and callback verification. It
+never offers permanent deletion, emptying the bin, automatic restore, non-system-volume
+trash, cross-volume move, installed-software inventory, system mutation, elevation,
+arbitrary command execution, voice, or browser/office automation.
