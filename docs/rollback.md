@@ -1,5 +1,12 @@
 # Rollback design
 
+## Stage 3
+
+System diagnostics are R0 query-only operations, so rollback is `NONE`: there is no changed
+system state to restore. Cancellation stops future sampling/collectors cooperatively and
+retains completed read-only outcomes. Audit evidence is not a system mutation rollback target.
+Any future action suggested by a report needs its own risk and confirmation workflow.
+
 ## Stage 1 operations
 
 | Operation | Risk | Rollback | Reason |

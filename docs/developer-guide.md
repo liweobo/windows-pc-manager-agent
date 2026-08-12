@@ -1,5 +1,23 @@
 # Developer guide
 
+## Stage 3 development
+
+Stage 3 is split across domain models, eight registered system tools, the platform protocol,
+Windows query adapter, safety, confirmation, orchestration, audit, provider contracts, and
+the dashboard. New collectors need a complete R0 manifest, finite enum/mapping entry,
+independent safety validation, and success/denial/error/cancellation/limit tests. Never add
+write methods to this protocol or reuse diagnostic confirmation for a later write.
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_system_diagnostic_*.py tests/integration/test_system_diagnostic_flow.py tests/security/test_system_diagnostic_safety.py tests/gui/test_system_diagnostics_tab.py -q
+uv run pytest tests/integration/test_windows_system_collectors_real.py -q
+uv run pytest tests/performance/test_system_diagnostics_performance.py -q -s
+```
+
+The deterministic fake is `tests/fixtures/system_diagnostics.py`. The real Windows test is
+query-only and verifies that process command-line and uninstall-command fields do not exist.
+
 ## Stage 2B development checks
 
 Stage 2B code is split across `domain/trash.py`, `safety/trash_*`,

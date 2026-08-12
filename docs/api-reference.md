@@ -1,5 +1,389 @@
 # API reference
 
+## Stage 3 Windows 系统只读诊断 API
+
+本节逐项说明 Stage 3 新增或扩展的生产函数。除 Qt 展示方法外，所有入口均可在无 GUI、
+无模型的测试中调用。系统采集只通过已注册 R0 工具进入 Windows 查询适配器。
+
+### 领域模型校验函数
+
+#### `DiagnosticPlan.validate_safety_contract()`
+
+在 Pydantic 构造后校验计划必须是 R0、`read_only=True`、需要计划确认且收集器不重复。
+返回校验后的同一计划；违约抛出 `ValueError`。它只校验结构，不读取系统。
+
+#### `DiagnosticPlan.canonical_digest()`
+
+将计划以排序键、稳定分隔符的 JSON 编码后计算 SHA-256。摘要覆盖计划 ID、时间、目标、
+收集器、采样参数、批量上限和安全字段；任一变化使确认失效。返回 64 字符十六进制字符串。
+
+#### `SuggestedAction.prohibit_execution()`
+
+强制 Stage 3 建议的 `executable` 为 `False`。任何试图把只读报告建议变成执行入口的模型或
+调用方会在 Schema 校验时得到 `ValueError`。
+
+#### `DiagnosticNarrativeObservation.reject_numeric_claims(value)`
+
+拒绝模型解释中的任何数字字符，防止供应商重述或编造测量值。返回原字符串；检测到数字抛出
+`ValueError`，确定性代码仍是所有数值的唯一来源。
+
+### 平台协议 `SystemDiagnosticsPlatform`
+
+#### `collect_system_info()`
+
+返回 `SystemInfoSnapshot`：Windows edition/release/build、主机名、架构、处理器型号、安装
+内存、启动时间和运行秒数。协议不允许产品密钥、凭据或设备秘密。
+
+#### `collect_cpu(sample_count, interval_seconds, cancellation)`
+
+在 2–10 个点、0.1–2 秒间隔内采样总 CPU 与每核心使用率，返回平均、峰值、核心数和频率。
+`cancellation` 提供动态取消信号；实现可抛出取消异常，不修改调度或电源设置。
+
+#### `collect_memory()`
+
+返回物理内存、可用/已用、缓存、页面文件以及可用时的 commit 计数。字段不可可靠取得时
+使用 `None`，不得猜测。
+
+#### `collect_disks()`
+
+返回 `(DiskSnapshot 元组, 警告元组)`。默认只保留 Windows 本地固定卷，读取文件系统、
+总量、已用和剩余；不可访问卷变成警告，不遍历文件内容。
+
+#### `collect_processes(interval_seconds, max_processes, cancellation)`
+
+两次读取之间按指定间隔采样，返回进程元数据、保守名称分组和完整/部分/跳过计数。请求
+Schema 中没有命令行选项，返回模型也没有命令行字段。受保护或已退出进程不会使整体崩溃。
+
+#### `collect_startup(max_items)`
+
+以只读注册表视图枚举 HKCU/HKLM `Run`/`RunOnce`（含 32/64 位视图）及用户/公共 Startup
+文件夹，返回条目、警告和截断标志。不解析或执行命令，不写注册表。
+
+#### `collect_services(max_items)`
+
+用 SCM 枚举和 `SERVICE_QUERY_CONFIG` 句柄返回服务名称、显示名、状态、启动类型、账户、
+可执行路径和可用描述。协议不存在启动、停止、重启、禁用或配置方法。
+
+#### `collect_software(max_items)`
+
+只读 HKCU、HKLM 32 位和 64 位卸载注册表，返回去重后的名称、版本、发布者、安装日期/
+位置、估算大小、范围和架构。返回类型没有卸载命令字段。
+
+### Windows 查询适配器辅助函数
+
+#### `_utc_from_timestamp(value)`
+
+把 Unix 时间戳转换为带 UTC 时区的 `datetime`。无系统副作用。
+
+#### `_wait_with_cancellation(seconds, cancellation)`
+
+按最多 50 毫秒切片等待采样周期，持续检查取消信号。取消时抛出
+`DiagnosticCollectionCancelled`，避免 GUI 在长睡眠中失去响应。
+
+#### `_read_registry_value(hive, key_path, value_name, access=KEY_READ)`
+
+只用 `OpenKey`/`QueryValueEx` 读取单值，缺失或无权访问时返回 `None`。`access` 仅用于选择
+32/64 位只读视图，生产调用不传写权限。
+
+#### `_drive_kind(mountpoint)`
+
+把 `GetDriveTypeW` 数值映射成 fixed/removable/network/optical/ramdisk/unknown，供磁盘工具
+只分析本地固定卷。
+
+#### `_service_state(value)` / `_service_start_type(value)`
+
+把 pywin32 SCM 常量映射为稳定小写字符串；未知值返回 `unknown`，不猜测含义。
+
+#### `_extract_executable_path(binary_path)`
+
+展开环境变量并从服务 image path 中只提取可执行文件部分，丢弃参数，减少凭据/令牌泄露。
+返回 `Path | None`，不检查或启动文件。
+
+### `WindowsSystemDiagnosticsPlatform` 方法
+
+`collect_system_info`、`collect_cpu`、`collect_memory`、`collect_disks`、`collect_processes`、
+`collect_startup`、`collect_services`、`collect_software` 分别实现上述协议。实现只使用
+`psutil`、Python 标准库、`GetDriveTypeW`、`winreg` 读取与 SCM 查询。它们不创建子进程，
+不调用 PowerShell/CMD/WMI/`Win32_Product`，不提权，也不调用进程/服务/注册表写 API。
+
+### 工具清单与八个注册工具
+
+#### `_manifest(...)`
+
+为系统工具构造完整 `ToolManifest`：R0、只读、需要计划确认、不需要运行时 R2 确认、回滚
+`NONE`、普通用户查询权限、Windows 平台、30 秒超时和批量上限。返回不可变清单。
+
+#### `SystemInfoTool.__init__(platform)` / `manifest` / `execute(request, cancellation)`
+
+构造 `system.info` 并注入平台；`manifest` 返回清单；`execute` 只接受
+`EmptyCollectorRequest`，否则 `TypeError`，成功返回 `SystemInfoResult`。
+
+#### `CpuTool.__init__(platform)` / `manifest` / `execute(...)`
+
+注册 `system.cpu`。`execute` 只接受 `CpuCollectorRequest`，把边界内采样次数、间隔和取消
+信号交给平台，返回 `CpuResult`。
+
+#### `MemoryTool.__init__(platform)` / `manifest` / `execute(...)`
+
+注册 `system.memory`。空参数查询并返回 `MemoryResult`。
+
+#### `DiskTool.__init__(platform)` / `manifest` / `execute(...)`
+
+注册 `system.disks`。空参数查询，保留不可访问卷警告，返回 `DiskResult`。
+
+#### `ProcessTool.__init__(platform)` / `manifest` / `execute(...)`
+
+注册 `system.processes`。验证采样间隔与进程上限后返回 `ProcessResult`；不接收命令行开关。
+
+#### `StartupTool.__init__(platform)` / `manifest` / `execute(...)`
+
+注册 `system.startup`。验证 `max_items` 后返回 `StartupResult` 及截断状态。
+
+#### `ServiceTool.__init__(platform)` / `manifest` / `execute(...)`
+
+注册 `system.services`。验证上限后通过查询型平台接口返回 `ServiceResult`。
+
+#### `SoftwareTool.__init__(platform)` / `manifest` / `execute(...)`
+
+注册 `system.software`。验证上限后返回不含卸载命令的 `SoftwareResult`。
+
+### 诊断确认
+
+#### `DiagnosticConfirmationService.__init__(ttl_seconds=300, now=None)`
+
+建立内存确认状态机。`now` 可注入以测试过期；保存的是计划摘要和到期时间，不保存系统快照。
+
+#### `request(plan)`
+
+生成绑定 plan ID、canonical digest、收集器摘要和有效期的 `PLAN` 确认。返回
+`ConfirmationRequest`，不执行工具。
+
+#### `resolve(confirmation_id, approved, plan)`
+
+验证确认存在、尚未处理、未过期、计划 ID 与摘要未变，再写入批准/拒绝状态。未知、复用、
+过期或变更抛出 `DiagnosticConfirmationError`。
+
+#### `require_approved(plan)`
+
+执行前再次要求摘要一致且批准仍未过期；否则抛出 `DiagnosticConfirmationError`。
+
+### 计划与安全审查
+
+#### `classify_diagnostic_intent(user_goal)`
+
+用有限中英文关键词把目标分为 overview/performance/cpu/memory/disks/processes/startup/
+services/software。未命中返回 overview，不访问模型或系统。
+
+#### `is_diagnostic_request(user_goal)`
+
+判断聊天文本是否明确包含系统诊断概念，供 UI 路由。返回布尔值，不把普通文件请求误当系统查询。
+
+#### `extract_software_search_term(user_goal)`
+
+从“电脑上安装了哪些 Adobe 软件”等已确定的软件清单问题中去掉固定功能词，返回可选的本地
+名称/发布者筛选词；不调用模型、不猜测软件类别，空泛“查看软件清单”返回 `None`。
+
+#### `DiagnosticPlanCompiler.__init__(registry, sample_count=3, sample_interval_seconds=1.5, max_processes=500, max_items=5000)`
+
+注入注册表和集中限制。这些默认值形成约 4.5 秒 CPU 观察窗口，均受领域 Schema 上限约束。
+
+#### `local_draft(user_goal)`
+
+根据本地分类器返回有限 `DiagnosticIntentDraft`。模型未配置或未获外发同意时使用此路径。
+
+#### `compile(user_goal, draft)`
+
+把不可信 draft 与意图允许集合求交，自动加入 system.info，检查每个清单均已注册且为 R0
+只读，最后生成不可变计划。越权收集器或未知工具抛出异常。
+
+#### `DiagnosticSafetyValidator.__init__(registry)`
+
+保存唯一的注册工具边界，无副作用。
+
+#### `review(plan)`
+
+独立检查 R0、只读、零修改、`NONE` 回滚、计划确认、无重复收集器、工具存在、参数 Schema、
+清单风险和确认语义。返回包含全部问题的 `DiagnosticSafetyReview`；不自动修正危险计划。
+
+#### `arguments_for(plan, collector)`
+
+只从已校验计划派生 CPU、进程和有限枚举参数；无参数工具返回空字典。模型不能提供参数。
+
+### 确定性诊断引擎
+
+#### `_review_action(title, description)`
+
+构造 `executable=False` 的 R0 REVIEW 建议。
+
+#### `DiagnosticEngine.__init__(thresholds=None)`
+
+注入集中、可测试且会写入报告的 `DiagnosticThresholds`；省略时用保守默认值。
+
+#### `analyze(plan, snapshot)`
+
+调用所有可用类别规则，汇总失败收集器数与 finding 数，返回含实际阈值和免责声明的报告。
+
+#### `_cpu_findings(snapshot)`
+
+只根据多样本平均/峰值产生持续 CPU 观察，可信度 MEDIUM；瞬时单点不会独立触发。
+
+#### `_memory_findings(snapshot)`
+
+按已用百分比和可用字节形成内存观察，并明确缓存/工作负载可能改变含义。
+
+#### `_disk_findings(snapshot)`
+
+同时要求使用率和绝对剩余字节达到阈值后才形成 finding，避免大容量盘仅凭百分比误报。
+
+#### `_process_findings(snapshot)`
+
+按本地测量找出达到 CPU 或内存观察阈值的进程并确定性排序；不称其恶意且不提供终止动作。
+
+#### `_startup_findings(snapshot)`
+
+仅按条目数量给出 LOW 可信度复核提示，明确数量不能证明启动问题。
+
+### 快照采集与编排
+
+#### `SystemSnapshotService.__init__(registry, audit)`
+
+注入唯一工具执行入口和隐私最小化审计器。
+
+#### `collect(plan, cancellation)`
+
+在写前审计后用最多四个线程并发执行独立 R0 收集器，再按计划顺序组装；取消后把未启动项
+标记 CANCELLED。单个异常由 `_collect_one` 转成 outcome，其他收集器继续。
+
+#### `_collect_one(plan, collector, cancellation)`
+
+在线程池中通过注册表执行并测量耗时，成功生成 SUCCEEDED/PARTIAL，异常只生成类型化安全
+消息和 FAILED/CANCELLED。为避免 SQLite 并发写争用，调用方 `collect` 在主编排线程先写全部
+started 事件，再按计划顺序写 completion 事件。
+
+#### `_item_count(result)`
+
+按输出 Schema 确定性计算审计条目数，不展开原始对象。
+
+#### `_assemble(collected, outcomes)`
+
+类型收窄八种工具结果并组装可选字段。失败类别保持空值，其 outcome 仍保留。
+
+#### `DiagnosticOrchestrator.__init__(...)`
+
+注入编译器、安全器、确认器、快照服务、引擎和审计器，保持每个边界可替换测试。
+
+#### `prepare(user_goal)`
+
+本地生成计划、执行独立审查并审计结果，返回 `(plan, review)`；尚不读取系统。
+
+#### `request_confirmation(plan)`
+
+重新安全审查，通过后创建确认；被篡改计划抛出 `ValueError`。
+
+#### `resolve_confirmation(confirmation_id, approved, plan)`
+
+委托确认状态机处理并审计用户决定。
+
+#### `execute(plan, cancellation=None)`
+
+执行时重新审查、要求有效批准、采集快照、运行确定性引擎并写报告审计。没有批准、审计失败、
+安全失败均阻止工具；收集器访问失败则形成部分报告。
+
+### 审计函数
+
+`DiagnosticAuditLogger.__init__(repository, git_commit=None)` 注入 SQLite 审计和可选提交号。
+`plan_reviewed` 记录计划/审查；`confirmation_resolved` 记录决定；`collector_started` 提供
+写前证据；`collector_completed` 只记状态、计数、警告数、缓存标记、错误类型和耗时；
+`report_completed` 只记报告 ID、finding/collector/失败数量及零修改验证。均不保存进程、
+启动命令、服务或软件清单。
+
+### 模型供应商边界
+
+#### `LLMProvider.create_diagnostic_intent(request)` / `explain_system_diagnostics(request)`
+
+供应商中立的异步扩展点。前者只能返回有限 `DiagnosticIntentDraft`；后者只能返回绑定 finding
+code 的定性叙述。基类默认抛出 `NotImplementedError`，所以旧供应商不会被误认为支持 Stage 3。
+
+#### `DiagnosticProviderPlanner.__init__(provider, compiler, consent)`
+
+注入可替换模型、确定性编译器和外发确认。
+
+#### `build_request(user_goal)` / `request_consent(user_goal)`
+
+前者只生成用户目标及有限意图/收集器清单；后者为准确 payload 建立摘要确认。均不含快照。
+
+#### `plan(user_goal, confirmation_id)`
+
+要求外发批准后调用 `create_diagnostic_intent`，再由本地编译器限制模型输出。返回计划和 trace。
+
+#### `DiagnosticExplainer.__init__(provider, consent)`
+
+注入模型与外发确认，不持有系统读取接口。
+
+#### `build_request(plan, report)` / `request_consent(plan, report)`
+
+删除数值和对象身份，仅保留最多 20 个 finding 的 code/category/severity/title/evidence 字段名，
+随后建立准确 payload 的外发确认。
+
+#### `explain(plan, report, confirmation_id)`
+
+确认后请求定性解释，并拒绝引用不存在 finding code 的结果。叙述 Schema 还拒绝所有数字声明。
+
+#### `OpenAILLMProvider.create_diagnostic_intent(request)`
+
+使用 Responses 结构化解析为 `DiagnosticIntentDraft`；API 错误和类型错误被包装为不含密钥的
+`OpenAIProviderError`。
+
+#### `OpenAILLMProvider.explain_system_diagnostics(request)`
+
+解析 `DiagnosticNarrativeDraft`，校验所有 finding code 在请求中，拒绝未知引用和数字断言。
+
+### Qt 后台与 Dashboard
+
+#### `DiagnosticWorker.__init__(orchestrator, plan)` / `run()` / `cancel()`
+
+保存已确认计划和独立取消令牌；`run` 在线程池执行并发射 completed/failed 信号；`cancel`
+只设置协作信号，不强杀线程或 OS 查询。
+
+#### `require_diagnostic_report(value)`
+
+收窄 Qt `object` 信号为 `DiagnosticReport`，类型不符抛出 `TypeError`。
+
+#### `_bytes_text(value)`
+
+把字节显示为 B/KiB/MiB/GiB/TiB，不改变原始模型值。
+
+#### `SystemDiagnosticsTab.__init__(runtime)` / `_build_ui()` / `_table(headers)`
+
+构建目标输入、快捷计划、风险/确认、进度、摘要、筛选和六个只读结果表。UI 不直接调用工具。
+
+#### `_plan_clicked()` / `start_planning(goal=None)`
+
+从按钮/聊天进入本地编译与安全审查，显示 JSON 计划并创建确认；不在此阶段读取系统。
+
+#### `_approve()` / `_reject()`
+
+把用户决定交给确认状态机，只有批准后启用运行按钮。
+
+#### `_run()` / `cancel()` / `_completed(value)` / `_failed(message)`
+
+启动后台 worker、协作取消、类型校验完成结果或呈现友好错误；主线程不等待 CPU/进程采样。
+
+#### `_populate(report)` / `_fill(table, rows)` / `_filter_tables(text)`
+
+分别渲染报告、填表和对当前可见数据本地筛选。进程按内存排序；这些函数只更新 Qt 控件。
+
+#### `shutdown()` / `_show_error(message)`
+
+退出时请求取消；错误用对话框和状态信号显示，不伪造完成结果。
+
+### 运行时扩展
+
+#### `ApplicationRuntime.create_system_diagnostic_services()`
+
+创建 Windows 查询适配器、注册八个 R0 工具、配置编译/安全/确认/快照/引擎/审计并返回依赖包。
+若模型启用，再添加 consent-gated planner/explainer；模型始终不是系统查询依赖。
+
 ## Stage 2B Windows Recycle Bin API（新增）
 
 本节逐项说明 Stage 2B 新增或扩展的生产函数。所有路径均为不可信输入；只有

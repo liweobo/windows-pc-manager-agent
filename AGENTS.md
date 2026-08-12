@@ -64,7 +64,7 @@ uv run ruff check .
 uv run mypy src
 $env:QT_QPA_PLATFORM = "offscreen"
 uv run pytest -m "not performance" --cov=pc_manager_agent --cov-report=term-missing --cov-fail-under=85
-uv run pytest tests/performance/test_large_scan.py -q -s
+uv run pytest tests/performance -q -s
 uv run bandit -q -r src
 uv run pip-audit
 uv build
@@ -100,10 +100,10 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-Stage 2B includes Stage 2A plus explicitly selected file/directory placement in the
-Windows Recycle Bin through `IFileOperation`. It requires an R2 plan confirmation, fresh
-identity/tree revalidation, a second short-lived runtime confirmation, fixed local NTFS
-capability proof, write-ahead MANUAL recovery evidence, and callback verification. It
-never offers permanent deletion, emptying the bin, automatic restore, non-system-volume
-trash, cross-volume move, installed-software inventory, system mutation, elevation,
-arbitrary command execution, voice, or browser/office automation.
+Stage 3 retains Stage 2B and adds only confirmed R0 queries for Windows/system identity,
+multi-sample CPU, memory/pagefile, local fixed disks, metadata-only processes, Run/Startup
+entries, SCM service state/configuration, and uninstall-registry software inventory.
+Process command lines and uninstall commands are not collected. Diagnostic findings are
+threshold-based observations, never malware or root-cause diagnoses. No Stage 3 tool can
+terminate a process, modify a service/startup item/registry value, uninstall software,
+elevate, run PowerShell/CMD/WMI/Win32_Product, or mutate system state. Stage 4 has not begun.

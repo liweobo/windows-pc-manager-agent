@@ -12,6 +12,7 @@ from pc_manager_agent import __version__
 from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
 from pc_manager_agent.audit.repository import AuditRepository
+from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
 from pc_manager_agent.authorization.models import AuthorizedPath
 from pc_manager_agent.authorization.service import AuthorizedPathService
@@ -25,12 +26,18 @@ from pc_manager_agent.confirmation.file_operations import (
     RollbackConfirmationService,
 )
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
+from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmationService
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
 from pc_manager_agent.domain.file_analysis import FileAnalysisProgress
 from pc_manager_agent.domain.reports import ScanProgress
 from pc_manager_agent.domain.risk import RiskLevel
 from pc_manager_agent.domain.transactions import OperationProgress
 from pc_manager_agent.domain.trash import TrashExecutionReport
+from pc_manager_agent.orchestration.diagnostic_engine import DiagnosticEngine
+from pc_manager_agent.orchestration.diagnostic_provider import (
+    DiagnosticExplainer,
+    DiagnosticProviderPlanner,
+)
 from pc_manager_agent.orchestration.explanation import FileAnalysisExplainer
 from pc_manager_agent.orchestration.file_analysis import FileAnalysisOrchestrator
 from pc_manager_agent.orchestration.file_analysis_planner import (
@@ -44,6 +51,11 @@ from pc_manager_agent.orchestration.file_operation_planner import (
 )
 from pc_manager_agent.orchestration.file_operation_service import FileOperationService
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.orchestration.system_diagnostic_planner import DiagnosticPlanCompiler
+from pc_manager_agent.orchestration.system_diagnostics import (
+    DiagnosticOrchestrator,
+    SystemSnapshotService,
+)
 from pc_manager_agent.orchestration.transaction_executor import TransactionExecutor
 from pc_manager_agent.orchestration.trash_planner import TrashPlanCompiler
 from pc_manager_agent.orchestration.trash_service import TrashService
@@ -62,6 +74,9 @@ from pc_manager_agent.platform_support.windows.path_info import (
     last_access_time_reliable,
 )
 from pc_manager_agent.platform_support.windows.recycle_bin import WindowsRecycleBinPlatform
+from pc_manager_agent.platform_support.windows.system_diagnostics import (
+    WindowsSystemDiagnosticsPlatform,
+)
 from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
 from pc_manager_agent.reporting.exporter import ReportExporter, ReportExportResult
@@ -71,6 +86,7 @@ from pc_manager_agent.safety.file_operation_validator import FileOperationSafety
 from pc_manager_agent.safety.operation_preview import OperationPreviewEngine
 from pc_manager_agent.safety.path_policy import PathPolicy
 from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
+from pc_manager_agent.safety.system_diagnostics import DiagnosticSafetyValidator
 from pc_manager_agent.safety.trash_policy import TrashPathPolicy
 from pc_manager_agent.safety.trash_preview import TrashPreviewEngine
 from pc_manager_agent.safety.trash_validator import TrashSafetyValidator
@@ -87,6 +103,16 @@ from pc_manager_agent.tools.file_tools.rename import RenameTool
 from pc_manager_agent.tools.file_tools.scanner import DirectoryScannerTool
 from pc_manager_agent.tools.file_tools.trash import TrashTool
 from pc_manager_agent.tools.registry import ToolRegistry
+from pc_manager_agent.tools.system_tools.collectors import (
+    CpuTool,
+    DiskTool,
+    MemoryTool,
+    ProcessTool,
+    ServiceTool,
+    SoftwareTool,
+    StartupTool,
+    SystemInfoTool,
+)
 
 
 class ProviderConfigurationError(RuntimeError):
@@ -125,6 +151,17 @@ class TrashServices:
     service: TrashService
 
 
+@dataclass(frozen=True, slots=True)
+class SystemDiagnosticServices:
+    """Dependency bundle for confirmed Stage 3 R0 diagnostics."""
+
+    registry: ToolRegistry
+    compiler: DiagnosticPlanCompiler
+    orchestrator: DiagnosticOrchestrator
+    provider_planner: DiagnosticProviderPlanner | None
+    explainer: DiagnosticExplainer | None
+
+
 class ApplicationRuntime:
     """Own shared infrastructure and create root-scoped orchestrators."""
 
@@ -156,6 +193,9 @@ class ApplicationRuntime:
         self.trash_confirmation = TrashConfirmationService(
             settings.confirmation_ttl_seconds,
             settings.trash_runtime_confirmation_ttl_seconds,
+        )
+        self.diagnostic_confirmation = DiagnosticConfirmationService(
+            settings.confirmation_ttl_seconds
         )
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
@@ -462,6 +502,58 @@ class ApplicationRuntime:
                 app_version=__version__,
                 git_commit=os.getenv("GITHUB_SHA"),
             )
+        )
+
+    def create_system_diagnostic_services(self) -> SystemDiagnosticServices:
+        """Build all eight read-only collectors behind one confirmed orchestrator."""
+        platform_adapter = WindowsSystemDiagnosticsPlatform()
+        registry = ToolRegistry()
+        for tool in (
+            SystemInfoTool(platform_adapter),
+            CpuTool(platform_adapter),
+            MemoryTool(platform_adapter),
+            DiskTool(platform_adapter),
+            ProcessTool(platform_adapter),
+            StartupTool(platform_adapter),
+            ServiceTool(platform_adapter),
+            SoftwareTool(platform_adapter),
+        ):
+            registry.register(tool)
+        compiler = DiagnosticPlanCompiler(
+            registry,
+            sample_count=self.settings.diagnostic_sample_count,
+            sample_interval_seconds=self.settings.diagnostic_sample_interval_seconds,
+            max_processes=self.settings.diagnostic_max_processes,
+            max_items=self.settings.diagnostic_max_items,
+        )
+        safety = DiagnosticSafetyValidator(registry)
+        audit = DiagnosticAuditLogger(
+            self.audit,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        orchestrator = DiagnosticOrchestrator(
+            compiler=compiler,
+            safety=safety,
+            confirmation=self.diagnostic_confirmation,
+            snapshot_service=SystemSnapshotService(registry, audit),
+            engine=DiagnosticEngine(),
+            audit=audit,
+        )
+        provider = self.create_llm_provider()
+        return SystemDiagnosticServices(
+            registry=registry,
+            compiler=compiler,
+            orchestrator=orchestrator,
+            provider_planner=(
+                DiagnosticProviderPlanner(provider, compiler, self.external_consent)
+                if provider is not None
+                else None
+            ),
+            explainer=(
+                DiagnosticExplainer(provider, self.external_consent)
+                if provider is not None
+                else None
+            ),
         )
 
     def close(self) -> None:

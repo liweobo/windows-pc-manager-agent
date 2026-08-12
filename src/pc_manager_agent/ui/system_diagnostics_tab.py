@@ -1,0 +1,488 @@
+"""PySide6 dashboard for confirmed Stage 3 read-only Windows diagnostics."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+
+from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
+
+from pc_manager_agent.app.runtime import ApplicationRuntime, SystemDiagnosticServices
+from pc_manager_agent.confirmation.models import ConfirmationRequest
+from pc_manager_agent.domain.system_diagnostics import (
+    DiagnosticIntent,
+    DiagnosticPlan,
+    DiagnosticReport,
+    ProcessSnapshot,
+)
+from pc_manager_agent.orchestration.system_diagnostic_planner import extract_software_search_term
+from pc_manager_agent.ui.system_workers import DiagnosticWorker, require_diagnostic_report
+
+
+def _bytes_text(value: int) -> str:
+    """Render a byte count using a compact binary unit for local presentation."""
+    amount = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if amount < 1024 or unit == "TiB":
+            return f"{amount:.1f} {unit}"
+        amount /= 1024
+    return f"{amount:.1f} TiB"
+
+
+class SystemDiagnosticsTab(QWidget):
+    """Present local planning, confirmation, progress, findings, and inventories."""
+
+    status_message = Signal(str)
+
+    def __init__(self, runtime: ApplicationRuntime) -> None:
+        super().__init__()
+        self._runtime = runtime
+        self._services: SystemDiagnosticServices | None = None
+        self._plan: DiagnosticPlan | None = None
+        self._confirmation: ConfirmationRequest | None = None
+        self._report: DiagnosticReport | None = None
+        self._worker: DiagnosticWorker | None = None
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        goal_row = QHBoxLayout()
+        self.goal_input = QLineEdit()
+        self.goal_input.setPlaceholderText("例如：诊断电脑为什么卡顿；查看启动项；列出已安装软件")
+        plan_button = QPushButton("生成只读诊断计划")
+        plan_button.clicked.connect(self._plan_clicked)
+        self.goal_input.returnPressed.connect(self._plan_clicked)
+        goal_row.addWidget(self.goal_input)
+        goal_row.addWidget(plan_button)
+
+        quick_row = QHBoxLayout()
+        for label, goal in (
+            ("系统概览", "查看电脑系统状态"),
+            ("性能诊断", "诊断电脑性能和卡顿"),
+            ("进程", "查看进程资源占用"),
+            ("启动项", "查看开机启动项"),
+            ("服务", "查看 Windows 服务列表"),
+            ("软件", "查看已安装软件清单"),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(lambda _checked=False, value=goal: self.start_planning(value))
+            quick_row.addWidget(button)
+
+        self.risk_label = QLabel(
+            "尚未生成计划。Stage 3 仅查询系统状态，不请求管理员权限，不修改系统。"
+        )
+        self.plan_view = QTextBrowser()
+        self.plan_view.setMaximumHeight(180)
+        self.plan_view.setPlaceholderText("确认前会在这里显示收集器、采样参数和预计影响。")
+
+        action_row = QHBoxLayout()
+        self.confirm_button = QPushButton("确认 R0 计划")
+        self.reject_button = QPushButton("拒绝")
+        self.run_button = QPushButton("开始只读诊断")
+        self.cancel_button = QPushButton("取消")
+        for button in (
+            self.confirm_button,
+            self.reject_button,
+            self.run_button,
+            self.cancel_button,
+        ):
+            button.setEnabled(False)
+            action_row.addWidget(button)
+        self.confirm_button.clicked.connect(self._approve)
+        self.reject_button.clicked.connect(self._reject)
+        self.run_button.clicked.connect(self._run)
+        self.cancel_button.clicked.connect(self.cancel)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.summary = QTextBrowser()
+        self.summary.setMaximumHeight(180)
+        self.cache_label = QLabel(
+            "数据时效：每次点击执行都会重新查询；当前版本不缓存启动项、服务或软件清单。"
+        )
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("筛选当前结果"))
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("输入名称、状态、发布者或其他可见文字")
+        self.search_input.textChanged.connect(self._filter_tables)
+        filter_row.addWidget(self.search_input)
+
+        self.results_tabs = QTabWidget()
+        self.overview_table = self._table(("项目", "值"))
+        self.disk_table = self._table(("挂载点", "文件系统", "已用", "可用", "使用率"))
+        self.process_table = self._table(
+            (
+                "PID",
+                "名称",
+                "CPU %",
+                "内存 %",
+                "内存",
+                "状态",
+                "开始时间",
+                "父 PID",
+                "用户",
+                "可执行路径",
+                "访问完整性",
+            )
+        )
+        self.process_group_table = self._table(
+            ("规范名称", "进程数", "合计 CPU %", "合计内存", "PID 列表")
+        )
+        self.startup_table = self._table(("名称", "来源", "范围", "命令或路径"))
+        self.service_table = self._table(("服务名", "显示名", "状态", "启动类型", "账户"))
+        self.software_table = self._table(("名称", "版本", "发布者", "范围", "架构"))
+        self.results_tabs.addTab(self.overview_table, "概览")
+        self.results_tabs.addTab(self.disk_table, "磁盘")
+        self.results_tabs.addTab(self.process_table, "进程")
+        self.results_tabs.addTab(self.process_group_table, "进程组")
+        self.results_tabs.addTab(self.startup_table, "启动项")
+        self.results_tabs.addTab(self.service_table, "服务")
+        self.results_tabs.addTab(self.software_table, "软件")
+
+        layout.addLayout(goal_row)
+        layout.addLayout(quick_row)
+        layout.addWidget(self.risk_label)
+        layout.addWidget(self.plan_view)
+        layout.addLayout(action_row)
+        layout.addWidget(self.progress)
+        layout.addWidget(self.summary)
+        layout.addWidget(self.cache_label)
+        layout.addLayout(filter_row)
+        layout.addWidget(self.results_tabs, 2)
+
+    @staticmethod
+    def _table(headers: tuple[str, ...]) -> QTableWidget:
+        table = QTableWidget(0, len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSortingEnabled(True)
+        table.horizontalHeader().setStretchLastSection(True)
+        return table
+
+    @Slot()
+    def _plan_clicked(self) -> None:
+        self.start_planning()
+
+    def start_planning(self, goal: str | None = None) -> None:
+        """Create and review a local finite plan without reading system state."""
+        if goal is not None:
+            self.goal_input.setText(goal)
+        user_goal = self.goal_input.text().strip()
+        if not user_goal:
+            self._show_error("请先输入系统诊断目标。")
+            return
+        try:
+            services = self._runtime.create_system_diagnostic_services()
+            plan, review = services.orchestrator.prepare(user_goal)
+            if not review.approved:
+                raise RuntimeError("；".join(issue.message for issue in review.issues))
+            confirmation = services.orchestrator.request_confirmation(plan)
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        self._services = services
+        self._plan = plan
+        self._confirmation = confirmation
+        self.plan_view.setPlainText(plan.model_dump_json(indent=2))
+        self.risk_label.setText(
+            "风险 R0（只读）；系统修改 0；管理员权限：否；回滚 NONE（因为没有写操作）。"
+        )
+        self.confirm_button.setEnabled(True)
+        self.reject_button.setEnabled(True)
+        self.run_button.setEnabled(False)
+        self.status_message.emit("只读计划已通过独立安全审查，等待你的明确确认")
+
+    @Slot()
+    def _approve(self) -> None:
+        if self._services is None or self._plan is None or self._confirmation is None:
+            return
+        try:
+            self._services.orchestrator.resolve_confirmation(
+                self._confirmation.confirmation_id, True, self._plan
+            )
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        self.confirm_button.setEnabled(False)
+        self.reject_button.setEnabled(False)
+        self.run_button.setEnabled(True)
+        self.status_message.emit("R0 计划已确认；可以开始读取系统状态")
+
+    @Slot()
+    def _reject(self) -> None:
+        if self._services is None or self._plan is None or self._confirmation is None:
+            return
+        try:
+            self._services.orchestrator.resolve_confirmation(
+                self._confirmation.confirmation_id, False, self._plan
+            )
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        self.confirm_button.setEnabled(False)
+        self.reject_button.setEnabled(False)
+        self.run_button.setEnabled(False)
+        self.status_message.emit("计划已拒绝；没有读取系统状态")
+
+    @Slot()
+    def _run(self) -> None:
+        if self._services is None or self._plan is None or self._worker is not None:
+            return
+        worker = DiagnosticWorker(self._services.orchestrator, self._plan)
+        worker.signals.completed.connect(self._completed)
+        worker.signals.failed.connect(self._failed)
+        self._worker = worker
+        self.run_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.progress.setRange(0, 0)
+        self.status_message.emit("正在执行已确认的只读系统查询…")
+        QThreadPool.globalInstance().start(worker)
+
+    @Slot()
+    def cancel(self) -> None:
+        """Request cooperative cancellation without terminating the worker thread."""
+        if self._worker is not None:
+            self._worker.cancel()
+            self.status_message.emit("已请求取消；正在安全结束当前采样")
+
+    @Slot(object)
+    def _completed(self, value: object) -> None:
+        try:
+            report = require_diagnostic_report(value)
+        except TypeError as exc:
+            self._failed(str(exc))
+            return
+        self._worker = None
+        self._report = report
+        self.cancel_button.setEnabled(False)
+        self.run_button.setEnabled(True)
+        self.progress.setRange(0, 1)
+        self.progress.setValue(1)
+        self._populate(report)
+        self.status_message.emit(report.summary)
+
+    @Slot(str)
+    def _failed(self, message: str) -> None:
+        self._worker = None
+        self.cancel_button.setEnabled(False)
+        self.run_button.setEnabled(True)
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self._show_error(f"系统诊断未完成：{message}")
+
+    def _populate(self, report: DiagnosticReport) -> None:
+        snapshot = report.snapshot
+        finding_lines = [report.summary, report.disclaimer, "", "确定性观察："]
+        finding_lines.extend(
+            f"- [{finding.severity.value}] {finding.title}\n  {finding.explanation}"
+            for finding in report.findings
+        )
+        finding_lines.append("")
+        finding_lines.append(f"实际阈值：{report.thresholds.model_dump_json()}")
+        self.summary.setPlainText("\n".join(finding_lines))
+        self.cache_label.setText(
+            f"采集时间 UTC：{snapshot.collected_at.isoformat()}；全部为本次实时查询，未使用缓存。"
+        )
+
+        overview: list[tuple[str, str]] = []
+        if snapshot.system_info is not None:
+            info = snapshot.system_info
+            overview.extend(
+                (
+                    ("计算机", info.computer_name),
+                    ("Windows", f"{info.windows_edition or ''} {info.windows_release}".strip()),
+                    ("构建", info.windows_build),
+                    ("架构", info.architecture),
+                    ("处理器", info.processor_model or "不可用"),
+                    ("启动时间 UTC", info.boot_time.isoformat()),
+                )
+            )
+        if snapshot.cpu is not None:
+            overview.extend(
+                (
+                    ("CPU 平均", f"{snapshot.cpu.average_percent:.1f}%"),
+                    ("CPU 峰值", f"{snapshot.cpu.peak_percent:.1f}%"),
+                )
+            )
+        if snapshot.memory is not None:
+            overview.extend(
+                (
+                    ("内存使用率", f"{snapshot.memory.used_percent:.1f}%"),
+                    ("可用内存", _bytes_text(snapshot.memory.available_bytes)),
+                )
+            )
+        for outcome in snapshot.outcomes:
+            overview.append(
+                (
+                    f"采集器 {outcome.collector.value}",
+                    f"{outcome.state.value}; {outcome.item_count} 项; {outcome.duration_ms} ms",
+                )
+            )
+        self._fill(self.overview_table, overview)
+        self._fill(
+            self.disk_table,
+            [
+                (
+                    str(item.mountpoint),
+                    item.filesystem or "",
+                    _bytes_text(item.used_bytes),
+                    _bytes_text(item.free_bytes),
+                    f"{item.used_percent:.1f}%",
+                )
+                for item in snapshot.disks
+            ],
+        )
+        processes = snapshot.processes.processes if snapshot.processes is not None else ()
+        process_sort_key: Callable[[ProcessSnapshot], tuple[float | int, ...]] = (
+            (lambda item: (item.memory_rss_bytes, item.cpu_percent, item.pid))
+            if self._plan is not None and self._plan.intent is DiagnosticIntent.MEMORY
+            else (lambda item: (item.cpu_percent, item.memory_rss_bytes, item.pid))
+        )
+        processes = tuple(
+            sorted(
+                processes,
+                key=process_sort_key,
+                reverse=True,
+            )
+        )
+        self._fill(
+            self.process_table,
+            [
+                (
+                    str(item.pid),
+                    item.name,
+                    f"{item.cpu_percent:.1f}",
+                    f"{item.memory_percent:.1f}",
+                    _bytes_text(item.memory_rss_bytes),
+                    item.status or "",
+                    item.started_at.isoformat() if item.started_at else "",
+                    str(item.parent_pid) if item.parent_pid is not None else "",
+                    item.username or "",
+                    str(item.executable_path) if item.executable_path else "",
+                    item.access.value,
+                )
+                for item in processes
+            ],
+        )
+        groups = snapshot.processes.groups if snapshot.processes is not None else ()
+        self._fill(
+            self.process_group_table,
+            [
+                (
+                    item.normalized_name,
+                    str(item.process_count),
+                    f"{item.total_cpu_percent:.1f}",
+                    _bytes_text(item.total_memory_rss_bytes),
+                    ", ".join(str(pid) for pid in item.pids),
+                )
+                for item in sorted(
+                    groups,
+                    key=lambda value: (
+                        value.total_memory_rss_bytes,
+                        value.total_cpu_percent,
+                    ),
+                    reverse=True,
+                )
+            ],
+        )
+        self._fill(
+            self.startup_table,
+            [
+                (item.name, item.source.value, item.scope.value, item.command_or_path)
+                for item in snapshot.startup_entries
+            ],
+        )
+        self._fill(
+            self.service_table,
+            [
+                (
+                    item.name,
+                    item.display_name,
+                    item.state,
+                    item.start_type or "",
+                    item.account or "",
+                )
+                for item in snapshot.services
+            ],
+        )
+        self._fill(
+            self.software_table,
+            [
+                (
+                    item.name,
+                    item.version or "",
+                    item.publisher or "",
+                    item.scope.value,
+                    item.architecture.value,
+                )
+                for item in snapshot.software
+            ],
+        )
+        if (
+            not self.search_input.text()
+            and self._plan is not None
+            and self._plan.intent is DiagnosticIntent.SOFTWARE
+        ):
+            search_term = extract_software_search_term(self._plan.user_goal)
+            if search_term:
+                self.search_input.setText(search_term)
+        self._filter_tables(self.search_input.text())
+
+    @staticmethod
+    def _fill(table: QTableWidget, rows: Sequence[tuple[str, ...]]) -> None:
+        table.setSortingEnabled(False)
+        table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            for column, text in enumerate(row):
+                item = QTableWidgetItem(text)
+                if column == 0 and text.isdigit():
+                    item.setData(Qt.ItemDataRole.UserRole, int(text))
+                table.setItem(row_index, column, item)
+        table.setSortingEnabled(True)
+        table.resizeColumnsToContents()
+
+    @Slot(str)
+    def _filter_tables(self, text: str) -> None:
+        """Filter visible inventory rows locally without querying or mutating Windows."""
+        needle = text.strip().casefold()
+        for table in (
+            self.disk_table,
+            self.process_table,
+            self.process_group_table,
+            self.startup_table,
+            self.service_table,
+            self.software_table,
+        ):
+            for row in range(table.rowCount()):
+                values = tuple(
+                    item.text().casefold()
+                    for column in range(table.columnCount())
+                    if (item := table.item(row, column)) is not None
+                )
+                visible = not needle or any(needle in value for value in values)
+                table.setRowHidden(row, not visible)
+
+    def shutdown(self) -> None:
+        """Cancel outstanding sampling during controlled application shutdown."""
+        self.cancel()
+
+    def _show_error(self, message: str) -> None:
+        QMessageBox.warning(self, "操作未执行", message)
+        self.status_message.emit(message)

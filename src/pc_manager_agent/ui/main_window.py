@@ -30,9 +30,11 @@ from pc_manager_agent.confirmation.models import ConfirmationRequest
 from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.domain.reports import ScanReport
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnostic_request
 from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
+from pc_manager_agent.ui.system_diagnostics_tab import SystemDiagnosticsTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
 from pc_manager_agent.ui.trash_tab import TrashTab
 from pc_manager_agent.ui.workers import ScanWorker, require_scan_report
@@ -50,7 +52,7 @@ class MainWindow(QMainWindow):
         self._worker: ScanWorker | None = None
         self._tray: SystemTrayController | None = None
         self._quitting = False
-        self.setWindowTitle("Windows PC Manager Agent — Stage 2B 回收站安全操作")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 3 只读系统诊断")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -58,6 +60,7 @@ class MainWindow(QMainWindow):
         self._build_analysis_tab()
         self._build_operation_tab()
         self._build_trash_tab()
+        self._build_system_diagnostics_tab()
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
@@ -168,6 +171,12 @@ class MainWindow(QMainWindow):
         self._analysis_tab.trash_selected_requested.connect(self._open_trash_for_paths)
         self._tabs.addTab(self._trash_tab, "Windows 回收站")
 
+    def _build_system_diagnostics_tab(self) -> None:
+        """Attach the independent Stage 3 read-only diagnostic dashboard."""
+        self._system_diagnostics_tab = SystemDiagnosticsTab(self._runtime)
+        self._system_diagnostics_tab.status_message.connect(self.statusBar().showMessage)
+        self._tabs.addTab(self._system_diagnostics_tab, "系统诊断")
+
     def _build_audit_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -208,6 +217,14 @@ class MainWindow(QMainWindow):
             return
         self._conversation.append(f"你：{text}")
         self._chat_input.clear()
+        if is_diagnostic_request(text):
+            self._tabs.setCurrentWidget(self._system_diagnostics_tab)
+            self._conversation.append(
+                "Agent：已转到系统诊断。将先展示 R0 只读计划，确认后才查询；"
+                "不会终止进程、修改服务/启动项、卸载软件或请求管理员权限。"
+            )
+            self._system_diagnostics_tab.start_planning(text)
+            return
         trash_intent = classify_trash_intent(text)
         if trash_intent is TrashIntentDecision.PROHIBITED_PERMANENT_DELETE:
             reason = "R4/MVP prohibits permanent deletion, Recycle Bin bypass, and emptying"
@@ -466,6 +483,7 @@ class MainWindow(QMainWindow):
         self._analysis_tab.shutdown()
         self._operation_tab.shutdown()
         self._trash_tab.shutdown()
+        self._system_diagnostics_tab.shutdown()
         if self._worker:
             self._worker.cancel()
         QThreadPool.globalInstance().waitForDone(5_000)

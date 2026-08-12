@@ -1,5 +1,24 @@
 # Security model
 
+## Stage 3 system-query boundary
+
+Every Stage 3 tool is `R0`, read-only, `RollbackLevel.NONE`, plan-confirmed, and registered
+with a fixed Pydantic input/output schema. `NONE` is truthful because no system state is
+changed. Execution re-runs safety review and requires the canonical plan digest approved by
+the user. A changed sample count, interval, collector set, item limit, plan ID, or body
+invalidates approval.
+
+The adapter opens only query handles and registry keys. Process records deliberately lack a
+command-line field. Software records deliberately lack uninstall strings. The service reader
+extracts an executable path while discarding arguments. Startup values remain local to the
+dashboard and are never included in audit or model explanations. Audit stores collector name,
+status, counts, warning count, duration, and sanitized exception type—not raw inventories.
+
+Findings are conservative observations. CPU uses multiple samples and every report includes
+the actual thresholds. High utilization does not prove fault, malware, or causation. Suggested
+actions are schema-enforced as non-executable. Missing access becomes partial/failed; the app
+never asks for elevation. Audit failure stops execution before collectors.
+
 ## Stage 2B controls
 
 - `file.trash` is R2, non-idempotent, Preview-required, double-confirmed, and MANUAL.

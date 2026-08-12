@@ -30,10 +30,19 @@ fresh revalidation, and a second short-lived object-specific confirmation. Each 
 write-ahead MANUAL recovery evidence and Shell callback verification. Automatic restore,
 permanent deletion, emptying the Recycle Bin, and non-system volumes remain prohibited.
 
-## Stage 3 — system status
+## Stage 3 — system status (complete)
 
-Read-only disk, CPU, memory, process, startup, service, software, and performance
-views. No system mutation.
+Read-only Windows identity, multi-sample CPU, memory/pagefile, local fixed disks,
+metadata-only process inventory, Run/Startup entries, SCM service queries, uninstall-registry
+software inventory, deterministic threshold findings, partial failure, cancellation, audit,
+optional minimal-data model explanation, and a dashboard. No system mutation, command-line
+collection, shell, WMI, elevation, malware diagnosis, or `Win32_Product`.
+
+## Stage 4 — controlled system operations (not started)
+
+Process termination, startup/service changes, software uninstall, and other R3 operations
+remain design-only. Each capability requires its own threat model, confirmation design,
+recovery plan, Windows API experiment, and isolated test/review before any implementation.
 
 ## Later stages
 

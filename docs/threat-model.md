@@ -1,5 +1,22 @@
 # Threat model
 
+## Stage 3 additions
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Model invents a system-changing tool | Finite enums, local compiler, registered R0 manifests, independent review | Invalid output fails closed |
+| Confirmation applies to changed sampling | Plan ID and complete canonical digest with expiry | User must read the displayed plan |
+| Process command lines expose secrets | Command lines are never requested or represented | Executable paths/usernames remain locally sensitive |
+| Uninstall command executes or leaks | Only display metadata is read; uninstall strings are absent | Registry metadata may be stale |
+| Query becomes mutation | `KEY_READ` and SCM enumerate/query handles; no mutation API registered | Library defects remain possible |
+| One access error hides other evidence | Per-collector outcomes and partial reports | Categories have different timestamps |
+| Load is called a root cause | Multi-sampling, confidence, evidence, disclaimer | Short windows can miss intermittent behavior |
+| Startup/file names inject prompts | Untrusted display data, excluded from provider payload | User may misread deceptive names |
+| Audit leaks inventory | Counts/status/timing and sanitized errors only | Original request is locally retained |
+
+Stage 4 has not started. No Stage 3 interface authorizes termination, service/startup changes,
+registry writes, uninstall, elevation, firewall changes, or arbitrary commands.
+
 ## Stage 2B additions
 
 | Threat | Boundary | Mitigation |
