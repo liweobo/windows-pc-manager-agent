@@ -102,6 +102,9 @@ once release tags are introduced.
 
 ### Fixed
 
+- Include the Stage 3 confirmation state-machine tests in the CI security-boundary
+  coverage job so the package-level 95% gate measures every confirmation module.
+
 - Pin uv 0.11.32 in CI so setup does not depend on a latest-release API lookup.
 - Prevent the file-analysis plan button's checked state from being passed to the
   goal text field as a boolean value.

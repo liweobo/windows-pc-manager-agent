@@ -41,6 +41,7 @@ jobs:
         if: matrix.python-version == '3.13'
         run: >-
           uv run pytest tests/security tests/unit/test_confirmation.py
+          tests/unit/test_system_diagnostic_confirmation.py
           tests/unit/test_rollback.py tests/unit/test_authorized_paths.py
           tests/unit/test_registry.py tests/unit/test_file_operation_models.py
           tests/unit/test_file_operation_tools.py
