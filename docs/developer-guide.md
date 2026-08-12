@@ -23,6 +23,8 @@ worker thread. Update `docs/api-reference.md` for every changed production funct
 
 ## Setup and verification
 
+CI pins uv 0.11.32 for reproducible setup; use that version when regenerating `uv.lock`.
+
 ```powershell
 uv sync --all-groups
 uv run ruff format .

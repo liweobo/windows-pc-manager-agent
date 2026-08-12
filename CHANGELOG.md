@@ -85,6 +85,7 @@ once release tags are introduced.
 
 ### Fixed
 
+- Pin uv 0.11.32 in CI so setup does not depend on a latest-release API lookup.
 - Prevent the file-analysis plan button's checked state from being passed to the
   goal text field as a boolean value.
 - Use one Windows directory-identity API for discovery and execution-time
