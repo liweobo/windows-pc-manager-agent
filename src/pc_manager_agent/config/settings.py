@@ -36,6 +36,10 @@ class AppSettings(BaseModel):
     trash_high_impact_objects: int = Field(default=100, ge=1)
     trash_high_impact_bytes: int = Field(default=10 * 1024**3, ge=1)
     trash_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
+    diagnostic_sample_count: int = Field(default=3, ge=2, le=10)
+    diagnostic_sample_interval_seconds: float = Field(default=1.5, ge=0.1, le=2.0)
+    diagnostic_max_processes: int = Field(default=500, ge=1, le=2_000)
+    diagnostic_max_items: int = Field(default=5_000, ge=1, le=20_000)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -89,6 +93,12 @@ class AppSettings(BaseModel):
             "trash_runtime_confirmation_ttl_seconds": os.getenv(
                 "PC_MANAGER_TRASH_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
             ),
+            "diagnostic_sample_count": os.getenv("PC_MANAGER_DIAGNOSTIC_SAMPLE_COUNT", "3"),
+            "diagnostic_sample_interval_seconds": os.getenv(
+                "PC_MANAGER_DIAGNOSTIC_SAMPLE_INTERVAL_SECONDS", "1.5"
+            ),
+            "diagnostic_max_processes": os.getenv("PC_MANAGER_DIAGNOSTIC_MAX_PROCESSES", "500"),
+            "diagnostic_max_items": os.getenv("PC_MANAGER_DIAGNOSTIC_MAX_ITEMS", "5000"),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
         if data_directory:

@@ -20,6 +20,13 @@ from pc_manager_agent.domain.file_operations import (
     RenameRuleType,
 )
 from pc_manager_agent.domain.plans import TaskPlan
+from pc_manager_agent.domain.system_diagnostics import (
+    DiagnosticCategory,
+    DiagnosticIntent,
+    DiagnosticIntentDraft,
+    FindingSeverity,
+    SystemCollector,
+)
 
 
 class PlannerRequest(BaseModel):
@@ -132,6 +139,82 @@ class ProviderNarrativeResult(BaseModel):
     request_id: str | None = None
 
 
+class DiagnosticPlannerRequest(BaseModel):
+    """Minimal Stage 3 planner payload with no local system snapshot or path."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    user_goal: str = Field(min_length=1, max_length=2_000)
+    allowed_intents: tuple[DiagnosticIntent, ...]
+    allowed_collectors: tuple[SystemCollector, ...]
+
+
+class ProviderDiagnosticIntentResult(BaseModel):
+    """Validated but untrusted diagnostic intent with provider trace metadata."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    intent: DiagnosticIntentDraft
+    provider: str
+    request_id: str | None = None
+
+
+class DiagnosticExplanationFinding(BaseModel):
+    """Path-free and process-free deterministic finding offered for explanation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    code: str = Field(min_length=1, max_length=100)
+    category: DiagnosticCategory
+    severity: FindingSeverity
+    title: str = Field(min_length=1, max_length=300)
+    evidence_fields: tuple[str, ...]
+
+
+class DiagnosticExplanationRequest(BaseModel):
+    """Minimal finding metadata proposed for optional external explanation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    intent: DiagnosticIntent
+    findings: tuple[DiagnosticExplanationFinding, ...] = Field(max_length=20)
+
+
+class DiagnosticNarrativeObservation(BaseModel):
+    """Qualitative provider explanation bound to one deterministic finding code."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    finding_code: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=1_000)
+
+    @field_validator("text")
+    @classmethod
+    def reject_numeric_claims(cls, value: str) -> str:
+        """Prevent the provider from inventing or restating measured numbers."""
+        if any(character.isdigit() for character in value):
+            raise ValueError("Provider diagnostic explanation must not contain numeric claims")
+        return value
+
+
+class DiagnosticNarrativeDraft(BaseModel):
+    """Bounded qualitative Stage 3 explanation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    observations: tuple[DiagnosticNarrativeObservation, ...] = Field(max_length=20)
+
+
+class ProviderDiagnosticNarrativeResult(BaseModel):
+    """Validated diagnostic narrative with provider trace metadata."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    narrative: DiagnosticNarrativeDraft
+    provider: str
+    request_id: str | None = None
+
+
 class LLMProvider(ABC):
     """Replaceable structured planner interface."""
 
@@ -165,4 +248,18 @@ class LLMProvider(ABC):
         request: AnalysisExplanationRequest,
     ) -> ProviderNarrativeResult:
         """Return qualitative observations about aggregate-only measured results."""
+        raise NotImplementedError
+
+    async def create_diagnostic_intent(
+        self,
+        request: DiagnosticPlannerRequest,
+    ) -> ProviderDiagnosticIntentResult:
+        """Return a finite untrusted Stage 3 intent that needs local compilation."""
+        raise NotImplementedError
+
+    async def explain_system_diagnostics(
+        self,
+        request: DiagnosticExplanationRequest,
+    ) -> ProviderDiagnosticNarrativeResult:
+        """Return qualitative path-free explanations bound to local finding codes."""
         raise NotImplementedError

@@ -1,5 +1,26 @@
 # Windows PC Manager Agent
 
+## Stage 3：Windows 系统状态只读诊断
+
+当前分支在已有 Stage 0–2B 基础上加入 Stage 3。应用可以在普通用户权限下查看：
+
+- Windows 版本、构建号、架构、处理器型号和启动时间；
+- 多次采样的 CPU、物理内存与页面文件状态；
+- 本地固定磁盘容量；
+- 进程名称、PID、资源使用和有限元数据（明确不采集完整命令行）；
+- HKCU/HKLM Run 项与用户/公共 Startup 文件夹；
+- Windows 服务的只读状态和查询型配置；
+- HKCU/HKLM 卸载注册表中的已安装软件清单（不读取或执行卸载命令）；
+- 基于公开阈值的保守观察、可信度、证据和非执行型建议。
+
+在“系统诊断”页输入“诊断电脑为什么卡顿”“查看启动项”或“查看已安装软件”，先检查
+结构化 R0 计划，再点击确认和执行。查询在后台线程运行，可以取消；单个采集器失败时其余
+结果仍会显示。Stage 3 没有终止进程、修改服务/启动项、卸载软件、写注册表、管理员提权、
+PowerShell、CMD、WMI 或 `Win32_Product` 能力。
+
+默认诊断无需配置模型。若启用 OpenAI，规划只可发送用户目标和固定收集器名称，解释只可
+发送不含数值和本地对象身份的发现元数据；每次外发前仍须单独确认。
+
 ## Stage 2B Windows Recycle Bin
 
 Stage 2B can move only files or directories that the user explicitly selects into the

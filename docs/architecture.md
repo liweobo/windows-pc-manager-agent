@@ -1,5 +1,44 @@
 # Architecture
 
+## Stage 3 read-only system diagnostics
+
+Stage 3 follows the same plan-first boundaries without reusing file-operation authority:
+
+```text
+chat / system dashboard
+  -> DiagnosticPlanCompiler (finite local intent and bounded parameters)
+  -> DiagnosticSafetyValidator (registered R0 manifests and exact schemas)
+  -> DiagnosticConfirmationService (plan ID + canonical digest + expiry)
+  -> DiagnosticOrchestrator -> ToolRegistry
+       system.info / cpu / memory / disks / processes / startup / services / software
+  -> WindowsSystemDiagnosticsPlatform (query-only APIs)
+  -> SystemSnapshotService (explicit partial failures)
+  -> DiagnosticEngine (published thresholds and deterministic evidence)
+  -> DiagnosticReport / dashboard / minimized audit
+```
+
+`domain.system_diagnostics` has no Qt, OpenAI, pywin32, or `psutil` dependency. The eight
+tool classes validate schemas and delegate to `SystemDiagnosticsPlatform`, allowing core
+tests to use a deterministic fake. Windows implementation uses `psutil`, read-only `winreg`,
+`GetDriveTypeW`, and query-only Service Control Manager handles. It does not spawn a
+subprocess and does not use PowerShell, CMD, WMI, `Win32_Product`, service control, process
+termination, registry writes, or uninstall APIs.
+
+CPU and process resource usage are sampled across a bounded interval. Up to four independent
+R0 collectors run concurrently after write-ahead audit so sampling waits can overlap query
+latency; results and audit completion records are restored to plan order. Each result has its
+own status, item count, warnings, duration, and sanitized error, so one failed collector does
+not erase successful independent results. The Qt worker owns a cooperative cancellation token.
+Stage 3 currently does not cache inventories: every explicit execution refreshes all selected
+collectors and the dashboard labels the new snapshot time. This avoids presenting stale data
+as current until a persistent cache with explicit refresh/invalidation semantics is designed.
+
+The optional model has two narrow contracts. Planning sends only the user goal and finite
+intent/collector allow-lists; local compilation remains authoritative. Explanation sends only
+finding code/category/severity/title and evidence field names—never measurements, paths,
+process/service/software identities, startup commands, or inventory records. Both network
+calls use the existing digest-bound external-data confirmation.
+
 ## Stage 2B R2 Recycle Bin boundary
 
 Stage 2B is deliberately parallel to, rather than hidden inside, the Stage 2A R1 service:

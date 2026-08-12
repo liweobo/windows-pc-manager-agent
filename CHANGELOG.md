@@ -7,6 +7,16 @@ once release tags are introduced.
 
 ### Added
 
+- Stage 3 R0 Windows diagnostics for system identity, multi-sample CPU, memory,
+  local fixed disks, processes, startup entries, services, and installed-software
+  registry records behind registered tools and exact plan confirmation.
+- A partial-result `SystemSnapshot`, deterministic threshold engine, conservative
+  findings/actions, privacy-minimized audit trail, and cancellable background dashboard.
+- Provider-neutral diagnostic intent/explanation contracts whose external payloads
+  exclude measurements, paths, process/service/software identities, and commands.
+- Unit, integration, security, GUI, performance, and real-Windows query-only tests for
+  Stage 3, plus a detailed function-level API reference.
+
 - Secure stage 0 Windows desktop and tray foundation.
 - Replaceable LLM provider contract and OpenAI Responses API adapter.
 - Structured plans, risk review, registered-tool execution, confirmation, audit,
@@ -59,6 +69,13 @@ once release tags are introduced.
   positive recycle evidence remains mandatory.
 
 ### Security
+
+- Stage 3 never collects process command lines or uninstall commands and has no process,
+  service, startup, registry, software, elevation, shell, WMI, or system mutation tool.
+- Diagnostic model output is finite untrusted intent only; local compilation, registered
+  R0 manifests, independent review, digest-bound confirmation, and execution-time review
+  remain authoritative. Audit stores collector names, counts, state, warnings, and timing,
+  not raw inventories.
 
 - Default-deny protected paths, path traversal, symlink, junction, and reparse
   point handling.
