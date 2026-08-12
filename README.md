@@ -1,5 +1,25 @@
 # Windows PC Manager Agent
 
+## Stage 2B Windows Recycle Bin
+
+Stage 2B can move only files or directories that the user explicitly selects into the
+Windows Recycle Bin. It uses a separate R2 workflow:
+
+1. local deterministic plan from checked paths;
+2. protected-path, volume-capability, identity, and full directory-tree Preview;
+3. first plan confirmation;
+4. fresh revalidation and a second short-lived immediate confirmation;
+5. write-ahead MANUAL recovery record;
+6. one-item Windows `IFileOperation` call and callback verification;
+7. transaction/audit result plus manual Restore instructions.
+
+The application has no permanent-delete or empty-Recycle-Bin tool. It blocks system and
+application-data roots, an authorized root itself, reparse/system/offline objects,
+network/removable/unknown volumes, and stale or overlapping selections. The initial
+release accepts only the Windows system volume when it is writable fixed NTFS and its
+Recycle Bin is queryable. Recovery is truthfully marked MANUAL; there is no automatic
+restore claim.
+
 面向个人用户的 Windows 11 电脑管理 Agent。项目采用“先计划、再审查、再确认、
 后执行”的安全边界；大模型只能生成结构化计划，不能直接操作电脑。
 

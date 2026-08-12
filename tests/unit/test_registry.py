@@ -104,6 +104,29 @@ def test_manifest_rejects_invalid_or_contradictory_metadata() -> None:
         ToolManifest(name="test.write", **{**base, "read_only": False})
     with pytest.raises(ValueError, match="positive"):
         ToolManifest(name="test.zero", **{**base, "timeout_seconds": 0})
+    with pytest.raises(ValueError, match="R2"):
+        ToolManifest(
+            name="test.r2-without-runtime-confirmation",
+            **{
+                **base,
+                "risk_level": RiskLevel.R2,
+                "read_only": False,
+                "rollback_level": RollbackLevel.MANUAL,
+                "supports_preview": True,
+            },
+        )
+    with pytest.raises(ValueError, match="reserved for R2"):
+        ToolManifest(
+            name="test.r1-runtime-confirmation",
+            **{
+                **base,
+                "risk_level": RiskLevel.R1,
+                "read_only": False,
+                "rollback_level": RollbackLevel.FULL,
+                "supports_preview": True,
+                "requires_runtime_confirmation": True,
+            },
+        )
 
 
 def test_cancellation_token() -> None:

@@ -1,5 +1,26 @@
 # Developer guide
 
+## Stage 2B development checks
+
+Stage 2B code is split across `domain/trash.py`, `safety/trash_*`,
+`confirmation/trash.py`, `orchestration/trash_*`, `tools/file_tools/trash.py`,
+`platform_support/windows/recycle_bin.py`, `recovery/`, persistence/audit, and the GUI.
+Do not reuse R1 FULL Undo models to represent Recycle Bin behavior.
+
+Run the focused tests before the full suite:
+
+```powershell
+uv run pytest tests/unit/test_trash_models.py tests/unit/test_trash_confirmation.py -q
+uv run pytest tests/security/test_trash_safety.py -q
+uv run pytest tests/integration/test_trash_flow.py tests/integration/test_trash_recovery.py -q
+uv run pytest tests/gui/test_trash_tab.py -q
+```
+
+Real integration may use only uniquely named files created by the test itself. Never point
+a test at existing user data. A new platform adapter must expose positive recycle evidence,
+must not fall back to `SHFileOperation` or filesystem deletion, and must keep COM on an STA
+worker thread. Update `docs/api-reference.md` for every changed production function.
+
 ## Setup and verification
 
 ```powershell
@@ -16,8 +37,19 @@ uv build
 uv run python -m pc_manager_agent --smoke-test
 ```
 
-Tests create temporary local trees and SQLite databases. They do not modify real user
-files or contact OpenAI. Qt runs offscreen. The benchmark creates 10,000 empty synthetic
+真实回收站探针默认跳过，因为它会把测试自己创建的微小临时文本放进当前用户回收站。只应在
+一次性 Windows CI 主机或明确接受该测试副作用的环境中运行：
+
+```powershell
+$env:PC_MANAGER_RUN_REAL_RECYCLE_TEST = "1"
+uv run pytest tests/integration/test_windows_recycle_bin_real.py -q
+```
+
+CI 在临时 Windows runner 上执行该探针，并要求 Shell 回收标志、新回收站项标识和源路径消失
+全部成立。
+
+除显式启用的真实回收站探针外，tests create temporary local trees and SQLite databases.
+They do not modify real user files or contact OpenAI. Qt runs offscreen. The benchmark creates 10,000 empty synthetic
 files, streams metadata to SQLite, and enforces broad time/memory regression ceilings.
 
 The CI safety command separately measures path policy, authorization, confirmation,

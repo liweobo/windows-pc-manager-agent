@@ -28,6 +28,7 @@ from pc_manager_agent.domain.transactions import (
     TransactionState,
 )
 from pc_manager_agent.persistence.database import create_sqlite_engine
+from pc_manager_agent.recovery.models import RecoveryStatus, TrashRecoveryRecord
 from pc_manager_agent.rollback.models import UndoRecord, UndoStatus
 from pc_manager_agent.tools.execution import (
     ExecutionAuthorization,
@@ -115,9 +116,44 @@ class UndoRecordRow(OperationBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class TransactionConfirmationRow(OperationBase):
+    """Additive record for either level of a Stage 2B R2 confirmation."""
+
+    __tablename__ = "transaction_confirmation_records"
+
+    confirmation_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    transaction_id: Mapped[str] = mapped_column(String(36), index=True)
+    tier: Mapped[str] = mapped_column(String(20))
+    state: Mapped[str] = mapped_column(String(20))
+    binding_digest: Mapped[str] = mapped_column(String(64))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TrashRecoveryRow(OperationBase):
+    """Write-ahead MANUAL recovery evidence for one Stage 2B item."""
+
+    __tablename__ = "trash_recovery_records"
+
+    recovery_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    transaction_id: Mapped[str] = mapped_column(String(36), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    record_digest: Mapped[str] = mapped_column(String(64))
+    recovery_data: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 _ALLOWED_TRANSITIONS: dict[TransactionState, frozenset[TransactionState]] = {
     TransactionState.PREVIEWED: frozenset({TransactionState.AWAITING_CONFIRMATION}),
     TransactionState.AWAITING_CONFIRMATION: frozenset(
+        {
+            TransactionState.CONFIRMED,
+            TransactionState.AWAITING_RUNTIME_CONFIRMATION,
+            TransactionState.CANCELLED,
+        }
+    ),
+    TransactionState.AWAITING_RUNTIME_CONFIRMATION: frozenset(
         {TransactionState.CONFIRMED, TransactionState.CANCELLED}
     ),
     TransactionState.CONFIRMED: frozenset({TransactionState.RUNNING, TransactionState.CANCELLED}),
@@ -126,6 +162,7 @@ _ALLOWED_TRANSITIONS: dict[TransactionState, frozenset[TransactionState]] = {
             TransactionState.COMPLETED,
             TransactionState.PARTIALLY_COMPLETED,
             TransactionState.FAILED,
+            TransactionState.UNKNOWN,
             TransactionState.CANCELLED,
             TransactionState.INTERRUPTED,
         }
@@ -168,6 +205,7 @@ class OperationRepository:
                                 (
                                     TransactionState.PREVIEWED.value,
                                     TransactionState.AWAITING_CONFIRMATION.value,
+                                    TransactionState.AWAITING_RUNTIME_CONFIRMATION.value,
                                     TransactionState.CONFIRMED.value,
                                     TransactionState.RUNNING.value,
                                     TransactionState.ROLLING_BACK.value,
@@ -185,6 +223,7 @@ class OperationRepository:
                     }:
                         row.state = TransactionState.INTERRUPTED.value
                         interrupted.append(UUID(row.transaction_id))
+                        self._mark_running_trash_unknown(session, row.transaction_id, current)
                     else:
                         # Preview/confirmation tokens are intentionally memory-only and
                         # cannot be trusted after restart. Cancel them rather than leave a
@@ -347,6 +386,243 @@ class OperationRepository:
         except SQLAlchemyError as exc:
             raise OperationStoreError("Operation write-ahead persistence failed") from exc
         return self.get_item(operation_id)
+
+    def create_trash_from_preview(
+        self,
+        plan: object,
+        preview: object,
+        argument_payloads: Mapping[UUID, Mapping[str, JsonValue]],
+    ) -> OperationTransaction:
+        """Persist a Stage 2B plan using shared transactions and source-only item routing."""
+        from pc_manager_agent.domain.trash import TrashPlan, TrashPreview, TrashPreviewStatus
+
+        typed_plan = TrashPlan.model_validate(plan)
+        typed_preview = TrashPreview.model_validate(preview)
+        self._require_initialized()
+        if (
+            typed_preview.plan_id != typed_plan.plan_id
+            or typed_preview.plan_digest != typed_plan.canonical_digest()
+        ):
+            raise OperationStoreError("Cannot persist a trash Preview that does not match its plan")
+        item_by_id = {item.operation_id: item for item in typed_plan.items}
+        if set(item_by_id) != set(argument_payloads):
+            raise OperationStoreError("Trash argument reservations do not match all items")
+        transaction = OperationTransaction(
+            transaction_id=typed_preview.transaction_id,
+            plan_id=typed_plan.plan_id,
+            preview_id=typed_preview.preview_id,
+            plan_digest=typed_plan.canonical_digest(),
+            preview_digest=typed_preview.canonical_digest(),
+            state=TransactionState.PREVIEWED,
+            operation_count=len(typed_preview.items),
+            ready_count=typed_preview.ready_count,
+            skipped_count=typed_preview.blocked_count,
+        )
+        rows = []
+        for preview_item in typed_preview.items:
+            planned = item_by_id[preview_item.operation_id]
+            payload = argument_payloads[planned.operation_id]
+            rows.append(
+                OperationItemRow(
+                    operation_id=str(planned.operation_id),
+                    transaction_id=str(typed_preview.transaction_id),
+                    sequence=planned.sequence,
+                    operation_type=planned.operation_type.value,
+                    tool_name=planned.tool_name,
+                    source=str(planned.source),
+                    # Existing Stage 2A schema requires a destination reservation. For a
+                    # source-only trash operation, the exact source is its unique subject.
+                    destination=str(planned.source),
+                    state=(
+                        OperationItemState.PENDING.value
+                        if preview_item.status is TrashPreviewStatus.READY
+                        else OperationItemState.SKIPPED.value
+                    ),
+                    arguments_digest=arguments_digest(payload),
+                    rollback_tool_name=None,
+                    rollback_arguments_digest=None,
+                    operation_data=planned.model_dump(mode="json"),
+                    preview_data=preview_item.model_dump(mode="json"),
+                    error_code=None,
+                    error_message=None,
+                    started_at=None,
+                    completed_at=None,
+                )
+            )
+        try:
+            with self._sessions.begin() as session:
+                session.add(self._transaction_to_row(transaction))
+                session.flush()
+                session.add_all(rows)
+        except IntegrityError as exc:
+            raise OperationStoreError("Trash source or identity reservation collided") from exc
+        except SQLAlchemyError as exc:
+            raise OperationStoreError("Trash Preview persistence failed") from exc
+        return transaction
+
+    def record_confirmation(
+        self,
+        transaction_id: UUID,
+        *,
+        confirmation_id: UUID,
+        tier: str,
+        state: str,
+        binding_digest: str,
+        confirmed_at: datetime | None,
+    ) -> None:
+        """Persist each R2 confirmation independently without weakening R1 schema."""
+        self._require_initialized()
+        try:
+            with self._sessions.begin() as session:
+                row = session.get(TransactionConfirmationRow, str(confirmation_id))
+                if row is None:
+                    session.add(
+                        TransactionConfirmationRow(
+                            confirmation_id=str(confirmation_id),
+                            transaction_id=str(transaction_id),
+                            tier=tier,
+                            state=state,
+                            binding_digest=binding_digest,
+                            confirmed_at=confirmed_at,
+                        )
+                    )
+                else:
+                    if row.transaction_id != str(transaction_id) or row.tier != tier:
+                        raise OperationStoreError("Confirmation record binding changed")
+                    row.state = state
+                    row.binding_digest = binding_digest
+                    row.confirmed_at = confirmed_at
+        except OperationStoreError:
+            raise
+        except SQLAlchemyError as exc:
+            raise OperationStoreError("Confirmation persistence failed") from exc
+
+    def begin_trash_operation(
+        self,
+        transaction_id: UUID,
+        operation_id: UUID,
+        recovery: TrashRecoveryRecord,
+    ) -> TransactionItem:
+        """Persist PREPARED MANUAL recovery evidence before the Shell call."""
+        self._require_initialized()
+        if recovery.transaction_id != transaction_id or recovery.operation_id != operation_id:
+            raise OperationStoreError("Trash recovery record does not match the item")
+        try:
+            with self._sessions.begin() as session:
+                transaction = session.get(OperationTransactionRow, str(transaction_id))
+                item = session.get(OperationItemRow, str(operation_id))
+                if transaction is None or item is None:
+                    raise OperationStoreError("Unknown trash transaction item")
+                if transaction.state != TransactionState.RUNNING.value:
+                    raise OperationStoreError("Trash transaction is not RUNNING")
+                if item.state != OperationItemState.PENDING.value:
+                    raise OperationStoreError("Trash item is not PENDING")
+                item.state = OperationItemState.RUNNING.value
+                item.started_at = datetime.now(UTC)
+                session.add(
+                    TrashRecoveryRow(
+                        recovery_id=str(recovery.recovery_id),
+                        operation_id=str(operation_id),
+                        transaction_id=str(transaction_id),
+                        sequence=recovery.sequence,
+                        status=recovery.status.value,
+                        record_digest=recovery.canonical_digest(),
+                        recovery_data=recovery.model_dump(mode="json"),
+                        created_at=recovery.prepared_at,
+                    )
+                )
+        except OperationStoreError:
+            raise
+        except IntegrityError as exc:
+            raise OperationStoreError("Trash recovery write-ahead record already exists") from exc
+        except SQLAlchemyError as exc:
+            raise OperationStoreError("Trash write-ahead persistence failed") from exc
+        return self.get_item(operation_id)
+
+    def complete_trash_operation(
+        self,
+        operation_id: UUID,
+        recovery: TrashRecoveryRecord,
+    ) -> tuple[TransactionItem, TrashRecoveryRecord]:
+        """Finalize verified recycle evidence or UNKNOWN outcome atomically."""
+        self._require_initialized()
+        try:
+            with self._sessions.begin() as session:
+                item = session.get(OperationItemRow, str(operation_id))
+                row = session.scalar(
+                    select(TrashRecoveryRow).where(
+                        TrashRecoveryRow.operation_id == str(operation_id)
+                    )
+                )
+                if item is None or row is None or item.state != OperationItemState.RUNNING.value:
+                    raise OperationStoreError("Running trash item or recovery record is missing")
+                if recovery.operation_id != operation_id or recovery.recovery_id != UUID(
+                    row.recovery_id
+                ):
+                    raise OperationStoreError("Final trash recovery identity changed")
+                if recovery.status is RecoveryStatus.AVAILABLE:
+                    item.state = OperationItemState.COMPLETED.value
+                elif recovery.status is RecoveryStatus.UNKNOWN:
+                    item.state = OperationItemState.UNKNOWN.value
+                else:
+                    item.state = OperationItemState.FAILED.value
+                item.completed_at = datetime.now(UTC)
+                row.status = recovery.status.value
+                row.recovery_data = recovery.model_dump(mode="json")
+                row.record_digest = recovery.canonical_digest()
+                transaction = session.get(OperationTransactionRow, item.transaction_id)
+                if transaction is None:
+                    raise OperationStoreError("Trash transaction is missing")
+                if item.state == OperationItemState.COMPLETED.value:
+                    transaction.completed_count += 1
+                else:
+                    transaction.failed_count += 1
+                transaction.updated_at = datetime.now(UTC)
+        except OperationStoreError:
+            raise
+        except SQLAlchemyError as exc:
+            raise OperationStoreError("Trash completion persistence failed") from exc
+        return self.get_item(operation_id), self.get_recovery(operation_id)
+
+    def get_recovery(self, operation_id: UUID) -> TrashRecoveryRecord:
+        """Return one integrity-checked MANUAL recovery record."""
+        self._require_initialized()
+        try:
+            with self._sessions() as session:
+                row = session.scalar(
+                    select(TrashRecoveryRow).where(
+                        TrashRecoveryRow.operation_id == str(operation_id)
+                    )
+                )
+        except SQLAlchemyError as exc:
+            raise OperationStoreError("Trash recovery lookup failed") from exc
+        if row is None:
+            raise OperationStoreError("Trash recovery record is missing")
+        record = TrashRecoveryRecord.model_validate(row.recovery_data)
+        if record.canonical_digest() != row.record_digest:
+            raise OperationStoreError("Trash recovery record integrity check failed")
+        return record
+
+    def list_recovery(self, transaction_id: UUID) -> tuple[TrashRecoveryRecord, ...]:
+        """Return recovery records in original execution order."""
+        self._require_initialized()
+        statement = (
+            select(TrashRecoveryRow)
+            .where(TrashRecoveryRow.transaction_id == str(transaction_id))
+            .order_by(TrashRecoveryRow.sequence)
+        )
+        try:
+            with self._sessions() as session:
+                rows = tuple(session.scalars(statement))
+        except SQLAlchemyError as exc:
+            raise OperationStoreError("Trash recovery query failed") from exc
+        records = []
+        for row in rows:
+            record = TrashRecoveryRecord.model_validate(row.recovery_data)
+            if record.canonical_digest() != row.record_digest:
+                raise OperationStoreError("Trash recovery record integrity check failed")
+            records.append(record)
+        return tuple(records)
 
     def complete_operation(
         self,
@@ -600,6 +876,7 @@ class OperationRepository:
             or transaction.plan_id != authorization.plan_id
             or transaction.preview_id != authorization.preview_id
             or authorization.arguments_digest != arguments_digest(argument_payload)
+            or (tool_name == "file.trash" and authorization.runtime_confirmation_id is None)
         ):
             raise OperationStoreError("Write execution authorization is stale or mismatched")
         try:
@@ -620,6 +897,29 @@ class OperationRepository:
                     or expected_tool != tool_name
                 ):
                     raise OperationStoreError("Write argument reservation changed")
+                if tool_name == "file.trash":
+                    runtime_confirmation = session.get(
+                        TransactionConfirmationRow,
+                        str(authorization.runtime_confirmation_id),
+                    )
+                    plan_confirmation = session.scalar(
+                        select(TransactionConfirmationRow).where(
+                            TransactionConfirmationRow.transaction_id
+                            == str(authorization.transaction_id),
+                            TransactionConfirmationRow.tier == "PLAN",
+                            TransactionConfirmationRow.state == "APPROVED",
+                        )
+                    )
+                    if (
+                        runtime_confirmation is None
+                        or runtime_confirmation.transaction_id != str(authorization.transaction_id)
+                        or runtime_confirmation.tier != "RUNTIME"
+                        or runtime_confirmation.state != "CONSUMED"
+                        or plan_confirmation is None
+                    ):
+                        raise OperationStoreError(
+                            "R2 execution lacks durable plan and runtime confirmation proof"
+                        )
         except SQLAlchemyError as exc:
             raise OperationStoreError("Write authorization lookup failed") from exc
 
@@ -627,6 +927,42 @@ class OperationRepository:
         """Dispose journal connections and invalidate future operations."""
         self._engine.dispose()
         self._initialized = False
+
+    @staticmethod
+    def _mark_running_trash_unknown(
+        session: Any,
+        transaction_id: str,
+        current: datetime,
+    ) -> None:
+        """Never retry a possibly completed Shell operation after process interruption."""
+        items = tuple(
+            session.scalars(
+                select(OperationItemRow).where(
+                    OperationItemRow.transaction_id == transaction_id,
+                    OperationItemRow.tool_name == "file.trash",
+                    OperationItemRow.state == OperationItemState.RUNNING.value,
+                )
+            )
+        )
+        for item in items:
+            item.state = OperationItemState.UNKNOWN.value
+            item.error_code = "PROCESS_INTERRUPTED"
+            item.error_message = "Recycle outcome requires manual inspection after restart"
+            item.completed_at = current
+            row = session.scalar(
+                select(TrashRecoveryRow).where(TrashRecoveryRow.operation_id == item.operation_id)
+            )
+            if row is not None:
+                record = TrashRecoveryRecord.model_validate(row.recovery_data)
+                unknown = record.model_copy(
+                    update={
+                        "status": RecoveryStatus.UNKNOWN,
+                        "result_message": "Process ended while Windows Recycle Bin call was active",
+                    }
+                )
+                row.status = unknown.status.value
+                row.recovery_data = unknown.model_dump(mode="json")
+                row.record_digest = unknown.canonical_digest()
 
     def _require_initialized(self) -> None:
         if not self._initialized:

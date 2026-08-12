@@ -45,6 +45,27 @@ PREVIEWED/AWAITING_CONFIRMATION/CONFIRMED becomes CANCELLED because the one-time
 confirmation is intentionally unavailable. The history page can inspect interrupted
 records and generate a rollback Preview from whatever valid Undo records exist.
 
+## Stage 2B Recycle Bin recovery
+
+| Operation | Risk | Recovery | Valid only while |
+|---|---|---|---|
+| Move explicitly selected file/directory to Windows Recycle Bin | R2 | MANUAL | Windows Recycle Bin still contains the item |
+| Blocked or cancelled object | R2 | NONE needed | No Shell operation occurred |
+| Interrupted or ambiguous Shell result | R2 | MANUAL inspection | User checks original path and Windows Recycle Bin |
+
+`TrashRecoveryRecord` is written as PREPARED before `IFileOperation`. It stores the
+transaction/item IDs, original path, handle-based before identity, time, checksum,
+Shell callback evidence when available, verification status, and explicit manual
+instructions. VERIFIED_RECYCLED becomes AVAILABLE/MANUAL. An absent callback object,
+process interruption, or otherwise incomplete evidence becomes UNKNOWN and stops later
+items; the application never retries automatically.
+
+Stage 2B does not feed these records to `RollbackManager` and does not display a FULL Undo
+button. Recovery means opening Windows Recycle Bin, locating the object by original name
+and deletion time, and choosing Restore. If the bin was emptied or Windows cannot restore
+the original location, application recovery is unavailable. Reverting Git commits never
+restores recycled user files.
+
 ## Write-command contract
 
 Every future user-file write must implement `OperationCommand`:

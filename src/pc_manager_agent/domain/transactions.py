@@ -14,16 +14,18 @@ from pc_manager_agent.domain.plans import FrozenModel
 
 
 class TransactionState(StrEnum):
-    """Explicit lifecycle for a Stage 2A mutation transaction."""
+    """Explicit lifecycle for a durable Stage 2 file-operation transaction."""
 
     PLANNED = "PLANNED"
     PREVIEWED = "PREVIEWED"
     AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION"
+    AWAITING_RUNTIME_CONFIRMATION = "AWAITING_RUNTIME_CONFIRMATION"
     CONFIRMED = "CONFIRMED"
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     PARTIALLY_COMPLETED = "PARTIALLY_COMPLETED"
     FAILED = "FAILED"
+    UNKNOWN = "UNKNOWN"
     CANCELLED = "CANCELLED"
     INTERRUPTED = "INTERRUPTED"
     ROLLING_BACK = "ROLLING_BACK"
@@ -39,6 +41,7 @@ class OperationItemState(StrEnum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    UNKNOWN = "UNKNOWN"
     SKIPPED = "SKIPPED"
     ROLLING_BACK = "ROLLING_BACK"
     ROLLED_BACK = "ROLLED_BACK"

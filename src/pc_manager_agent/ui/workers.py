@@ -7,12 +7,13 @@ from uuid import UUID
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
-from pc_manager_agent.app.runtime import ApplicationRuntime, FileOperationServices
+from pc_manager_agent.app.runtime import ApplicationRuntime, FileOperationServices, TrashServices
 from pc_manager_agent.domain.file_analysis import FileAnalysisPlan, FileAnalysisReport
 from pc_manager_agent.domain.file_operations import FileOperationPlan
 from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.domain.reports import ScanReport
 from pc_manager_agent.domain.transactions import OperationExecutionReport, OperationTransaction
+from pc_manager_agent.domain.trash import TrashExecutionReport, TrashPlan
 from pc_manager_agent.orchestration.explanation import FileAnalysisExplainer
 from pc_manager_agent.orchestration.file_analysis_planner import (
     FileAnalysisPlanner,
@@ -20,6 +21,10 @@ from pc_manager_agent.orchestration.file_analysis_planner import (
 )
 from pc_manager_agent.orchestration.file_operation_service import PreparedFileOperation
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.orchestration.trash_service import (
+    PreparedTrashOperation,
+    RuntimeConfirmedTrashOperation,
+)
 from pc_manager_agent.rollback.manager import PreparedRollback, RollbackManager
 from pc_manager_agent.tools.manifest import CancellationToken
 
@@ -345,4 +350,67 @@ def require_operation_transaction(value: object) -> OperationTransaction:
     """Narrow a rollback transaction transported through a Qt signal."""
     if not isinstance(value, OperationTransaction):
         raise TypeError("Worker emitted an invalid rollback result")
+    return value
+
+
+class TrashPreviewWorker(QRunnable):
+    """Perform Stage 2B safety review, snapshot, persistence, and first request off UI."""
+
+    def __init__(self, services: TrashServices, plan: TrashPlan) -> None:
+        super().__init__()
+        self.signals = OperationWorkerSignals()
+        self._services = services
+        self._plan = plan
+
+    @Slot()
+    def run(self) -> None:
+        """Prepare an R2 transaction without performing a filesystem mutation."""
+        try:
+            prepared = self._services.service.prepare(self._plan)
+        except Exception as exc:
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.signals.completed.emit(prepared)
+
+
+class TrashExecutionWorker(QRunnable):
+    """Execute one twice-confirmed Stage 2B transaction away from the UI thread."""
+
+    def __init__(
+        self,
+        services: TrashServices,
+        prepared: RuntimeConfirmedTrashOperation,
+    ) -> None:
+        super().__init__()
+        self.signals = OperationWorkerSignals()
+        self.cancellation = CancellationToken()
+        self._services = services
+        self._prepared = prepared
+
+    @Slot()
+    def run(self) -> None:
+        """Run the registered Recycle Bin tool and emit a verified terminal report."""
+        try:
+            report = self._services.service.execute(self._prepared, self.cancellation)
+        except Exception as exc:
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
+        self.signals.completed.emit(report)
+
+    def cancel(self) -> None:
+        """Stop future objects without interrupting the current Shell operation."""
+        self.cancellation.cancel()
+
+
+def require_prepared_trash(value: object) -> PreparedTrashOperation:
+    """Narrow a Stage 2B prepared transaction transported through a Qt signal."""
+    if not isinstance(value, PreparedTrashOperation):
+        raise TypeError("Worker emitted an invalid trash Preview")
+    return value
+
+
+def require_trash_report(value: object) -> TrashExecutionReport:
+    """Narrow a Stage 2B execution report transported through a Qt signal."""
+    if not isinstance(value, TrashExecutionReport):
+        raise TypeError("Worker emitted an invalid trash execution report")
     return value

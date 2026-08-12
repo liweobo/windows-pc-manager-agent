@@ -27,6 +27,7 @@ def test_settings_load_and_normalize_environment(monkeypatch: pytest.MonkeyPatch
     assert settings.openai_model == "model-id"
     assert settings.scan_max_files == 12
     assert settings.scan_timeout_seconds == 4
+    assert settings.trash_runtime_confirmation_ttl_seconds == 60
 
 
 def test_settings_reject_unknown_provider_and_invalid_limit() -> None:
@@ -34,6 +35,8 @@ def test_settings_reject_unknown_provider_and_invalid_limit() -> None:
         AppSettings(llm_provider="other")
     with pytest.raises(ValidationError):
         AppSettings(scan_max_files=0)
+    with pytest.raises(ValidationError):
+        AppSettings(trash_max_selected=0)
 
 
 def test_empty_model_becomes_none() -> None:

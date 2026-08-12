@@ -59,6 +59,7 @@ class FileAnalysisTab(QWidget):
     status_message = Signal(str)
     move_selected_requested = Signal(object)
     rename_selected_requested = Signal(object)
+    trash_selected_requested = Signal(object)
 
     def __init__(self, runtime: ApplicationRuntime) -> None:
         super().__init__()
@@ -225,6 +226,7 @@ class FileAnalysisTab(QWidget):
         self.explain_button = QPushButton("生成模型说明")
         self.move_selected_button = QPushButton("移动勾选项")
         self.rename_selected_button = QPushButton("重命名勾选项")
+        self.trash_selected_button = QPushButton("移入回收站…")
         self.previous_button.clicked.connect(self._previous_page)
         self.next_button.clicked.connect(self._next_page)
         self.open_folder_button.clicked.connect(self._open_selected_folder)
@@ -232,6 +234,7 @@ class FileAnalysisTab(QWidget):
         self.explain_button.clicked.connect(self._explain_report)
         self.move_selected_button.clicked.connect(self._request_move_selected)
         self.rename_selected_button.clicked.connect(self._request_rename_selected)
+        self.trash_selected_button.clicked.connect(self._request_trash_selected)
         for button in (
             self.previous_button,
             self.next_button,
@@ -240,6 +243,7 @@ class FileAnalysisTab(QWidget):
             self.explain_button,
             self.move_selected_button,
             self.rename_selected_button,
+            self.trash_selected_button,
         ):
             button.setEnabled(False)
             page_actions.addWidget(button)
@@ -670,6 +674,7 @@ class FileAnalysisTab(QWidget):
         self.open_folder_button.setEnabled(bool(rows))
         self.move_selected_button.setEnabled(bool(rows))
         self.rename_selected_button.setEnabled(bool(rows))
+        self.trash_selected_button.setEnabled(bool(rows))
 
     @Slot()
     def _request_move_selected(self) -> None:
@@ -686,6 +691,15 @@ class FileAnalysisTab(QWidget):
             self._show_error("请先勾选准备重命名的分析结果。")
             return
         self.rename_selected_requested.emit(paths)
+
+    @Slot()
+    def _request_trash_selected(self) -> None:
+        """Forward only explicitly checked analysis results into the Stage 2B page."""
+        paths = self._checked_result_paths()
+        if not paths:
+            self._show_error("请先勾选准备移入 Windows 回收站的分析结果。")
+            return
+        self.trash_selected_requested.emit(paths)
 
     def _checked_result_paths(self) -> tuple[Path, ...]:
         """Return only explicitly checked result paths from the currently visible page."""

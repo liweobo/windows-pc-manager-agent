@@ -1,5 +1,24 @@
 # User guide
 
+## Move selected objects to Windows Recycle Bin
+
+1. Add an authorized ordinary personal directory and run file analysis, or open the
+   **Windows Recycle Bin** tab and add paths manually.
+2. Check the exact files you want. The Agent never chooses them for you.
+3. Choose **Move to Recycle Bin**, then generate the R2 Preview.
+4. Review every path, contained-object count, total bytes, hidden/system indicators,
+   blocked reasons, and the MANUAL recovery warning.
+5. Complete the first plan confirmation. Nothing is moved at this point.
+6. The application rechecks all identities and directory contents. Complete the second
+   immediate confirmation only if the displayed objects are still correct.
+7. Review the result and recovery records. To restore, open Windows Recycle Bin, locate
+   the object by original name and deletion time, right-click it, and choose **Restore**.
+
+The operation is unavailable for protected/system/application-data paths, links/junctions,
+network/removable/unknown/non-system volumes, or when Windows cannot prove Recycle Bin
+capability. The app cannot restore an item after the Recycle Bin was emptied. It never
+offers permanent deletion or clearing the Recycle Bin.
+
 ## First run
 
 1. In PowerShell, run `uv sync --all-groups`, then `uv run pc-manager-agent`.

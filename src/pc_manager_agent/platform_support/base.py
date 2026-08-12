@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Protocol
 
 from pc_manager_agent.domain.file_operations import FileState
+from pc_manager_agent.domain.trash import RecycleBinCapability, RecycleBinResult
 
 
 class SingleInstanceGuard(Protocol):
@@ -35,4 +36,16 @@ class FileOperationPlatform(Protocol):
 
     def remove_empty_directory(self, path: Path) -> None:
         """Remove exactly one empty, already revalidated directory during rollback."""
+        ...
+
+
+class RecycleBinPlatform(Protocol):
+    """OS adapter that can only request and verify Windows Recycle Bin placement."""
+
+    def capability(self, path: Path) -> RecycleBinCapability:
+        """Return a fail-closed volume and Recycle Bin capability assessment."""
+        ...
+
+    def recycle(self, path: Path) -> RecycleBinResult:
+        """Move one object to the Recycle Bin without a permanent-delete fallback."""
         ...

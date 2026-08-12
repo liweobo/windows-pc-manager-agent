@@ -25,13 +25,16 @@ from PySide6.QtWidgets import (
 )
 
 from pc_manager_agent.app.runtime import ApplicationRuntime
+from pc_manager_agent.audit.repository import AuditUnavailableError
 from pc_manager_agent.confirmation.models import ConfirmationRequest
 from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.domain.reports import ScanReport
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
+from pc_manager_agent.ui.trash_tab import TrashTab
 from pc_manager_agent.ui.workers import ScanWorker, require_scan_report
 
 
@@ -47,13 +50,14 @@ class MainWindow(QMainWindow):
         self._worker: ScanWorker | None = None
         self._tray: SystemTrayController | None = None
         self._quitting = False
-        self.setWindowTitle("Windows PC Manager Agent — Stage 2A 安全文件操作")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 2B 回收站安全操作")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
         self._build_chat_tab()
         self._build_analysis_tab()
         self._build_operation_tab()
+        self._build_trash_tab()
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
@@ -68,7 +72,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         self._conversation = QTextBrowser()
         self._conversation.setPlainText(
-            "Agent：当前支持阶段 1 只读分析和 Stage 2A 安全移动/重命名/回滚。\n"
+            "Agent：当前支持阶段 1 只读分析、Stage 2A 安全移动/重命名/回滚，"
+            "以及 Stage 2B 双确认回收站操作。\n"
             "聊天不会直接执行系统操作；所有写操作都要经过真实 Preview 和明确确认。"
         )
         input_row = QHBoxLayout()
@@ -156,6 +161,13 @@ class MainWindow(QMainWindow):
         self._analysis_tab.rename_selected_requested.connect(self._open_rename_for_paths)
         self._tabs.addTab(self._operation_tab, "安全文件操作")
 
+    def _build_trash_tab(self) -> None:
+        """Attach the independent R2 Preview and two-confirmation workflow."""
+        self._trash_tab = TrashTab(self._runtime)
+        self._trash_tab.status_message.connect(self.statusBar().showMessage)
+        self._analysis_tab.trash_selected_requested.connect(self._open_trash_for_paths)
+        self._tabs.addTab(self._trash_tab, "Windows 回收站")
+
     def _build_audit_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -184,7 +196,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(
             QLabel("Stage 2A 仅支持已授权目录内的同卷移动、同父重命名、mkdir 和回滚。")
         )
-        layout.addWidget(QLabel("不覆盖、不跨卷、不进回收站、不永久删除、不执行系统修改。"))
+        layout.addWidget(QLabel("Stage 2B 仅支持双确认后移入 Windows 回收站；恢复能力为 MANUAL。"))
+        layout.addWidget(QLabel("不覆盖、不跨卷、不永久删除、不执行系统修改。"))
         layout.addStretch(1)
         self._tabs.addTab(page, "设置")
 
@@ -195,6 +208,28 @@ class MainWindow(QMainWindow):
             return
         self._conversation.append(f"你：{text}")
         self._chat_input.clear()
+        trash_intent = classify_trash_intent(text)
+        if trash_intent is TrashIntentDecision.PROHIBITED_PERMANENT_DELETE:
+            reason = "R4/MVP prohibits permanent deletion, Recycle Bin bypass, and emptying"
+            try:
+                self._runtime.audit_prohibited_request(text, reason)
+            except AuditUnavailableError:
+                self.statusBar().showMessage(
+                    "永久删除请求已拒绝；审计数据库不可用，请停止写操作并检查本地数据"
+                )
+            self._conversation.append(
+                "Agent：已拒绝永久删除、跳过或清空回收站请求。Stage 2B 只允许将你明确选择的对象"
+                "移入 Windows 回收站，并要求两次确认。"
+            )
+            self.statusBar().showMessage("R4/MVP 禁止：永久删除能力未注册，未执行任何操作")
+            return
+        if trash_intent is TrashIntentDecision.RECYCLE_BIN:
+            self._tabs.setCurrentWidget(self._trash_tab)
+            self._conversation.append(
+                "Agent：已转到 Windows 回收站页面。模型不会选择对象；请在文件分析结果中勾选，"
+                "或在该页面手动添加对象，然后生成 R2 Preview 并完成两次确认。"
+            )
+            return
         operation_terms = ("移动", "重命名", "改名", "整理", "撤销", "回滚")
         if any(term in text for term in operation_terms):
             self._tabs.setCurrentWidget(self._operation_tab)
@@ -246,6 +281,18 @@ class MainWindow(QMainWindow):
         self._operation_tab.set_sources(paths)
         self._tabs.setCurrentWidget(self._operation_tab)
         self.statusBar().showMessage("已传入勾选结果；选择有限规则并生成重命名 Preview")
+
+    @Slot(object)
+    def _open_trash_for_paths(self, value: object) -> None:
+        """Transfer only explicitly checked analysis paths into the R2 page."""
+        paths = (
+            tuple(path for path in value if isinstance(path, Path))
+            if isinstance(value, tuple)
+            else ()
+        )
+        self._trash_tab.set_sources(paths)
+        self._tabs.setCurrentWidget(self._trash_tab)
+        self.statusBar().showMessage("已传入明确勾选对象；请生成 R2 Preview 并完成两次确认")
 
     @Slot()
     def _choose_directory(self) -> None:
@@ -418,6 +465,7 @@ class MainWindow(QMainWindow):
         """Request cancellation and wait a bounded time for workers."""
         self._analysis_tab.shutdown()
         self._operation_tab.shutdown()
+        self._trash_tab.shutdown()
         if self._worker:
             self._worker.cancel()
         QThreadPool.globalInstance().waitForDone(5_000)

@@ -17,13 +17,15 @@ from pc_manager_agent.domain.risk import RiskLevel, RollbackLevel
 
 
 class OperationType(StrEnum):
-    """Allow-listed Stage 2A filesystem mutation types."""
+    """Allow-listed filesystem mutation types persisted in the shared journal."""
 
     CREATE_DIRECTORY = "CREATE_DIRECTORY"
     MOVE_FILE = "MOVE_FILE"
     MOVE_DIRECTORY = "MOVE_DIRECTORY"
     RENAME_FILE = "RENAME_FILE"
     RENAME_DIRECTORY = "RENAME_DIRECTORY"
+    RECYCLE_FILE = "RECYCLE_FILE"
+    RECYCLE_DIRECTORY = "RECYCLE_DIRECTORY"
 
 
 class FileObjectKind(StrEnum):
@@ -209,7 +211,12 @@ class PlannedFileOperation(FrozenModel):
                 raise ValueError("CREATE_DIRECTORY cannot have a source")
             if self.tool_name != "file.mkdir":
                 raise ValueError("CREATE_DIRECTORY must use file.mkdir")
-        else:
+        elif self.operation_type in {
+            OperationType.MOVE_FILE,
+            OperationType.MOVE_DIRECTORY,
+            OperationType.RENAME_FILE,
+            OperationType.RENAME_DIRECTORY,
+        }:
             if self.source is None or self.expected_source_state is None:
                 raise ValueError("Move and rename operations require source identity")
             expected_tool = (
@@ -220,6 +227,8 @@ class PlannedFileOperation(FrozenModel):
             )
             if self.tool_name != expected_tool:
                 raise ValueError(f"{self.operation_type.value} must use {expected_tool}")
+        else:
+            raise ValueError("Recycle-bin operations use the separate R2 TrashPlan model")
         return self
 
 

@@ -28,6 +28,7 @@ class ExecutionAuthorization(FrozenModel):
     preview_id: UUID
     tool_name: str = Field(pattern=r"^[a-z][a-z0-9_.-]+$")
     arguments_digest: str = Field(min_length=64, max_length=64)
+    runtime_confirmation_id: UUID | None = None
 
 
 class WriteExecutionGuard(Protocol):

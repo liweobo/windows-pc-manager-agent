@@ -1,5 +1,401 @@
 # API reference
 
+## Stage 2B Windows Recycle Bin API（新增）
+
+本节逐项说明 Stage 2B 新增或扩展的生产函数。所有路径均为不可信输入；只有
+`TrashService.execute` 在两级确认、SQLite 证明和执行前复验全部通过后才可能调用
+Windows Shell。
+
+### `domain.trash._digest_model(value)`
+
+把不可变 Pydantic 模型按键排序并序列化为 JSON，再计算 SHA-256。用于绑定计划、
+Preview、确认与恢复记录；不读取文件。序列化失败会传播异常。
+
+### `RecycleBinCapability.validate_capability()`
+
+校验卷能力声明。`available=True` 只有在本地固定、可写、非热插拔、NTFS 且回收站查询
+成功时合法；不可用结论必须带原因，防止适配器用含糊的“可用”绕过安全层。
+
+### `TrashPlanItem.validate_item()`
+
+确保文件使用 `RECYCLE_FILE`、目录使用 `RECYCLE_DIRECTORY`，源路径等于身份快照路径，
+工具固定为 `file.trash`，恢复等级固定为 MANUAL。
+
+### `TrashPlan.validate_plan()` / `TrashPlan.canonical_digest()`
+
+前者要求至少一个授权根和明确对象、R2、计划确认、即时确认、MANUAL 恢复、连续顺序以及
+唯一对象/路径。后者生成包含全部执行字段的稳定摘要；计划任一变化都会改变摘要。
+
+### `TrashObjectSnapshot.canonical_digest()`
+
+散列根身份、递归树摘要、数量、大小和属性统计，用于发现目录在 Preview 后新增、删除或
+替换内容。
+
+### `TrashPreviewItem.validate_status()`
+
+READY 必须同时具备对象快照和已证明的卷能力，且不能含阻止原因；BLOCKED 必须解释原因。
+
+### `TrashPreview.validate_totals()` / `TrashPreview.canonical_digest()`
+
+重新计算选择数、READY/BLOCKED、目录内对象数、总大小和最大对象，拒绝 UI 或持久化层
+伪造统计；随后为完整 Preview 生成确认摘要。
+
+### `TrashRecoveryRecord.canonical_digest()`
+
+散列原路径、原身份、Shell 结果、MANUAL 状态和恢复说明，用于读取 SQLite 时检测损坏或
+篡改。它不提供自动恢复。
+
+### `TrashPathPolicy.__init__(base_policy, extra_protected_roots=())`
+
+在已有授权策略上叠加 Windows、Program Files、ProgramData、AppData 和调用方指定保护根。
+构造只建立规则，不读取文件。
+
+### `TrashPathPolicy.approved_roots`
+
+返回基础策略的不可变授权根，仅用于编译器/界面显示；返回值不会扩大授权。
+
+### `TrashPathPolicy.validate_source(path)`
+
+验证绝对、已授权、现存普通文件/目录，拒绝授权根自身、系统/应用数据、重解析点、SYSTEM
+和 OFFLINE 对象。返回规范路径；违反边界时抛出 `PathSecurityError`。
+
+### `TrashPathPolicy.entry_rejection_reason(path)`
+
+为递归目录中的每个后代调用 `validate_source`，把异常转换为稳定阻止原因。无问题返回
+`None`；不会跟随链接。
+
+### `TrashPreviewEngine.__init__(...)`
+
+注入 R2 路径策略、身份适配器和回收站能力适配器，并验证选择数、目录对象数、字节和高影响
+阈值均为正数。
+
+### `TrashPreviewEngine.generate(plan, transaction_id=None)`
+
+逐个验证路径、身份、完整目录树和卷能力，保留每个 BLOCKED 项，计算影响和对象集合摘要。
+只读；不会调用 `recycle()`。超过任何硬上限时所有原 READY 项改为 BLOCKED。
+
+### `TrashPreviewEngine.require_unchanged(plan, preview)`
+
+第二次确认前及执行前重新生成快照，比较事务、对象集合、状态、数量和总大小。任何变化抛出
+`PathSecurityError`，要求重新生成计划和两次确认。
+
+### `TrashPreviewEngine.snapshot(source, kind)`
+
+使用显式栈递归枚举，不跟随链接；为相对路径、类型、卷序列、File ID、大小、时间和属性生成
+稳定树摘要，同时统计隐藏/系统/重解析/offline 项。达到对象或字节上限立即拒绝。
+
+### `TrashPreviewEngine._object_set_digest(items)`
+
+将操作 ID、路径、状态、快照摘要、能力结果和问题列表合并为选择集合摘要；供确认链绑定。
+
+### `TrashSafetyValidator.__init__(registry, policy, max_selected=100)`
+
+保存注册表和 R2 策略，并拒绝非正批量上限；没有系统副作用。
+
+### `TrashSafetyValidator.review(plan)`
+
+独立检查 R2/MANUAL/双确认、`file.trash` 清单、路径、操作类型以及父子重叠选择。任何问题令
+`SafetyReview.approved=False`，不会尝试“修正”危险计划。
+
+### `classify_trash_intent(text)`
+
+纯本地确定性路由。永久删除、跳过/清空回收站词句返回
+`PROHIBITED_PERMANENT_DELETE`；明确回收站意图返回 `RECYCLE_BIN`；其他返回 `NONE`。
+返回值不含路径或工具参数。
+
+### `TrashPlanCompiler.__init__(authorized_paths, policy, identity_platform, max_selected=100)`
+
+注入授权服务、R2 路径策略和身份读取器；拒绝非正上限。模型供应商不是依赖项。
+
+### `TrashPlanCompiler.compile(user_goal, selected_paths, authorized_root_ids)`
+
+只接受用户明确传入的路径，验证它们位于本计划指定授权根内，去重、读取身份并生成连续的
+`TrashPlanItem`。空目标、空选择、超限、越界或重复均抛异常；不执行写操作。
+
+### `TrashConfirmationService.__init__(plan_ttl_seconds=300, runtime_ttl_seconds=60, now=None)`
+
+创建内存一次性确认库。计划与即时确认分别使用有效期；可注入时钟便于测试。非正 TTL
+抛出 `ValueError`，进程重启会自然丢失未消费能力。
+
+### `request_plan(plan, preview)` / `resolve_plan(...)`
+
+第一项要求 Preview 与计划完全匹配且所有对象 READY，然后绑定事务、计划/Preview/对象摘要、
+数量、大小和到期时间。第二项只解析仍待处理且未过期的同一请求。
+
+### `request_runtime(plan_confirmation_id, plan, revalidated_preview)`
+
+只允许从已批准、未过期的 PLAN 确认和同一事务/对象集合创建短期 RUNTIME 请求。新的 Preview
+ID 可以变化，但对象集合、数量和大小不得变化。
+
+### `resolve_runtime(...)` / `consume_runtime(...)`
+
+前者记录第二次用户决定；后者在事务进入 RUNNING 时消费一次，并同时消费父 PLAN 能力。
+错误层级、拒绝、过期、重放或摘要变化抛 `TrashConfirmationError`。
+
+### `TrashConfirmationService._create(...)`
+
+构造并保存不可变确认对象，记录父确认、所有摘要、数量、大小和到期时间。
+
+### `_resolve(...)` / `_get(...)` / `_require_not_expired(...)`
+
+内部状态机辅助：查找请求、验证层级/状态、更新批准或拒绝，并把到期请求改为 EXPIRED。
+未知 ID 和缺失父确认默认拒绝。
+
+### `_require_executable(plan, preview)` / `_require_current(...)`
+
+前者要求所有选择 READY；后者比较事务、计划、摘要、对象集合、数量与总大小。它们是确定性
+权限检查，不接受 UI 自报状态。
+
+### `WindowsRecycleBinPlatform.__init__()`
+
+仅 Windows 可构造，加载 `kernel32` 和 `shell32` Unicode API。非 Windows 抛 `OSError`。
+
+### `_hresult_succeeded(value)`
+
+按 COM `SUCCEEDED` 规则检查 HRESULT 的最高位。它接受 `S_OK` 和
+`COPYENGINE_S_DONT_PROCESS_CHILDREN` 等信息型成功状态，拒绝所有失败位为 1 的值；避免把
+pywin32/Windows Shell 的合法成功码误判为错误。
+
+### `WindowsRecycleBinPlatform.capability(path)`
+
+调用卷根、驱动类型、文件系统/只读标志和 `SHQueryRecycleBinW`。第一版只允许 Windows 系统
+卷上的固定、可写、NTFS；其他卷的热插拔状态记为 UNKNOWN 并拒绝。检查失败返回带原因的
+`available=False`，不会尝试回收。
+
+### `WindowsRecycleBinPlatform.recycle(path)`
+
+再次检查能力和路径，在线程中初始化 STA COM，创建一次性 `IFileOperation`，只排队一个
+`DeleteItem`，设置 RECYCLEONDELETE/ADDUNDORECORD/EARLYFAILURE/WANTNUKEWARNING 等标志。
+成功必须同时满足操作 HRESULT 和逐项 HRESULT 的 COM 成功语义、未中止、回收传输标志、非空回收站 Shell
+对象以及原路径消失；否则返回 FAILED/UNKNOWN 或抛 `RecycleBinPlatformError`。不存在旧 API、
+命令行或永久删除回退。
+
+### `_RecycleProgressSink.__init__()`
+
+初始化 COM 包装和结果字段，不执行文件操作。
+
+### `_RecycleProgressSink.PreDeleteItem(flags, item)`
+
+只有 Shell 声明 `TSF_DELETE_RECYCLE_IF_POSSIBLE` 才返回 S_OK，否则返回 E_FAIL 取消该项。
+
+### `_RecycleProgressSink.PostDeleteItem(flags, item, hr_delete, newly_created)`
+
+保存真实逐项 HRESULT；仅当 `newly_created` 非空时保存回收站 Shell 标识。空值意味着可能被
+完全删除，因此绝不标记 VERIFIED。
+
+### `_RecycleProgressSink.StartOperations/FinishOperations/UpdateProgress/ResetTimer/PauseTimer/ResumeTimer`
+
+满足 COM 协议的无副作用回调；返回 S_OK。进度仅由上层事务按对象更新。
+
+### `_RecycleProgressSink.PreRenameItem(...)` / `PostRenameItem(...)`
+
+重命名不属于回收工具，两个回调均返回 E_FAIL，防止同一回调对象意外批准重命名。
+
+### `_RecycleProgressSink.PreMoveItem(...)` / `PostMoveItem(...)`
+
+普通移动不属于回收工具，两个回调均返回 E_FAIL；回收只能来自已排队的 `DeleteItem`。
+
+### `_RecycleProgressSink.PreCopyItem(...)` / `PostCopyItem(...)`
+
+复制不属于回收工具，两个回调均返回 E_FAIL，确保此适配器永远不会复制用户数据。
+
+### `_RecycleProgressSink.PreNewItem(...)` / `PostNewItem(...)`
+
+新建对象不属于回收工具，两个回调均返回 E_FAIL，限制 COM 进度接收器的批准范围。
+
+### `WindowsRecycleBinPlatform._volume_root(path)`
+
+使用 `GetVolumePathNameW` 取得真实卷根；失败抛 Windows 异常。
+
+### `_volume_information(root)` / `_query_recycle_bin(root)`
+
+前者返回文件系统名、卷序列和标志；后者通过公开 Shell API 查询回收站而不直接读取
+`$Recycle.Bin`。任一失败使能力不可用。
+
+### `_is_hotplug_or_unknown(root)`
+
+系统卷返回 `False`；其他卷在尚未完成可靠设备 IOCTL 分类前返回 `None`，从而失败关闭。
+
+### `TrashTool.__init__(policy, identity_platform, recycle_platform, snapshotter)`
+
+注入全部确定性依赖，不持有任意命令执行器。
+
+### `TrashTool.manifest`
+
+返回 `file.trash` 清单：R2、非只读、非幂等、支持 Preview/对象间取消、MANUAL、普通用户、
+Windows、批量 1，且同时要求计划和即时确认。
+
+### `TrashTool.execute(request, cancellation)`
+
+校验 Schema，检查取消，重新验证路径、根身份和完整目录快照，再调用一次 `recycle()`。
+平台的 FAILED/UNKNOWN 结果原样交给事务服务处理，不能静默当作成功。
+
+### `build_trash_arguments(plan, preview)`
+
+为每个对象生成并序列化 `TrashRequest`，包含源路径、最新根身份和完整目录快照。缺少快照时
+失败，不生成部分授权。
+
+### `TrashService.__init__(validator, preview_engine, confirmations, repository, registry, audit)`
+
+组合但不合并安全审查、Preview、确认、SQLite、注册表和审计边界，便于独立测试和故障注入。
+
+### `TrashService.prepare(plan)`
+
+执行独立审查和只读 Preview，要求全部 READY，持久化事务/参数预约，转入
+AWAITING_CONFIRMATION，创建并持久化 PLAN 请求，最后审计 Preview。任何失败都不会写用户文件。
+
+### `resolve_plan_confirmation(prepared, approved)`
+
+解析第一层决定并持久化。拒绝转 CANCELLED；批准只转 AWAITING_RUNTIME_CONFIRMATION，仍不能
+执行工具。
+
+### `request_runtime_confirmation(prepared)`
+
+验证事务状态，重新扫描完整对象集合，然后创建/持久化第二层待确认请求。变化或第一层未批准
+时失败。
+
+### `resolve_runtime_confirmation(runtime, approved)`
+
+解析即时决定。批准转 CONFIRMED，拒绝转 CANCELLED；记录审计和确认 ID/时间。
+
+### `TrashService.execute(runtime, cancellation=None)`
+
+一次性消费 RUNTIME，持久化 CONSUMED 证明，第三次复验，转 RUNNING。每个对象先写 PREPARED
+恢复和 started 审计，再用含 runtime confirmation ID 的能力调用注册表。验证成功升级为
+AVAILABLE/MANUAL；含糊为 UNKNOWN；异常为 FAILED；任一非成功停止后续对象。支持对象之间取消。
+
+### `TrashService._report(...)` / `recovery_records(transaction_id)`
+
+前者从持久事务生成终态报告；后者返回逐条校验摘要的 MANUAL 恢复记录供 GUI 展示。
+
+### `OperationRepository.create_trash_from_preview(...)`
+
+在共享事务表中原子写入 Stage 2B Preview 和参数摘要；源路径同时作为 source-only 操作的唯一
+subject 预约，不代表目标路径。
+
+### `record_confirmation(...)`
+
+向加法表写入或更新 PLAN/RUNTIME 层级、状态、绑定摘要和确认时间；ID、事务或层级变化即拒绝。
+
+### `begin_trash_operation(...)`
+
+要求事务 RUNNING、项 PENDING，并在任何 Shell 调用前原子写入 PREPARED
+`TrashRecoveryRecord`，随后把项改为 RUNNING。
+
+### `complete_trash_operation(...)`
+
+校验 recovery/operation ID，把 AVAILABLE 映射为 COMPLETED、UNKNOWN 映射为 UNKNOWN、其他映射
+为 FAILED，并同时更新事务计数和恢复摘要。
+
+### `get_recovery(operation_id)` / `list_recovery(transaction_id)`
+
+读取后重新计算摘要，损坏即抛 `OperationStoreError`。单项按 ID 查询，列表按原执行顺序返回。
+
+### `OperationRepository._mark_running_trash_unknown(session, transaction_id, current)`
+
+启动恢复时把仍 RUNNING 的 `file.trash` 项及 PREPARED 记录改为 UNKNOWN，记录人工检查原因；
+绝不自动重试可能已完成的 Shell 操作。
+
+### `require_execution_authorization(...)`（Stage 2B 扩展）
+
+除既有事务/计划/Preview/工具/参数摘要外，`file.trash` 还必须携带 runtime confirmation ID，且
+SQLite 中存在同事务已批准 PLAN 和已消费 RUNTIME 记录，否则注册表拒绝调用平台。
+
+### `TrashAuditLogger.__init__(repository, app_version, git_commit)`
+
+保存审计仓库和版本追踪字段；不缓存文件内容。
+
+### `previewed(plan, preview)` / `confirmation_resolved(plan, confirmation)`
+
+分别记录无写入的 R2 Preview，以及 PLAN/RUNTIME 决定及全部摘要、数量和总大小。日志不含文件
+正文或密钥。
+
+### `item_started(plan, item, recovery, runtime_confirmation_id)`
+
+在 Shell 前写 mandatory audit；数据库不可用时抛错，从而平台函数不会被调用。
+
+### `item_result(plan, item, result, recovery, error=None)`
+
+记录 HRESULT、回收证据、验证状态、MANUAL recovery ID 和脱敏错误；不声称自动恢复。
+
+### `ApplicationRuntime.create_trash_services(progress_callback=None)`
+
+为当前授权根构造 R2 策略、事务守卫、Preview、`file.trash`、验证器、编译器、审计和服务。
+模型供应商不会进入依赖图；没有授权根时失败。
+
+### `ApplicationRuntime.audit_prohibited_request(original_request, reason)`
+
+把永久删除、绕过或清空回收站等 R4 请求记为 `trash.request_refused`。记录明确说明没有执行、
+没有注册相关工具；不调用模型或平台。审计数据库不可用时异常传播给 UI，拒绝本身仍保持生效。
+
+### `RecycleBinPlatform.capability(path)` / `RecycleBinPlatform.recycle(path)`
+
+平台协议：前者只读并失败关闭；后者只允许移动一个对象到回收站并返回验证证据。跨平台实现
+不得增加永久删除回退。
+
+### `ToolManifest.__post_init__()`（Stage 2B 扩展）
+
+R2 工具必须 `requires_runtime_confirmation=True`；非 R2 工具不得声明该字段，防止错误确认语义。
+
+### `TrashPreviewWorker.run()` / `TrashExecutionWorker.run()`
+
+前者在线程中生成/持久化 Preview，不执行写；后者只运行已完成两次确认的事务。所有异常通过
+Qt failed 信号传回，不在工作线程吞掉。
+
+### `TrashExecutionWorker.cancel()`
+
+设置协作取消令牌，只停止后续对象；已开始的 Shell 原子调用不被强制终止。
+
+### `require_prepared_trash(value)` / `require_trash_report(value)`
+
+收窄 Qt `object` 信号值；类型不符抛 `TypeError`，防止 UI 把任意对象当作安全服务结果。
+
+### `FileAnalysisTab._request_trash_selected()`
+
+读取当前页明确勾选的结果；空选择提示错误，否则只把路径元组发给 Stage 2B 页面，不直接调用
+工具。
+
+### `MainWindow._build_trash_tab()` / `_open_trash_for_paths(value)`
+
+前者注册独立标签页及状态信号；后者过滤为 `Path` 元组并转交，不执行计划或写操作。
+
+### `TrashTab.set_sources(paths)`
+
+替换待处理列表并使旧 Preview 和两级确认失效；只更新界面。
+
+### `TrashTab._add_files()` / `_add_directory()` / `_clear_sources()`
+
+维护用户明确选择。文件对话框结果仍必须经过编译器和 R2 策略；清空会使确认失效。
+
+### `TrashTab._prepare()` / `_preview_completed(value)`
+
+前者确定性编译并启动只读 worker；后者验证类型、显示逐项对象/大小/属性/阻止原因，并只启用
+第一确认按钮。
+
+### `TrashTab._confirm_plan()`
+
+显示数量和总大小，默认按钮为取消。批准后调用服务解析第一确认并重新验证；不会执行平台。
+
+### `TrashTab._confirm_runtime()`
+
+显示即时、对象特定的 R2 对话框，明确 MANUAL 恢复，默认取消。批准才启动执行 worker。
+
+### `TrashTab._execution_completed(value)`
+
+显示事务计数、原路径、恢复状态和 Windows“还原”步骤；不显示自动 Undo。
+
+### `TrashTab.cancel()` / `shutdown()`
+
+请求停止后续对象；应用退出复用同一协作取消，不强制杀死线程。
+
+### `TrashTab._source_paths()` / `_all_root_ids()` / `_invalidate()`
+
+分别读取 UI 路径、当前授权 root ID，以及清除 Preview/两级确认。它们不授予新路径权限。
+
+### `TrashTab._worker_failed(message)` / `_show_error(message)`
+
+恢复按钮/进度状态并向初级用户展示“未执行”错误；不会忽略异常或继续下一项。
+
 本文档说明 `src/pc_manager_agent` 当前生产代码中的全部函数和方法，包括公开接口、
 私有辅助方法、抽象协议方法、Qt 槽函数以及函数内部的回调。测试辅助函数不属于生产
 API，因此不在本文档范围内。
