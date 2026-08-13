@@ -75,6 +75,9 @@ once release tags are introduced.
 
 ### Changed
 
+- Startup inventory now treats Windows executables without version-resource publisher
+  metadata as unknown/read-only instead of aborting the complete inventory.
+
 - Renamed the internal `platform` package to `platform_support` to distinguish
   operating-system adapters from Python's standard-library `platform` module.
 - The chat page now routes file-analysis goals to the formal Stage 1 workflow;

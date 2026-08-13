@@ -317,7 +317,8 @@ SQLite naive 时间为 UTC。它们只做数据转换。
 #### `_read_shell_link` / `_publisher` / `_approval_status`
 
 分别通过 ShellLink COM 只读 target/arguments/working directory，通过版本资源读取辅助公司名，
-以及仅解释已知 12-byte StartupApproved 状态。未知证据不推断成 enabled/disabled。
+以及仅解释已知 12-byte StartupApproved 状态。可执行文件没有版本资源时 `_publisher` 返回
+`None` 并由策略保持只读，而不是中断整个清单；未知证据不推断成 enabled/disabled。
 
 #### `_unresolved_registry_observation` / `_unresolved_folder_observation`
 

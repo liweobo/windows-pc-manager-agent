@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
+import pywintypes
 
 from pc_manager_agent.domain.startup_actions import StartupManagementMode, StartupSource
 from pc_manager_agent.platform_support.windows.data_protection import (
@@ -13,6 +15,7 @@ from pc_manager_agent.platform_support.windows.data_protection import (
 )
 from pc_manager_agent.platform_support.windows.startup_management import (
     WindowsStartupManagementPlatform,
+    _publisher,
 )
 
 
@@ -35,3 +38,17 @@ def test_real_startup_inventory_and_dpapi_are_read_only(tmp_path: Path) -> None:
     protector = WindowsCurrentUserDataProtector()
     ciphertext = protector.protect(b"stage4b-read-only-probe")
     assert protector.unprotect(ciphertext) == b"stage4b-read-only-probe"
+
+
+def test_missing_windows_version_resource_keeps_publisher_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A valid executable without version metadata must not abort inventory."""
+
+    def no_version_resource(*_args: object) -> Any:
+        raise pywintypes.error(1813, "GetFileVersionInfo", "resource not found")
+
+    monkeypatch.setattr("win32api.GetFileVersionInfo", no_version_resource)
+
+    assert _publisher(tmp_path / "no-version.exe") is None

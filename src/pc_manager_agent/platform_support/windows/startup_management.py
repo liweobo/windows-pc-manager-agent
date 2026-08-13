@@ -12,6 +12,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import pythoncom
+import pywintypes
 import win32api
 from win32com.shell import shell, shellcon
 
@@ -812,7 +813,7 @@ def _publisher(path: Path) -> str | None:
             str(path),
             rf"\StringFileInfo\{language:04x}{codepage:04x}\CompanyName",
         )
-    except (OSError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError, pywintypes.error):
         return None
     text = str(value).strip()
     return text or None
