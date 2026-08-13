@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QThreadPool, Signal, Slot
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -39,8 +40,8 @@ class ServiceManagementTab(QWidget):
         self._worker: ServiceInventoryWorker | None = None
         self._items: tuple[ServiceInventoryItem, ...] = ()
         self._dialogs: set[ServiceActionDialog] = set()
+        self._load_requested = False
         self._build_ui()
-        self.refresh()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -87,7 +88,7 @@ class ServiceManagementTab(QWidget):
         self._start.clicked.connect(lambda: self._open_action(ServiceActionType.START))
         self._stop.clicked.connect(lambda: self._open_action(ServiceActionType.STOP))
         self._restart.clicked.connect(lambda: self._open_action(ServiceActionType.RESTART))
-        self._status = QLabel("正在执行只读服务清单和权限探测；未执行任何控制。")
+        self._status = QLabel("打开本页时才会在后台读取服务；未执行任何控制。")
         self._status.setWordWrap(True)
         layout.addWidget(info)
         layout.addLayout(top)
@@ -100,6 +101,7 @@ class ServiceManagementTab(QWidget):
         """Start a bounded read-only inventory refresh off the GUI thread."""
         if self._worker is not None:
             return
+        self._load_requested = True
         self._refresh.setEnabled(False)
         self._set_actions(False, False, False)
         self._status.setText("正在读取服务身份、依赖和当前用户访问权限；没有发送控制。")
@@ -127,6 +129,12 @@ class ServiceManagementTab(QWidget):
             f"{controllable} 个至少有一项动作可进入 Preview。"
         )
         self.status_message.emit(self._status.text())
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Lazily enumerate SCM only after the user opens the service page."""
+        super().showEvent(event)
+        if not self._load_requested:
+            self.refresh()
 
     @Slot()
     def _render(self) -> None:

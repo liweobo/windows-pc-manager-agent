@@ -256,9 +256,10 @@
 | `_preview_html(prepared)` | HTML 转义显示身份、状态、分类、步骤、关系、权限和审查；不执行。 |
 | `_runtime_html(value)` | 显示即时对象与摘要，提醒 MANUAL。 |
 | `_result_html(result)` | 显示每步前后状态、验证和反向操作需新计划。 |
-| `ServiceManagementTab.__init__(runtime)` | 创建独立服务管理页并开始只读刷新。 |
+| `ServiceManagementTab.__init__(runtime)` | 创建独立服务管理页但不立即枚举 SCM，避免应用启动和其他任务被服务清单占用线程。 |
 | `_build_ui()` | 构建筛选、表格、Start/Stop/Restart 检查按钮和说明。 |
 | `refresh()` | 禁用写入口并在线程池刷新新鲜清单。 |
+| `showEvent(event)` | 用户首次打开本页时惰性调用 `refresh()`；后续显示不自动重复，手动刷新仍可用。 |
 | `_inventory_ready(value)` | 类型收窄、保存清单并重绘；不会复用 Stage 3 陈旧对象执行。 |
 | `_render()` | 按本地筛选填充展示表；ServiceName 保存为选择提示。 |
 | `_selection_changed()` | 按选中 `ServiceInventoryItem` 的动作许可开启对应检查按钮。 |
