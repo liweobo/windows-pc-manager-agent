@@ -1,5 +1,24 @@
 # Windows PC Manager Agent
 
+## Stage 4C1：Windows 服务安全启停与重启
+
+Stage 4C1 新增“服务管理”页，但服务修改仍采用默认拒绝。程序只会为当前普通用户账户
+运行的、独立进程型、签名验证通过、位于 Windows 与 Agent 目录之外、且未命中系统/登录/
+网络/存储/更新/安全/企业保护规则的第三方服务显示操作入口。驱动、共享进程、LocalSystem、
+LocalService、NetworkService、Microsoft/Windows、未知发布者和权限不明确的服务全部只读。
+
+唯一注册的服务写工具是 `system.service.start` 与 `system.service.stop`。`START`、`STOP` 为
+R2；`RESTART` 是 R2_HIGH_IMPACT，并被明确编排为 `STOP → 验证 STOPPED → 重新核对身份 →
+START → 验证 RUNNING`，不存在单步 Restart、自动重试、依赖级联或失败后强制杀进程。
+每次操作只针对一个精确 ServiceName，先展示 Preview，再进行计划确认和短时即时确认；
+状态、配置身份、依赖图或权限证据发生变化时，旧确认立即失效。程序只调用 SCM/Win32 API，
+不使用 PowerShell、CMD、`sc.exe`、WMI、shell 或管理员提权。
+
+服务状态变化无法恢复服务内部会话，因此回滚等级如实标为 `MANUAL`。Restart 若 Stop 成功而
+Start 失败或用户取消，结果会明确显示 `PARTIALLY_COMPLETED` 与当前实际状态，不会伪装成成功，
+也不会后台自动重启。所有真实写操作前都有 SQLite 写前事务和隐私最小化审计；应用重启后
+未完成事务标为 `INTERRUPTED`，不会自动继续。
+
 ## Stage 4B：启动项安全管理
 
 Stage 4B 在现有项目中增加“启动项管理”页，但只开放两个窄工具：
@@ -81,7 +100,7 @@ restore claim.
 
 ## 当前版本
 
-Stage 2A / `0.1.0` 开发版本在阶段 1 只读分析基础上包含：
+Stage 4C1 / `0.1.0` 开发版本在此前阶段基础上包含：
 
 - PySide6 主窗口和系统托盘；
 - 基础聊天、计划、风险提示与确认界面；

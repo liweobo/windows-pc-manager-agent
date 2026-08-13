@@ -1,5 +1,33 @@
 # Developer guide
 
+## Stage 4C1 development
+
+Stage 4C1 is split across `domain/service_actions.py`, the narrow
+`platform_support/service_control.py` protocol, `platform_support/windows/service_control.py`,
+target/dependency orchestration, safety policy/Preview/validator, two-tier confirmation,
+SQLite transaction persistence, two registered tools, audit, Qt workers/dialog/tab, and the
+runtime composition root. Restart must remain orchestration of STOP then START; never add a
+platform `restart`, cascade, generic service-control opcode, configuration change, process-kill,
+shell, WMI, `sc.exe`, elevation, automatic retry, or auto-resume path.
+
+Focused verification:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_service_action_models.py -q
+uv run pytest tests/integration/test_service_action_flow.py -q
+uv run pytest tests/security/test_service_safety.py tests/security/test_service_source_boundary.py -q
+uv run pytest tests/gui/test_service_management.py -q
+uv run pytest tests/integration/test_windows_service_control_readonly.py -q
+```
+
+All write-flow tests must use `FakeServicePlatform`; never start, stop or restart an installed
+service from a test. The real-Windows test is read-only. `PC_MANAGER_SERVICE_ACTION_TIMEOUT_SECONDS`
+sets the bounded 5–120 second state wait (default 30), and
+`PC_MANAGER_SERVICE_RUNTIME_CONFIRMATION_TTL_SECONDS` sets the 15–300 second immediate gate
+(default 60). Do not put these settings—or any credential—in `.env.example` when it contains
+local user edits. Every new service method/function must be added to `docs/api-reference.md`.
+
 ## Stage 4B development
 
 Stage 4B is split across `domain/startup_actions.py`, `platform_support/startup.py`, the

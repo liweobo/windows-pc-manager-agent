@@ -56,11 +56,21 @@ probe. Only HKCU Run and supported current-user Startup Folder links can be chan
 no generic registry editor, StartupApproved write, machine-wide change, RunOnce change,
 permanent deletion, bulk action, elevation or shell fallback.
 
-## Stage 4C+ — other controlled system operations (not started)
+## Stage 4C1 — controlled service state management (complete)
 
-Service changes, software uninstall, firewall changes, cleanup and other R3 operations
-remain design-only. Each capability requires its own threat model, confirmation, recovery
-plan, Windows API experiment, and isolated test/review before implementation.
+Bounded SCM inventory, exact ServiceName identity, conservative protected-service policy,
+dependency/dependent analysis, ordinary-user permission evidence, Preview, two confirmations,
+single-service START/STOP, explicit STOP/START RESTART, write-ahead transaction states,
+postcondition verification, partial-result reporting, audit and GUI/chat entry points.
+Only signed current-user own-process third-party services can be eligible. Configuration
+changes, cascade controls, service deletion/configuration, elevation, shell, WMI, process kill,
+automatic retry/resume and automatic rollback are absent.
+
+## Stage 4C2+ — other controlled system operations (not started)
+
+Broader service changes, software uninstall, firewall changes, cleanup and other system
+operations remain design-only. Each capability requires its own threat model, confirmation,
+recovery plan, Windows API experiment, and isolated test/review before implementation.
 
 ## Later stages
 

@@ -1,5 +1,24 @@
 # Threat model
 
+## Stage 4C1 additions
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Natural language targets the wrong service | Exact ServiceName resolution; ambiguous DisplayName and partial matches block | A user can still choose the wrong exact row; Preview names it explicitly |
+| System/security service is stopped | Default-deny type/account/path/name/publisher/description policy plus protected lists | Vendor naming evolves; unknown classification is therefore blocked |
+| TOCTOU swaps configuration after approval | Digests bind service type, binary fingerprint, account and start type; re-read before execution and before Restart START | Windows can change state immediately after a read; handle-scoped control and post-read reduce but cannot remove all races |
+| Dependency cascade expands impact | Live dependency/dependent graph is bound to confirmation; any blocker stops the action; no cascade API | SCM/service behavior can have undocumented external effects |
+| Privilege is silently escalated | Elevated-process blocker, least-rights handle probes, no UAC/runas/shell fallback | Existing service DACLs can still grant the ordinary user control rights |
+| Restart Stop succeeds but Start fails | Explicit two-step transaction, fresh identity check, `PARTIALLY_COMPLETED`, actual-state verification | Service remains stopped and requires informed manual action |
+| Cancellation is mistaken for Undo | Cancellation prevents only future controls; dispatched SCM request is allowed to finish bounded verification | A control already delivered cannot be recalled |
+| Restart or crash replays a control | Write-ahead ordered steps; active work becomes `INTERRUPTED`; confirmations are one-time; no auto-resume | User must inspect current service state and create a new Preview |
+| Model invents a service tool or ServiceName | Model output is an untrusted hint; registry has only start/stop; resolver obtains local identity | A compromised local SCM/configuration remains outside the model boundary |
+| Audit leaks executable or credentials | Allow-listed digest/ServiceName events; no path/command/password/binary payload | ServiceName itself may reveal installed-product metadata |
+
+Stage 4C1 tests use Fake SCM for every mutation path. The real-Windows adapter test enumerates
+and inspects only; it never opens a control right with the intent to mutate and never calls
+StartService or ControlService.
+
 ## Stage 4B additions
 
 | Threat | Boundary/control | Residual risk |

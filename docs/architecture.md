@@ -1,5 +1,48 @@
 # Architecture
 
+## Stage 4C1 controlled service-action boundary
+
+Stage 4C1 keeps the Stage 3 service inventory as read-only evidence and adds a separate
+service-management presentation. The GUI and chat can express only `START`, `STOP`, or
+`RESTART` plus one target hint; the deterministic resolver obtains the execution identity
+from a fresh local SCM inventory. DisplayName is presentation metadata. Only an exact unique
+DisplayName may help resolve a row, after which ServiceName is the sole execution identity.
+
+```text
+GUI/chat hint
+  -> ServiceTargetResolver (fresh exact ServiceName)
+  -> ServiceSafetyPolicy + ServiceDependencyAnalyzer + permission handle probes
+  -> ServiceActionPlanCompiler + ServicePreviewEngine
+  -> ServiceActionSafetyValidator
+  -> PLAN confirmation (plan/preview/identity/state/dependency/permission digests)
+  -> fresh local revalidation
+  -> short-lived RUNTIME confirmation
+  -> ServiceActionRepository write-ahead state + mandatory audit
+  -> ToolRegistry + ServiceExecutionGuard
+  -> system.service.stop / system.service.start
+  -> WindowsServiceControlPlatform (SCM API only)
+  -> state/configuration postcondition verification + terminal audit
+```
+
+`RESTART` is composition, not a platform primitive. The persisted ordered steps are STOP and
+START. After STOP reaches `STOPPED`, cancellation or a changed configuration prevents START;
+otherwise START reopens the exact service and revalidates its immutable configuration identity.
+A Stop-success/Start-failure outcome is durable `PARTIALLY_COMPLETED`, with the freshly queried
+state shown to the user. The system never retries or resumes a service transaction after an
+application restart.
+
+The Windows adapter opens SCM/service handles with query rights and only the single required
+`SERVICE_START` or `SERVICE_STOP` access. It uses `StartService` and `ControlService`, then
+polls `QueryServiceStatusEx` with a bounded timeout, wait-hint/checkpoint awareness, and
+cooperative cancellation. It does not expose configuration change, delete, pause, process
+termination, shell, `sc.exe`, PowerShell, CMD, WMI, elevation, or dependent-service cascade.
+
+Service write models, confirmations, persistence and audit are separate from Stage 3 query
+models and from Stage 4A process controls. `ServiceExecutionGuard` requires matching ordered
+tool/argument digests and consumed durable confirmations, so neither the UI nor a provider can
+call a write tool directly. The UI runs inventory, Preview, revalidation and execution in Qt
+workers; shutdown cancels future undispatched steps and waits through the bounded SCM timeout.
+
 ## Stage 4B startup-management boundary
 
 ```text

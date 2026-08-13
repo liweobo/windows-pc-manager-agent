@@ -1,5 +1,28 @@
 # Security model
 
+## Stage 4C1 service controls
+
+- Service actions are default-deny. Eligible objects must be Win32 own-process services,
+  run as the current Windows user, have an existing executable outside Windows/Agent roots,
+  pass Authenticode validation, and avoid all protected-name/path/publisher/description rules.
+- Drivers, shared/interactive services, Microsoft/Windows components, system accounts,
+  security/network/login/storage/update/enterprise/Agent services, pending states and unknown
+  identity are blocked. Running dependents block Stop/Restart; stopped dependencies block
+  Start/Restart. The Agent never changes a related service automatically.
+- An elevated Agent process is itself a blocker. Required access is proven by least-privilege
+  handle-open checks before confirmation and checked again before execution. Access denial
+  fails closed; the application never asks for UAC or retries with more privilege.
+- START and STOP are R2. RESTART is R2_HIGH_IMPACT and has explicit STOP and START steps.
+  Both confirmation tiers bind plan, Preview, configuration identity, live state, dependency
+  graph, permission evidence, object summary and expiry; reuse or any drift is rejected.
+- Only `system.service.start` and `system.service.stop` are registered. A durable transaction
+  and mandatory audit start before SCM control. Dispatch is recorded before state polling;
+  results distinguish no-op, completed, failed, partially completed, cancelled and interrupted.
+- Rollback is MANUAL because opposite state control cannot recover in-memory service sessions.
+  Reverse actions need a new Preview and confirmations. Interrupted work is never auto-resumed.
+- Audit stores ServiceName and cryptographic digests, not the executable path, command line,
+  service password, control payload, token, user document, or binary contents.
+
 ## Stage 4B startup controls
 
 - Inventory comes only from fixed HKCU/HKLM Run/RunOnce keys and current/common Startup
