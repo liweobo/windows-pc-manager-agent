@@ -46,6 +46,8 @@ class AppSettings(BaseModel):
     process_force_timeout_seconds: float = Field(default=10.0, ge=2.0, le=30.0)
     process_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
     startup_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
+    service_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
+    service_action_timeout_seconds: float = Field(default=30.0, ge=5.0, le=120.0)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -122,6 +124,12 @@ class AppSettings(BaseModel):
             ),
             "startup_runtime_confirmation_ttl_seconds": os.getenv(
                 "PC_MANAGER_STARTUP_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
+            "service_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_SERVICE_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
+            "service_action_timeout_seconds": os.getenv(
+                "PC_MANAGER_SERVICE_ACTION_TIMEOUT_SECONDS", "30"
             ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
