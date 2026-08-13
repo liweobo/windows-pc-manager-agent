@@ -13,6 +13,7 @@ from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
 from pc_manager_agent.audit.process_actions import ProcessActionAuditLogger
 from pc_manager_agent.audit.repository import AuditRepository
+from pc_manager_agent.audit.service_actions import ServiceActionAuditLogger
 from pc_manager_agent.audit.startup_actions import StartupActionAuditLogger
 from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
@@ -28,6 +29,7 @@ from pc_manager_agent.confirmation.file_operations import (
     RollbackConfirmationService,
 )
 from pc_manager_agent.confirmation.process_actions import ProcessActionConfirmationService
+from pc_manager_agent.confirmation.service_actions import ServiceActionConfirmationService
 from pc_manager_agent.confirmation.startup_actions import StartupActionConfirmationService
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
 from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmationService
@@ -58,6 +60,10 @@ from pc_manager_agent.orchestration.process_action_planner import ProcessActionP
 from pc_manager_agent.orchestration.process_actions import ProcessActionService
 from pc_manager_agent.orchestration.process_target_resolver import ProcessTargetResolver
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.orchestration.service_action_planner import ServiceActionPlanCompiler
+from pc_manager_agent.orchestration.service_actions import ServiceActionService
+from pc_manager_agent.orchestration.service_dependency_analyzer import ServiceDependencyAnalyzer
+from pc_manager_agent.orchestration.service_target_resolver import ServiceTargetResolver
 from pc_manager_agent.orchestration.startup_actions import StartupActionService
 from pc_manager_agent.orchestration.startup_target_resolver import StartupTargetResolver
 from pc_manager_agent.orchestration.system_diagnostic_planner import DiagnosticPlanCompiler
@@ -78,12 +84,17 @@ from pc_manager_agent.persistence.process_actions import (
     ProcessActionRepository,
     ProcessExecutionGuard,
 )
+from pc_manager_agent.persistence.service_actions import (
+    ServiceActionRepository,
+    ServiceExecutionGuard,
+)
 from pc_manager_agent.persistence.startup_actions import (
     StartupActionRepository,
     StartupBackupVault,
     StartupExecutionGuard,
 )
 from pc_manager_agent.platform_support.processes import ProcessManagementPlatform
+from pc_manager_agent.platform_support.service_control import ServiceControlPlatform
 from pc_manager_agent.platform_support.startup import StartupManagementPlatform
 from pc_manager_agent.platform_support.windows.data_protection import (
     WindowsCurrentUserDataProtector,
@@ -100,6 +111,10 @@ from pc_manager_agent.platform_support.windows.process_management import (
     WindowsProcessManagementPlatform,
 )
 from pc_manager_agent.platform_support.windows.recycle_bin import WindowsRecycleBinPlatform
+from pc_manager_agent.platform_support.windows.service_control import (
+    WindowsServiceControlPlatform,
+    current_windows_username,
+)
 from pc_manager_agent.platform_support.windows.startup_management import (
     WindowsStartupManagementPlatform,
 )
@@ -118,6 +133,9 @@ from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
 from pc_manager_agent.safety.process_policy import ProcessSafetyPolicy
 from pc_manager_agent.safety.process_preview import ProcessPreviewEngine
 from pc_manager_agent.safety.process_validator import ProcessActionSafetyValidator
+from pc_manager_agent.safety.service_policy import ServiceSafetyPolicy
+from pc_manager_agent.safety.service_preview import ServicePreviewEngine
+from pc_manager_agent.safety.service_validator import ServiceActionSafetyValidator
 from pc_manager_agent.safety.startup_policy import StartupSafetyPolicy
 from pc_manager_agent.safety.startup_preview import StartupPreviewEngine
 from pc_manager_agent.safety.startup_validator import StartupActionSafetyValidator
@@ -151,6 +169,10 @@ from pc_manager_agent.tools.system_tools.collectors import (
 from pc_manager_agent.tools.system_tools.process_actions import (
     ForceTerminateProcessTool,
     RequestProcessExitTool,
+)
+from pc_manager_agent.tools.system_tools.service_actions import (
+    StartServiceTool,
+    StopServiceTool,
 )
 from pc_manager_agent.tools.system_tools.startup_actions import (
     DisableStartupTool,
@@ -226,6 +248,17 @@ class StartupActionServices:
     service: StartupActionService
 
 
+@dataclass(frozen=True, slots=True)
+class ServiceActionServices:
+    """Dependency bundle for controlled Stage 4C1 service actions."""
+
+    registry: ToolRegistry
+    platform: ServiceControlPlatform
+    resolver: ServiceTargetResolver
+    compiler: ServiceActionPlanCompiler
+    service: ServiceActionService
+
+
 class ApplicationRuntime:
     """Own shared infrastructure and create root-scoped orchestrators."""
 
@@ -278,12 +311,19 @@ class ApplicationRuntime:
             WindowsCurrentUserDataProtector(),
         )
         self.startup_backup_vault.initialize()
+        self.service_confirmation = ServiceActionConfirmationService(
+            settings.confirmation_ttl_seconds,
+            settings.service_runtime_confirmation_ttl_seconds,
+        )
+        self.service_action_repository = ServiceActionRepository(settings.database_path)
+        self.interrupted_service_action_ids = self.service_action_repository.initialize()
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
         self.process_management_platform = WindowsProcessManagementPlatform()
         self.startup_management_platform = WindowsStartupManagementPlatform(
             settings.data_directory / "disabled_startup"
         )
+        self.service_control_platform = WindowsServiceControlPlatform()
         self.report_exporter = ReportExporter(
             self.analysis_results,
             on_export=self._audit_report_export,
@@ -733,8 +773,67 @@ class ApplicationRuntime:
             service=service,
         )
 
+    def create_service_action_services(self) -> ServiceActionServices:
+        """Build Stage 4C1 exact identity, policy, two-step restart, and SCM tools."""
+        platform = self.service_control_platform
+        resolver = ServiceTargetResolver(platform, max_items=self.settings.diagnostic_max_items)
+        compiler = ServiceActionPlanCompiler()
+        policy = ServiceSafetyPolicy(
+            current_username=current_windows_username(),
+            agent_root=Path(__file__).resolve().parents[1],
+        )
+        guard = ServiceExecutionGuard(self.service_action_repository)
+        registry = ToolRegistry(write_guard=guard)
+
+        def dispatched(request: object) -> None:
+            from pc_manager_agent.domain.service_actions import (
+                ServiceStepRequest,
+                ServiceStepType,
+                ServiceTransactionState,
+            )
+
+            typed = ServiceStepRequest.model_validate(request)
+            self.service_action_repository.mark_dispatched(
+                typed.transaction_id,
+                (
+                    ServiceTransactionState.WAITING_RUNNING
+                    if typed.step is ServiceStepType.START
+                    else ServiceTransactionState.WAITING_STOPPED
+                ),
+            )
+
+        registry.register(StartServiceTool(platform, dispatched))
+        registry.register(StopServiceTool(platform, dispatched))
+        dependencies = ServiceDependencyAnalyzer()
+        audit = ServiceActionAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        service = ServiceActionService(
+            platform,
+            resolver,
+            compiler,
+            policy,
+            ServicePreviewEngine(policy, dependencies),
+            ServiceActionSafetyValidator(registry),
+            self.service_confirmation,
+            self.service_action_repository,
+            registry,
+            audit,
+            timeout_seconds=self.settings.service_action_timeout_seconds,
+        )
+        return ServiceActionServices(
+            registry=registry,
+            platform=platform,
+            resolver=resolver,
+            compiler=compiler,
+            service=service,
+        )
+
     def close(self) -> None:
         """Release local persistence resources."""
+        self.service_action_repository.close()
         self.startup_backup_vault.close()
         self.startup_action_repository.close()
         self.process_action_repository.close()

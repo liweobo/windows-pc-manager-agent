@@ -7,6 +7,16 @@ once release tags are introduced.
 
 ### Added
 
+- Stage 4C1 bounded service inventory and conservative classification for exact ServiceName,
+  current-user own-process third-party services with verified signatures.
+- Registered R2 `system.service.start` and `system.service.stop` tools; Restart is an explicit
+  R2_HIGH_IMPACT Stop/verify/revalidate/Start/verify transaction with no single-step shortcut.
+- SCM-only ordinary-user execution, dependency/dependent blocking, two digest-bound one-time
+  confirmations, write-ahead SQLite states, privacy-minimized audit, partial-result reporting,
+  cancellation, GUI/chat entry points, and truthful MANUAL recovery guidance.
+- Stage 4C1 fake-SCM unit/integration/security/GUI coverage plus an opt-in real-Windows
+  read-only adapter probe. Tests never mutate an installed service.
+
 - Stage 4B fixed-source startup inventory and conservative classification for HKCU/HKLM
   Run/RunOnce plus current/common Startup folders, with only current-user HKCU Run and
   supported `.lnk` entries eligible for management.

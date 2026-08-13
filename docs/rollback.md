@@ -1,5 +1,23 @@
 # Rollback design
 
+## Stage 4C1 service state actions
+
+| Operation/outcome | Risk | Rollback | Truthful recovery statement |
+|---|---|---|---|
+| START reaches RUNNING | R2 | MANUAL | A later STOP is a new action, not Undo |
+| STOP reaches STOPPED | R2 | MANUAL | A later START cannot restore in-memory sessions |
+| RESTART reaches RUNNING | R2_HIGH_IMPACT | MANUAL | Restarted internal state is not recoverable |
+| STOP succeeds, START fails/cancels/times out | R2_HIGH_IMPACT | MANUAL, partial | Service may remain STOPPED or pending; inspect current state and create a new plan |
+| Already in requested state | R2 | NONE needed | No SCM control was dispatched; result is a verified no-op |
+| Blocked/cancelled before dispatch | R2/R2_HIGH_IMPACT | NONE needed | No service control was sent |
+| Interrupted/unknown result | R2/R2_HIGH_IMPACT | Manual inspection | Refresh inventory; never auto-retry or auto-resume |
+
+Service actions intentionally do not produce a `FULL` undo record. The repository instead
+stores immutable identity/state/dependency/permission digests, ordered step/argument digests,
+dispatch boundaries, both confirmation bindings, final state and verification evidence.
+Requesting the opposite state is always a new transaction with a new Preview and two new
+confirmations. In particular, Restart after a partial result is never scheduled automatically.
+
 ## Stage 4B startup actions
 
 | Operation | Risk | Rollback | Valid only while |

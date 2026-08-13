@@ -1,5 +1,281 @@
 # API reference
 
+## Stage 4C1 Windows 服务安全启停 API
+
+本节覆盖 Stage 4C1 新增或修改的每个生产函数/方法。`ServiceName` 是执行身份；
+`DisplayName` 只用于展示和唯一精确匹配。除特别注明外，所有模型都是不可变 Pydantic
+模型，校验失败抛出 `ValidationError`，所有真实写入均要求普通用户权限、写前事务、
+双重确认和注册工具授权。
+
+### 领域模型 `domain.service_actions`
+
+| 类/函数 | 作用、输入、返回值、异常与安全约束 |
+|---|---|
+| `ServiceActionType` | 有限动作枚举：`START`、`STOP`、`RESTART`；不允许模型构造其他动作。 |
+| `ServiceStepType` | 唯一平台写步骤 `START`/`STOP`。Restart 只能由这两个步骤编排。 |
+| `ServiceState` | SCM 状态枚举，包含稳定、pending、paused 与 unknown 状态。 |
+| `ServiceState.is_pending` | 无参数属性；pending 四种过渡态返回 `True`，用于禁止冲突控制。无副作用。 |
+| `ServiceSafetyClass` | 服务安全分类：当前用户第三方、系统、驱动、安全、网络、登录、存储、更新、Agent、企业和未知等。 |
+| `ServiceSafetyDecision` | 确定性最终结论 `ALLOW`/`BLOCK`；LLM 不能覆盖。 |
+| `ServiceErrorCode` | UI/审计可稳定匹配的隐私安全错误码；不嵌入二进制路径或凭据。 |
+| `ServiceTransactionState` | 写前事务状态机；区分计划、两次确认、每个控制/等待步骤、完成、部分完成、失败、取消和中断。 |
+| `ServiceIdentity` | 绑定 ServiceName、显示名、服务类型、二进制路径指纹、运行账户和启动类型；不保存命令参数。 |
+| `ServiceIdentity.canonical_digest()` | 规范化名称/账户并对所有配置身份字段做 SHA-256；返回十六进制摘要，用于 TOCTOU 复验。无系统读取。 |
+| `ServiceRelation` | 一条依赖或被依赖关系，含精确 ServiceName、显示名和当前状态。 |
+| `ServicePermissionEvidence` | 记录 query/start/stop/enumerate-dependents 句柄探测结论、是否提权和采集时间。 |
+| `ServicePermissionEvidence.allows(action)` | 按动作判断最小权限是否齐全；提权进程或缺少 query 立即返回 `False`，Restart 必须同时具备三类控制/枚举权限。 |
+| `ServicePermissionEvidence.canonical_digest()` | 对稳定权限布尔值做摘要，排除采集时间；用于确认后的权限漂移检测。 |
+| `ServiceObservation` | 一次新鲜 SCM 观察：配置身份、状态、可接受控制、PID、可选二进制/发布者/描述及关系图。 |
+| `ServiceObservation.state_digest()` | 将配置摘要、状态和可接受控制绑定为 SHA-256，避免旧状态确认被复用。 |
+| `ServiceObservation.dependency_digest()` | 先按 ServiceName 排序依赖/被依赖项，再摘要名称与状态；用于阻止关系图漂移。 |
+| `ServiceDependencyAssessment` | 依赖分析结果，含阻止的依赖/被依赖项、图摘要和解释。 |
+| `ServiceSafetyAssessment` | 确定性分类结果，含身份摘要、分类、ALLOW/BLOCK、错误码和用户解释。 |
+| `ServiceActionPlan` | 单对象不可变计划，绑定三类预期摘要、精确步骤、风险、确认要求和 MANUAL 回滚。 |
+| `ServiceActionPlan.validate_contract()` | Pydantic 后校验：START/STOP 只能一个对应步骤且为 R2；RESTART 必须 STOP→START 且为 R2_HIGH_IMPACT；两次确认必须开启；回滚必须 MANUAL。违反即拒绝建模。 |
+| `ServiceActionPlan.canonical_digest()` | 对全部执行相关计划字段做 SHA-256，计划任何变化都会改变确认绑定。 |
+| `ServiceActionPreview` | 组合观察、策略、依赖、权限、风险和回滚的只读 Preview。 |
+| `ServiceActionPreview.executable` | 仅当策略允许、依赖允许、权限齐全、非 pending 且状态摘要自洽时返回 `True`。 |
+| `ServiceActionPreview.canonical_digest()` | 摘要完整 Preview，绑定两级确认。 |
+| `ServiceStepRequest` | 注册工具的严格输入：事务、步骤、配置身份/摘要、预期状态、5–120 秒超时。 |
+| `ServiceStepResult` | 单步结果：前后状态、是否已派发、是否验证、消息和起止时间。 |
+| `ServiceActionResult` | 完整动作结果；明确完成/部分完成/no-op、最终状态和每步证据。 |
+| `ServiceActionTransaction` | SQLite 行的领域投影，含绑定摘要、确认 ID、顺序步骤、当前索引、结果和错误。 |
+| `ServiceInventoryItem` | GUI 清单项：新鲜观察、分类、三个动作是否可用以及解释。 |
+| `canonical_binary_fingerprint(raw_binary_path)` | 接受并逐字绑定 SCM 原始二进制配置字符串，使用 UTF-8/surrogatepass 后 SHA-256。返回不可逆指纹，不展开、不执行路径。 |
+| `canonical_path(path)` | `Path.resolve(strict=False)` 后按 Windows 大小写规则规范化；仅供摘要/比较，不授予访问权限。 |
+| `_digest(payload)` | 将对象以排序、紧凑 JSON 编码后 SHA-256；内部统一生成稳定绑定摘要。 |
+
+### 领域异常 `domain.service_errors`
+
+| 类/方法 | 作用 |
+|---|---|
+| `ServiceActionError.__init__(code, message)` | 构造带稳定 `ServiceErrorCode` 的工作流异常；消息供 UI，错误码供状态机/审计。 |
+| `ServiceConfigurationChangedError.__init__(message=...)` | 固定为 `SERVICE_CONFIGURATION_CHANGED`，用于身份字段与批准 Preview 不一致。 |
+| `ServicePermissionError.__init__(message=...)` | 固定为 `PRIVILEGE_REQUIRED`，权限不足时失败关闭且不触发提权。 |
+
+### 目标解析、计划和依赖
+
+| 类/函数 | 作用、输入、返回值与拒绝条件 |
+|---|---|
+| `ServiceTargetResolver.__init__(platform, max_items=5000)` | 注入平台和有界清单上限；上限小于 1 抛 `ValueError`。 |
+| `ServiceTargetResolver.list_current()` | 每次调用平台重新枚举，返回不超过上限的观察；不使用缓存身份执行。 |
+| `ServiceTargetResolver.resolve_query(query)` | 先精确大小写无关匹配 ServiceName，再允许唯一精确 DisplayName；空值、无匹配、多 DisplayName 分别拒绝；不做模糊/部分匹配。 |
+| `ServiceTargetResolver.resolve_name(service_name)` | 执行前通过精确 ServiceName 重读；不存在或平台返回不同身份即抛 `ServiceActionError`。 |
+| `ServiceActionPlanCompiler.compile(user_goal, target_query, action, observation, permissions)` | 从本地可信观察生成单对象计划；绑定状态/关系/权限摘要，Restart 固定 STOP→START，风险固定；不接受模型提供的身份。 |
+| `service_action_intent(text)` | 从有限中英文动词识别 START/STOP/RESTART，无法识别返回 `None`；不执行。 |
+| `service_target_query(text)` | 删除有限动作/礼貌词并提取一个目标提示；批量词、代词或空目标抛 `ValueError`，阻止“全部服务”。 |
+| `ServiceDependencyAnalyzer.assess(observation, action)` | Start/Restart 要求全部依赖 RUNNING；Stop/Restart 要求全部被依赖项 STOPPED；返回图摘要与阻止项，绝不级联控制。 |
+
+### 安全策略、Preview 与独立复核
+
+| 类/函数 | 作用、输入、返回值与安全约束 |
+|---|---|
+| `ServiceSafetyPolicy.__init__(current_username, agent_root, windows_directory)` | 固化当前用户和保护根目录；随后所有判断默认拒绝。 |
+| `ServiceSafetyPolicy.assess(observation, action)` | 依次检查驱动/共享/交互类型，系统/安全/网络/登录/存储/更新/企业/Agent 标记，路径、运行账户、签名发布者、pending、可接受控制和禁用启动类型；仅窄当前用户第三方服务返回 ALLOW。 |
+| `_normalize_account(value)` | 去除空白和 `.\\` 前缀并 casefold，供账户比较；不解析凭据。 |
+| `_same_account(candidate, current)` | 接受限定名或当前用户名短名；系统账户不会等于当前普通用户。 |
+| `_is_within(path, root)` | 用 `Path.relative_to` 判断路径是否在保护根内；不访问文件内容。 |
+| `_explain(reason)` | 将策略错误码映射为初级用户可理解的固定解释；无模型生成。 |
+| `ServicePreviewEngine.__init__(policy, dependency_analyzer)` | 注入两个相互独立的确定性检查器。 |
+| `ServicePreviewEngine.build(plan, observation, permissions)` | 验证计划绑定后组合策略/依赖/权限为 Preview；不执行 SCM 控制。 |
+| `ServiceSafetyReview` | 独立复核输出：是否批准、问题列表和复核时间。 |
+| `ServiceActionSafetyValidator.__init__(registry)` | 注入注册表，避免审查不存在的工具。 |
+| `ServiceActionSafetyValidator.review(plan, preview)` | 检查计划/Preview 摘要、风险、回滚、步骤对应的已注册工具清单、权限、策略和依赖；任一问题返回不批准。 |
+
+### 两级确认 `confirmation.service_actions`
+
+| 类/方法 | 作用、输入、返回值与状态规则 |
+|---|---|
+| `ServiceConfirmationTier` | 区分 `PLAN` 与短时 `RUNTIME`。 |
+| `ServiceConfirmationState` | 区分 pending、approved、rejected、consumed、expired。 |
+| `ServiceActionConfirmation` | 不可变确认凭据，绑定 plan/preview/identity/state/dependency/permission/对象摘要、父确认和过期时间。 |
+| `ServiceConfirmationError` | 过期、重放、绑定漂移或非法状态统一抛出的拒绝异常。 |
+| `ServiceActionConfirmationService.__init__(plan_ttl_seconds, runtime_ttl_seconds, now=...)` | 设置两个有限 TTL 和可测试时钟；非法 TTL 拒绝。确认存于实例内存，持久化由 repository 负责。 |
+| `request_plan(plan, preview)` | 要求 Preview 可执行且与计划一致，创建第一层 pending 凭据。 |
+| `resolve_plan(id, approved, plan, preview)` | 复核全部摘要和有效期后批准/拒绝；只能解析一次。 |
+| `request_runtime(plan_confirmation_id, plan, preview)` | 要求父计划确认已批准且仍匹配，创建更短期第二层凭据。 |
+| `resolve_runtime(id, approved, plan, preview)` | 解析即时确认；任何 Preview 漂移均拒绝。 |
+| `consume_runtime(id, plan, preview)` | 执行入口一次性消费已批准即时确认；重放抛 `ServiceConfirmationError`。 |
+| `_create(tier, plan, preview, parent_confirmation_id, ttl)` | 生成绑定摘要、对象摘要、时间和 UUID 的内部构造器。 |
+| `_resolve(id, approved, tier, plan, preview)` | 内部公共解析路径；校验 tier、pending 状态、过期和所有绑定后替换状态。 |
+| `_get(id)` | 从内存取凭据；空/未知 ID 失败关闭。 |
+| `_require_not_expired(request)` | 超时则标记/拒绝，确保旧确认不再使用。 |
+| `_require_executable(plan, preview)` | 要求 Preview 可执行、计划 ID/摘要/事务/动作一致。 |
+| `_require_current(request, plan, preview)` | 对比当前所有摘要和对象摘要；任一差异视为计划变化。 |
+
+### 事务持久化与执行授权 `persistence.service_actions`
+
+| 类/方法 | 作用、输入、返回值与副作用 |
+|---|---|
+| `ServiceActionStoreError` | 数据库未初始化、事务非法、步骤越序或确认不匹配时抛出。 |
+| `ServiceActionBase` | Stage 4C1 SQLAlchemy 声明基类。 |
+| `ServiceActionTransactionRow` | 内部事务表映射；保存摘要、顺序步骤、状态和脱敏结果 JSON。 |
+| `ServiceActionConfirmationRow` | 内部确认表映射；保存两个确认层的绑定和消费状态。 |
+| `ServiceActionRepository.__init__(database_path)` | 创建 SQLite engine/session factory，不执行迁移。路径来自应用数据配置。 |
+| `initialize()` | 建表；将上次活动事务标记 `INTERRUPTED`、未执行 pending 标记取消；返回中断事务 ID，不自动继续。 |
+| `create(plan, preview, steps)` | 写入 Preview 后的事务及每个工具/参数摘要；重复 ID 或非 PREVIEW 状态拒绝。 |
+| `transition(transaction_id, state, error_code=None, error_message=None, result=None)` | 按白名单状态图原子更新；非法跳转拒绝，错误和结果以脱敏 JSON 保存。 |
+| `bind_runtime_preview(transaction_id, preview)` | 保存即时重验 Preview 摘要，且必须对应同一计划/事务。 |
+| `record_confirmation(value)` | 新增或更新确认行，持久化绑定、结论和消费时间；不存服务二进制路径。 |
+| `bind_confirmation(transaction_id, confirmation_id, runtime)` | 将正确层级确认 ID 绑定事务，禁止跨事务替换。 |
+| `consume_confirmation_pair(plan_confirmation_id, runtime_confirmation)` | 单事务内原子验证父子确认均批准、未消费、未过期且摘要匹配，再标记消费。 |
+| `begin_step(transaction_id, index, executing_state)` | 写前声明当前有且只有一个顺序步骤正在执行；越序或已有步骤进行中拒绝。 |
+| `mark_dispatched(transaction_id, wait_state)` | SCM 控制返回前立刻记录已派发边界和 WAITING 状态；仅活动步骤可调用。 |
+| `complete_step(transaction_id, index, state)` | 验证索引后递增下一步，清除 in-progress，并转入 STOP_COMPLETED/COMPLETED/失败状态。 |
+| `get(transaction_id)` | 读取并转换一个完整领域事务；不存在抛 store error。 |
+| `record_terminal_result(transaction_id, result)` | 只更新终态结果 JSON；用于 verified=False 等无异常终止。 |
+| `close()` | 释放 SQLAlchemy engine；之后不得继续执行服务事务。 |
+| `_require_initialized()` | 内部前置检查，未初始化时失败关闭。 |
+| `ServiceExecutionGuard.__init__(repository)` | 注入持久化证据，作为 ToolRegistry 写守卫。 |
+| `ServiceExecutionGuard.require(manifest, arguments, authorization)` | 校验事务/操作/计划/Preview/工具/参数摘要、确认消费、当前步骤与风险；不匹配时工具不会获得调用。 |
+| `_from_row(row)` | 将 ORM 行和 JSON 字段严格还原成 `ServiceActionTransaction`。 |
+
+### 平台协议与 Windows SCM 实现
+
+| 类/函数 | 作用、输入、返回值与平台副作用 |
+|---|---|
+| `ServiceControlPlatform.list_services(max_items=5000)` | 协议：有界枚举观察。实现必须只读。 |
+| `ServiceControlPlatform.inspect(service_name)` | 协议：按精确 ServiceName 读取；不存在返回 `None`。 |
+| `ServiceControlPlatform.evaluate_permissions(service_name, action)` | 协议：只通过最小权限句柄打开来形成证据，不执行控制。 |
+| `ServiceControlPlatform.start(identity, expected_state, timeout_seconds, cancellation, on_dispatched=None)` | 协议：精确身份复验后开始并等待 RUNNING；回调记录派发边界。 |
+| `ServiceControlPlatform.stop(...)` | 协议：精确身份复验后发送 STOP 并等待 STOPPED；不终止 PID、不级联。 |
+| `WindowsServiceControlPlatform.list_services(max_items=5000)` | 用 query-only SCM handle 枚举并逐项观察；权限/删除竞态造成的单项失败被安全跳过，上限受控。 |
+| `WindowsServiceControlPlatform.inspect(service_name)` | 以 query 权限打开精确服务并读取配置、状态、依赖、发布者证据；无修改。 |
+| `WindowsServiceControlPlatform.evaluate_permissions(service_name, action)` | 分别尝试 query/start/stop/enumerate-dependent 权限句柄并检测 token 是否提权；返回布尔证据，句柄立即关闭。 |
+| `WindowsServiceControlPlatform.start(...)` | 调用共同 `_control`，仅允许目标 RUNNING，使用 `StartService`。 |
+| `WindowsServiceControlPlatform.stop(...)` | 调用共同 `_control`，仅允许目标 STOPPED，使用 `ControlService(SERVICE_CONTROL_STOP)`。 |
+| `WindowsServiceControlPlatform._inspect_with_scm(scm, service_name)` | 复用已打开 SCM 的精确读取；服务消失返回 `None`，其他错误上抛。 |
+| `WindowsServiceControlPlatform._control(step, identity, expected_state, target_state, timeout, cancellation, on_dispatched)` | 用所需单一控制权限重新打开，比较完整配置摘要和预期状态；目标已达到时返回 verified no-op；否则派发、回调、有限轮询并返回证据。身份/状态变化、取消和 API 失败均停止。 |
+| `current_windows_username()` | 读取 `GetUserNameEx(NameSamCompatible)` 风格当前账户，供策略固定当前用户；不读取密码/token 内容。 |
+| `_observation_from_handle(scm, handle, service_name)` | 从 query handle 汇总 `QueryServiceConfig`、`QueryServiceStatusEx`、描述、依赖/被依赖、可执行路径、公司名和 Authenticode 结果。 |
+| `_query_relation(scm, service_name)` | 只读打开一个关系节点并返回名称/显示名/状态；关系消失则让上层重新 Preview。 |
+| `_wait_for_state(handle, target_state, timeout_seconds, cancellation)` | 使用 monotonic 截止时间、checkpoint 与 wait hint 有界轮询；取消只停止等待/未来步骤，不撤销已派发控制；超时返回未验证状态或抛稳定错误。 |
+| `_can_open_service(service_name, desired_access)` | 尝试最小 desired access 并立即关闭；access denied 返回 `False`，非权限类异常上抛。 |
+| `_process_is_elevated()` | 读取当前进程 token elevation；任何检测失败按安全错误处理，策略不借机提权。 |
+| `_state(value)` | 将 Win32 SERVICE_* 数值映射为 `ServiceState`，未知值映射 UNKNOWN。 |
+| `_extract_executable_path(raw)` | 从服务二进制字符串安全提取可执行文件部分并展开环境变量；不执行命令或参数。无法可靠解析返回 `None`。 |
+| `_publisher(path)` | 读取 Windows 版本资源 CompanyName，仅作显示/辅助分类；不替代 Authenticode 布尔验证。 |
+| `_GUID`、`_WinTrustFileInfo`、`_WinTrustUnion`、`_WinTrustData` | `WinVerifyTrust` 所需固定 ctypes 结构；没有通用 native-call 接口。 |
+| `_authenticode_signature_valid(path)` | 通过 `WinVerifyTrust` 验证文件签名并关闭状态数据；返回布尔值，不联网下载或执行文件。 |
+
+### 注册工具 `tools.system_tools.service_actions`
+
+| 类/函数 | 作用、输入、返回值与执行边界 |
+|---|---|
+| `StartServiceTool.__init__(platform, on_dispatched=None)` | 注入唯一平台和可选写前派发回调。 |
+| `StartServiceTool.manifest` | 返回 `system.service.start` R2、MANUAL、单对象、需两次确认、Windows-only 清单。 |
+| `StartServiceTool.execute(request, cancellation)` | 收窄为 `ServiceStepRequest`，要求 step=START，通知派发边界后调用平台 start；身份/权限验证仍由平台执行。 |
+| `StartServiceTool._notify(request)` | 将严格请求传给 repository 回调，不接受任意参数。 |
+| `StopServiceTool.__init__(platform, on_dispatched=None)` | 注入 stop 平台和派发回调。 |
+| `StopServiceTool.manifest` | 返回 `system.service.stop` R2、MANUAL、单对象、需两次确认清单。 |
+| `StopServiceTool.execute(request, cancellation)` | 要求 step=STOP 后调用平台 stop；没有 terminate-process 或 cascade fallback。 |
+| `StopServiceTool._notify(request)` | 将严格请求传给事务派发回调。 |
+| `_manifest(name, description, risk)` | 构造两个工具共享的窄清单；固定 schema、权限、超时、批量 1、审计字段和 Windows 平台。 |
+
+### 应用服务 `orchestration.service_actions`
+
+| 方法/函数 | 作用、输入、返回值与副作用 |
+|---|---|
+| `ServiceActionService.__init__(...)` | 注入平台、解析、编译、策略、Preview、复核、确认、仓库、注册表和审计；超时非正数拒绝。 |
+| `list_current()` | 新鲜枚举并为每项计算三种权限/策略可用性；只读但可能较慢，应在 worker 运行。 |
+| `prepare(user_goal, target_query, action)` | 本地解析、权限探测、编译、Preview、独立复核、持久化写前步骤和审计；返回 plan/preview/review，不执行控制。 |
+| `request_plan_confirmation(plan, preview)` | 创建并持久化第一层确认，绑定事务。 |
+| `resolve_plan_confirmation(id, approved, plan, preview)` | 解析并审计；批准进入 runtime gate，拒绝进入 CANCELLED。 |
+| `request_runtime_confirmation(plan_confirmation_id, plan)` | 重读身份/状态/关系/权限并复核；变化即 BLOCKED，否则保存新 Preview 并签发短时确认。 |
+| `resolve_runtime_confirmation(id, approved, plan, preview)` | 解析第二层；批准进入 CONFIRMED，拒绝取消。 |
+| `execute(plan_confirmation_id, runtime_confirmation_id, plan, preview, cancellation=None)` | 一次性消费确认、再次全量复验、先写 mandatory audit，再按顺序调用注册工具；返回 verified 最终/部分结果。 |
+| `_execute_steps(plan, preview, runtime_confirmation_id, cancellation)` | 严格顺序执行步骤并写入 begin/dispatched/complete 状态；Stop 失败不 Start；Stop 后取消返回部分完成；异常记录真实最终状态。 |
+| `_cancelled_result(plan, results, final_state, started)` | 构造取消或 Restart Stop 后部分完成结果，设置相应错误码并审计；不做反向控制。 |
+| `_runtime_preview(plan)` | 按 ServiceName 重读并比较配置、状态、依赖、权限摘要，再构建/复核 Preview；任一漂移调用 `_block`。 |
+| `_final_state(service_name, fallback)` | 失败后尽力只读查询当前状态；查询异常返回 UNKNOWN，不虚构 fallback 成功。 |
+| `_step_arguments(plan, initial_state)` | 预生成有序工具名/严格参数及每步预期状态，供事务持久化摘要。 |
+| `_step_argument(plan, step, expected_state)` | 构造一个 `ServiceStepRequest`；START/STOP 只映射到两个注册名。 |
+| `_result(...)` | 统一创建带时间、步骤、最终状态、完成/部分/no-op 标志的结果。 |
+| `_block(plan, message, code)` | 尽力将事务标记 BLOCKED 后抛 `ServiceActionError`；数据库异常不会把拒绝变成允许。 |
+| `_preview_error(preview)` | 按提权、权限、策略、依赖优先级选择稳定阻止码。 |
+
+### 审计 `audit.service_actions`
+
+| 方法 | 作用与隐私边界 |
+|---|---|
+| `ServiceActionAuditLogger.__init__(repository, app_version, git_commit)` | 注入审计库和版本证据。 |
+| `previewed(plan, preview)` | 记录 ServiceName、动作、风险、分类和各摘要；不记录二进制路径/命令。 |
+| `confirmation_resolved(plan, confirmation)` | 记录层级、批准/拒绝、绑定和到期/消费状态。 |
+| `started(plan, preview)` | 真实控制前强制记录开始事件；失败会阻止执行。 |
+| `step_completed(plan, index, result)` | 记录步骤序号、是否派发、前后状态和验证结论。 |
+| `completed(plan, result)` | 记录 completed/partial/no-op 和最终状态。 |
+| `failed(plan, phase, error_code, message, mutation_may_have_started)` | 记录脱敏错误类型/阶段与是否可能已派发；不保存路径或异常中的敏感参数。 |
+
+### 运行时组合与设置
+
+| 类/方法 | 作用 |
+|---|---|
+| `ServiceActionServices` | runtime 返回的不可变 bundle：应用服务、registry 和 repository。 |
+| `ApplicationRuntime.create_service_action_services()` | 创建 resolver/compiler/policy/dependency/preview/validator/audit/guard，注册恰好 start/stop 两个工具并返回 bundle。 |
+| `create_service_action_services.dispatched(request)` | 内部回调：验证 `ServiceStepRequest` 后把 STOP/START 分别标记 WAITING_STOPPED/WAITING_RUNNING；在平台轮询前持久化。 |
+| `ApplicationRuntime.close()` | 新增关闭 service repository；应在所有 worker 有界结束后调用。 |
+| `AppSettings.service_runtime_confirmation_ttl_seconds` | 即时确认 TTL，环境变量 `PC_MANAGER_SERVICE_RUNTIME_CONFIRMATION_TTL_SECONDS`，范围 15–300，默认 60。 |
+| `AppSettings.service_action_timeout_seconds` | 单个 SCM 状态等待上限，环境变量 `PC_MANAGER_SERVICE_ACTION_TIMEOUT_SECONDS`，范围 5–120，默认 30。 |
+| `AppSettings.from_environment()`（Stage 4C1 增量） | 读取上述两个字符串并交给 Pydantic 做范围/类型校验；不读取文件或凭据。 |
+
+### Qt worker、对话框和管理页
+
+| 类/方法/函数 | 作用、线程和副作用 |
+|---|---|
+| `ServiceWorkerSignals` | worker 的 `completed(object)`/`failed(str)` 终态信号。 |
+| `PreparedServiceAction` | worker 返回 services + plan + preview + review 的不可变容器。 |
+| `RuntimeServicePreview` | worker 返回重新验证 Preview 与即时确认的容器。 |
+| `ServiceInventoryWorker.__init__(runtime)` | 保存 runtime；不在 GUI 线程查询 SCM。 |
+| `ServiceInventoryWorker.run()` | worker 线程初始化 COM、构造服务并读取清单，发成功/失败信号，最后释放 COM。 |
+| `ServicePrepareWorker.__init__(runtime, user_goal, service_name, action)` | 保存精确本地选择和动作。 |
+| `ServicePrepareWorker.run()` | worker 内创建服务并只读 prepare；返回 `PreparedServiceAction`。 |
+| `ServiceRuntimePreviewWorker.__init__(service, plan_confirmation_id, plan)` | 保存同一应用服务和父确认，避免重建确认内存状态。 |
+| `ServiceRuntimePreviewWorker.run()` | worker 内全量重验并请求短时确认。 |
+| `ServiceExecutionWorker.__init__(service, plan_confirmation_id, runtime_confirmation_id, plan, preview)` | 保存同一服务/绑定并创建协作取消 token。 |
+| `ServiceExecutionWorker.cancel()` | 仅设置 token；阻止未来步骤，不强杀已派发 SCM 请求。 |
+| `ServiceExecutionWorker.run()` | worker 内消费确认并执行有界步骤，发 verified 结果/失败。 |
+| `require_service_inventory(value)` | Qt `object` 信号的运行时类型收窄；非 tuple/非清单项抛 `TypeError`。 |
+| `require_prepared_service(value)` | 要求 `PreparedServiceAction`。 |
+| `require_runtime_service(value)` | 要求 `RuntimeServicePreview`。 |
+| `require_service_result(value)` | 要求 `ServiceActionResult`。 |
+| `_emit_completed(signals, value)` | 发成功信号；仅吞掉 owner 已在安全关闭期间删除导致的 Qt `RuntimeError`。 |
+| `_emit_failed(signals, exc)` | 格式化异常类型/消息并发失败信号；仅吞掉相同 Qt 删除竞态。 |
+| `ServiceActionDialog.__init__(runtime, service_name, display_name, action, parent=None)` | 创建单对象模态式工作流对话框并立即启动只读 prepare worker。 |
+| `ServiceActionDialog._build_ui()` | 构建摘要、风险、详情、进度和分阶段按钮；不执行工具。 |
+| `_start_prepare()` | 禁用动作并启动后台 Preview。 |
+| `_prepared(value)` | 类型收窄、显示详细 Preview；审查不通过时不启用确认。 |
+| `_advance()` | 按当前 UI 阶段路由计划确认或即时确认，不允许跳级。 |
+| `_approve_plan()` | 明确对话确认对象/风险后解析第一层，并启动 runtime revalidation worker。 |
+| `_runtime_ready(value)` | 显示新鲜状态/依赖/身份摘要和 MANUAL 警告，启用即时确认。 |
+| `_approve_runtime()` | 显式确认后解析第二层并启动 execution worker。 |
+| `_executed(value)` | 显示每步和最终/部分状态，完成后按钮只关闭。 |
+| `_failed(message)` | 显示友好失败，禁用执行并把取消按钮改为安全关闭。 |
+| `shutdown()` | 对活动 execution worker 请求取消未来步骤。 |
+| `_replace_cancel_callback(callback)` | 断开旧按钮槽并绑定唯一新阶段回调，避免重复点击多次执行。 |
+| `closeEvent(event)` | 关闭前调用 shutdown；不等待或强杀当前平台调用。 |
+| `_preview_html(prepared)` | HTML 转义显示身份、状态、分类、步骤、关系、权限和审查；不执行。 |
+| `_runtime_html(value)` | 显示即时对象与摘要，提醒 MANUAL。 |
+| `_result_html(result)` | 显示每步前后状态、验证和反向操作需新计划。 |
+| `ServiceManagementTab.__init__(runtime)` | 创建独立服务管理页但不立即枚举 SCM，避免应用启动和其他任务被服务清单占用线程。 |
+| `_build_ui()` | 构建筛选、表格、Start/Stop/Restart 检查按钮和说明。 |
+| `refresh()` | 禁用写入口并在线程池刷新新鲜清单。 |
+| `showEvent(event)` | 用户首次打开本页时惰性调用 `refresh()`；后续显示不自动重复，手动刷新仍可用。 |
+| `_inventory_ready(value)` | 类型收窄、保存清单并重绘；不会复用 Stage 3 陈旧对象执行。 |
+| `_render()` | 按本地筛选填充展示表；ServiceName 保存为选择提示。 |
+| `_selection_changed()` | 按选中 `ServiceInventoryItem` 的动作许可开启对应检查按钮。 |
+| `_set_actions(start, stop, restart)` | 集中控制三个按钮的 enabled 状态。 |
+| `_selected()` | 返回当前选中领域项或 `None`，不凭表格文本重建身份。 |
+| `_open_action(action)` | 对选中精确项打开工作流对话框；结束后刷新清单。 |
+| `open_action_request(action, target_hint, display_hint=None)` | 聊天入口；本地查找精确目标/选中引用后打开同一对话框，歧义拒绝。 |
+| `_failed(message)` | 显示只读加载错误并保持动作禁用。 |
+| `shutdown()` | 关闭管理页时请求活动对话框取消未来步骤。 |
+| `_search_text(item)` | 生成仅供本地筛选的 ServiceName/显示名/状态/发布者/分类文本。 |
+| `MainWindow._build_service_management_tab()` | 将“服务管理”作为独立页加入主窗口并连接聊天引用。 |
+| `MainWindow._remember_service_reference(service_name, display_name)` | 保存最近一次本地明确服务引用；仅作下次代词提示，不是执行授权。 |
+| `MainWindow._handle_chat()`（Stage 4C1 增量） | 识别有限服务动作；需要唯一目标或明确最近引用，随后打开同一 Preview 流程。LLM 不能直接调用 SCM。 |
+| `MainWindow.shutdown()`（Stage 4C1 增量） | 请求服务/其他 worker 取消，并等待 35 秒覆盖默认 SCM 30 秒 timeout + 清理余量，避免数据库先关闭。 |
+| `_references_previous_service(text)` | 仅检测有限中英文代词短语；没有最近明确引用时不会猜目标。 |
+
 ## Stage 4B 启动项安全管理 API
 
 下列接口均属于现有项目的 Stage 4B。除 Windows 适配器和 GUI worker 外，核心接口可在无

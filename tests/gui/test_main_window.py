@@ -17,11 +17,13 @@ def test_main_window_has_safe_default_tabs_and_local_chat(
 ) -> None:
     window = MainWindow(runtime)
     qtbot.addWidget(window)
-    assert window._tabs.count() == 9
+    assert window._tabs.count() == 10
     assert window._tabs.tabText(5) == "启动项管理"
+    assert window._tabs.tabText(6) == "服务管理"
     assert window._tabs.tabText(3) == "Windows 回收站"
     assert window._tabs.tabText(1) == "文件分析"
     assert window._tabs.tabText(2) == "安全文件操作"
+    assert window._service_management_tab._worker is None
     assert not window._scan_button.isEnabled()
     window._chat_input.setText("delete everything")
     qtbot.keyClick(window._chat_input, Qt.Key.Key_Return)

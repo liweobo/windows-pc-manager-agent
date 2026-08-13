@@ -38,10 +38,15 @@ from pc_manager_agent.orchestration.process_action_planner import (
     process_target_query,
 )
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.orchestration.service_action_planner import (
+    service_action_intent,
+    service_target_query,
+)
 from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnostic_request
 from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
+from pc_manager_agent.ui.service_management_tab import ServiceManagementTab
 from pc_manager_agent.ui.startup_management_tab import StartupManagementTab
 from pc_manager_agent.ui.system_diagnostics_tab import SystemDiagnosticsTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
@@ -62,7 +67,8 @@ class MainWindow(QMainWindow):
         self._tray: SystemTrayController | None = None
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 4B 启动项安全管理")
+        self._last_service_reference: tuple[str, str] | None = None
+        self.setWindowTitle("Windows PC Manager Agent — Stage 4C1 服务安全管理")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -72,6 +78,7 @@ class MainWindow(QMainWindow):
         self._build_trash_tab()
         self._build_system_diagnostics_tab()
         self._build_startup_management_tab()
+        self._build_service_management_tab()
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
@@ -197,6 +204,15 @@ class MainWindow(QMainWindow):
         self._startup_management_tab.status_message.connect(self.statusBar().showMessage)
         self._tabs.addTab(self._startup_management_tab, "启动项管理")
 
+    def _build_service_management_tab(self) -> None:
+        """Attach protected service inventory and exact Stage 4C1 action workflow."""
+        self._service_management_tab = ServiceManagementTab(self._runtime)
+        self._service_management_tab.status_message.connect(self.statusBar().showMessage)
+        self._service_management_tab.service_reference_changed.connect(
+            self._remember_service_reference
+        )
+        self._tabs.addTab(self._service_management_tab, "服务管理")
+
     def _build_audit_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -243,6 +259,29 @@ class MainWindow(QMainWindow):
             return
         self._conversation.append(f"你：{text}")
         self._chat_input.clear()
+        service_intent_value = service_action_intent(text)
+        if service_intent_value is not None:
+            self._tabs.setCurrentWidget(self._service_management_tab)
+            try:
+                target_query = service_target_query(text)
+            except ValueError as exc:
+                if _references_previous_service(text) and self._last_service_reference is not None:
+                    target_query, display_name = self._last_service_reference
+                else:
+                    self._conversation.append(f"Agent：未执行。{exc}")
+                    return
+            else:
+                display_name = target_query
+            self._conversation.append(
+                "Agent：正在用当前 SCM 清单本地解析目标并生成 Preview。"
+                "显示名称只是查询提示；执行前仍会绑定唯一 service name 并完成两次确认。"
+            )
+            self._service_management_tab.open_action_request(
+                service_intent_value,
+                target_query,
+                display_name=display_name,
+            )
+            return
         if is_process_action_request(text):
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             query: ProcessTargetQuery | None = None
@@ -372,6 +411,10 @@ class MainWindow(QMainWindow):
     @Slot(int, str)
     def _remember_process_reference(self, pid: int, name: str) -> None:
         self._last_process_reference = (pid, name)
+
+    @Slot(str, str)
+    def _remember_service_reference(self, service_name: str, display_name: str) -> None:
+        self._last_service_reference = (service_name, display_name)
 
     @Slot()
     def _choose_directory(self) -> None:
@@ -547,9 +590,13 @@ class MainWindow(QMainWindow):
         self._trash_tab.shutdown()
         self._system_diagnostics_tab.shutdown()
         self._startup_management_tab.shutdown()
+        self._service_management_tab.shutdown()
         if self._worker:
             self._worker.cancel()
-        QThreadPool.globalInstance().waitForDone(5_000)
+        # A dispatched SCM request cannot be force-cancelled safely.  Allow the
+        # configured 30-second service timeout plus a small cleanup margin so
+        # the database is not closed while a service worker is still auditing.
+        QThreadPool.globalInstance().waitForDone(35_000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Hide to tray unless a controlled application exit is in progress."""
@@ -572,4 +619,19 @@ def _references_previous_process(text: str) -> bool:
     return any(
         marker in normalized
         for marker in ("它", "这个进程", "选中的", "that process", "close it", "kill it")
+    )
+
+
+def _references_previous_service(text: str) -> bool:
+    normalized = text.casefold()
+    return any(
+        marker in normalized
+        for marker in (
+            "这个服务",
+            "那个服务",
+            "选中的服务",
+            "restart it",
+            "stop it",
+            "start it",
+        )
     )

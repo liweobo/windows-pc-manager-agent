@@ -101,10 +101,13 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-Stage 4B retains earlier stages and adds exactly two R2 startup tools: single-entry disable
-and restore for supported current-user HKCU Run or Startup Folder `.lnk` entries. Both require
-an exact DPAPI-encrypted backup, deterministic allow classification, Preview, plan approval,
-fresh revalidation, immediate approval, verification and audit. HKLM, RunOnce, common
-Startup, Microsoft/system/security/driver/enterprise/Agent/unresolved entries are read-only
-or blocked. StartupApproved is never written. There is no generic registry/path tool, batch
-disable, permanent deletion, shell, elevation, service modification or software uninstall.
+Stage 4C1 retains earlier stages and adds exactly two narrow SCM tools:
+`system.service.start` and `system.service.stop`. START/STOP are R2 and RESTART is an explicit
+R2_HIGH_IMPACT STOP/verify/revalidate/START/verify transaction. Only one exact ServiceName for
+a signed, own-process, current-user third-party service can pass policy, permission,
+dependency, Preview, plan-confirmation and immediate-confirmation gates. Driver/shared/system/
+Microsoft/security/network/login/storage/update/enterprise/Agent/unknown services are
+read-only or blocked. Never cascade dependencies, retry automatically, elevate, use shell,
+WMI, `sc.exe`, kill a service process, change service configuration, uninstall software, or
+auto-resume interrupted transactions. Service recovery is MANUAL and partial restart outcomes
+must display the freshly observed state.
