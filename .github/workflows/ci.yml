@@ -52,12 +52,16 @@ jobs:
           tests/unit/test_process_confirmation.py
           tests/unit/test_process_resolution.py
           tests/unit/test_process_tools.py
+          tests/unit/test_startup_actions.py
+          tests/unit/test_startup_resolver.py
           tests/unit/test_recycle_bin_platform.py
           tests/integration/test_file_operations_flow.py
           tests/integration/test_operation_transactions.py
           tests/integration/test_trash_flow.py
           tests/integration/test_trash_recovery.py
           tests/integration/test_process_action_flow.py
+          tests/integration/test_startup_action_workflow.py
+          tests/security/test_startup_safety.py
           --cov=pc_manager_agent.safety
           --cov=pc_manager_agent.confirmation --cov=pc_manager_agent.rollback
           --cov=pc_manager_agent.recovery
@@ -75,6 +79,9 @@ jobs:
       - name: Real Windows process adapter disposable probe
         if: matrix.python-version == '3.13'
         run: uv run pytest tests/integration/test_windows_process_management_real.py -q
+      - name: Real Windows startup read-only adapter probe
+        if: matrix.python-version == '3.13'
+        run: uv run pytest tests/integration/test_windows_startup_readonly.py -q
       - name: 10,000-file streaming benchmark
         if: matrix.python-version == '3.13'
         run: uv run pytest tests/performance/test_large_scan.py -q -s

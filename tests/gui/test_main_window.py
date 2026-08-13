@@ -17,7 +17,8 @@ def test_main_window_has_safe_default_tabs_and_local_chat(
 ) -> None:
     window = MainWindow(runtime)
     qtbot.addWidget(window)
-    assert window._tabs.count() == 8
+    assert window._tabs.count() == 9
+    assert window._tabs.tabText(5) == "启动项管理"
     assert window._tabs.tabText(3) == "Windows 回收站"
     assert window._tabs.tabText(1) == "文件分析"
     assert window._tabs.tabText(2) == "安全文件操作"

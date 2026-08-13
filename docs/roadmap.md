@@ -47,11 +47,20 @@ postcondition verification, additive transaction/audit records, restart interrup
 handling, and GUI/chat entry points. Force never follows automatically and cannot reuse a
 graceful approval. Process command lines, elevation, shell and automatic rollback are absent.
 
-## Stage 4B+ — other controlled system operations (not started)
+## Stage 4B — controlled startup management (complete)
 
-Startup/service changes, software uninstall, firewall changes, cleanup and other R3
-operations remain design-only. Each capability requires its own threat model, confirmation,
-recovery plan, Windows API experiment, and isolated test/review before implementation.
+Fixed-source read-only inventory, exact current-user startup identity, default-deny safety
+classification, DPAPI-encrypted exact backup, Preview, two confirmations, single-object
+disable/restore, conflict-free FULL rollback, verification, audit, GUI and Windows read-only
+probe. Only HKCU Run and supported current-user Startup Folder links can be changed. There is
+no generic registry editor, StartupApproved write, machine-wide change, RunOnce change,
+permanent deletion, bulk action, elevation or shell fallback.
+
+## Stage 4C+ — other controlled system operations (not started)
+
+Service changes, software uninstall, firewall changes, cleanup and other R3 operations
+remain design-only. Each capability requires its own threat model, confirmation, recovery
+plan, Windows API experiment, and isolated test/review before implementation.
 
 ## Later stages
 

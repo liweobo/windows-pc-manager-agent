@@ -1,5 +1,23 @@
 # Windows PC Manager Agent
 
+## Stage 4B：启动项安全管理
+
+Stage 4B 在现有项目中增加“启动项管理”页，但只开放两个窄工具：
+
+- `startup.disable`：禁用一个经过重新读取、分类、完整备份和双重确认的当前用户启动项；
+- `startup.restore`：只从 Agent 自己创建且验证通过的备份恢复一个启动项。
+
+可管理范围限于 `HKCU\\...\\Run` 和当前用户 Startup Folder 中可可靠解析的 `.lnk`。
+`RunOnce`、HKLM、公共 Startup Folder、Microsoft/Windows 组件、安全软件、驱动相关项、
+企业管理项、Agent 自身以及身份不明的条目均保持只读或直接阻止。注册表值采用固定位置的
+Win32 事务 API；快捷方式使用同卷移动且禁止覆盖。精确恢复材料先由当前 Windows 用户的
+DPAPI 加密，再写入本地 SQLite；审计日志只保存摘要，不保存命令或备份字节。
+
+禁用和恢复都保守定为 R2，必须依次完成计划确认和临执行即时确认。任一发布者、程序路径、
+注册表值、快捷方式、Windows StartupApproved 证据、计划或备份摘要发生变化，旧确认立即
+失效。`FULL` 表示在原位置仍无冲突且精确备份仍可解密验证时可以自动回滚，并不保证程序下一次
+一定启动。应用不提供通用注册表编辑器、启动项删除、批量禁用、管理员提权或 Shell 退路。
+
 ## Stage 4A：受控进程关闭与终止
 
 Stage 4A 在 Stage 3 只读进程清单上增加两个、也只有两个写工具：
@@ -180,6 +198,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
 uv run pytest -m "not performance" --cov=pc_manager_agent --cov-report=term-missing --cov-fail-under=85
 uv run pytest tests/performance/test_large_scan.py -q -s
 uv run pytest tests/integration/test_windows_process_management_real.py -q
+uv run pytest tests/integration/test_windows_startup_readonly.py -q
 uv run bandit -q -r src
 uv run pip-audit
 uv build

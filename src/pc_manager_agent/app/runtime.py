@@ -13,6 +13,7 @@ from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
 from pc_manager_agent.audit.process_actions import ProcessActionAuditLogger
 from pc_manager_agent.audit.repository import AuditRepository
+from pc_manager_agent.audit.startup_actions import StartupActionAuditLogger
 from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
 from pc_manager_agent.authorization.models import AuthorizedPath
@@ -27,6 +28,7 @@ from pc_manager_agent.confirmation.file_operations import (
     RollbackConfirmationService,
 )
 from pc_manager_agent.confirmation.process_actions import ProcessActionConfirmationService
+from pc_manager_agent.confirmation.startup_actions import StartupActionConfirmationService
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
 from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmationService
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
@@ -56,6 +58,8 @@ from pc_manager_agent.orchestration.process_action_planner import ProcessActionP
 from pc_manager_agent.orchestration.process_actions import ProcessActionService
 from pc_manager_agent.orchestration.process_target_resolver import ProcessTargetResolver
 from pc_manager_agent.orchestration.service import ScanOrchestrator
+from pc_manager_agent.orchestration.startup_actions import StartupActionService
+from pc_manager_agent.orchestration.startup_target_resolver import StartupTargetResolver
 from pc_manager_agent.orchestration.system_diagnostic_planner import DiagnosticPlanCompiler
 from pc_manager_agent.orchestration.system_diagnostics import (
     DiagnosticOrchestrator,
@@ -74,7 +78,16 @@ from pc_manager_agent.persistence.process_actions import (
     ProcessActionRepository,
     ProcessExecutionGuard,
 )
+from pc_manager_agent.persistence.startup_actions import (
+    StartupActionRepository,
+    StartupBackupVault,
+    StartupExecutionGuard,
+)
 from pc_manager_agent.platform_support.processes import ProcessManagementPlatform
+from pc_manager_agent.platform_support.startup import StartupManagementPlatform
+from pc_manager_agent.platform_support.windows.data_protection import (
+    WindowsCurrentUserDataProtector,
+)
 from pc_manager_agent.platform_support.windows.explorer import WindowsExplorerService
 from pc_manager_agent.platform_support.windows.file_operations import (
     WindowsFileOperationPlatform,
@@ -87,6 +100,9 @@ from pc_manager_agent.platform_support.windows.process_management import (
     WindowsProcessManagementPlatform,
 )
 from pc_manager_agent.platform_support.windows.recycle_bin import WindowsRecycleBinPlatform
+from pc_manager_agent.platform_support.windows.startup_management import (
+    WindowsStartupManagementPlatform,
+)
 from pc_manager_agent.platform_support.windows.system_diagnostics import (
     WindowsSystemDiagnosticsPlatform,
 )
@@ -102,6 +118,9 @@ from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
 from pc_manager_agent.safety.process_policy import ProcessSafetyPolicy
 from pc_manager_agent.safety.process_preview import ProcessPreviewEngine
 from pc_manager_agent.safety.process_validator import ProcessActionSafetyValidator
+from pc_manager_agent.safety.startup_policy import StartupSafetyPolicy
+from pc_manager_agent.safety.startup_preview import StartupPreviewEngine
+from pc_manager_agent.safety.startup_validator import StartupActionSafetyValidator
 from pc_manager_agent.safety.system_diagnostics import DiagnosticSafetyValidator
 from pc_manager_agent.safety.trash_policy import TrashPathPolicy
 from pc_manager_agent.safety.trash_preview import TrashPreviewEngine
@@ -132,6 +151,10 @@ from pc_manager_agent.tools.system_tools.collectors import (
 from pc_manager_agent.tools.system_tools.process_actions import (
     ForceTerminateProcessTool,
     RequestProcessExitTool,
+)
+from pc_manager_agent.tools.system_tools.startup_actions import (
+    DisableStartupTool,
+    RestoreStartupTool,
 )
 
 
@@ -193,6 +216,16 @@ class ProcessActionServices:
     service: ProcessActionService
 
 
+@dataclass(frozen=True, slots=True)
+class StartupActionServices:
+    """Dependency bundle for backed-up Stage 4B startup actions."""
+
+    registry: ToolRegistry
+    platform: StartupManagementPlatform
+    resolver: StartupTargetResolver
+    service: StartupActionService
+
+
 class ApplicationRuntime:
     """Own shared infrastructure and create root-scoped orchestrators."""
 
@@ -234,9 +267,23 @@ class ApplicationRuntime:
         )
         self.process_action_repository = ProcessActionRepository(settings.database_path)
         self.interrupted_process_action_ids = self.process_action_repository.initialize()
+        self.startup_confirmation = StartupActionConfirmationService(
+            settings.confirmation_ttl_seconds,
+            settings.startup_runtime_confirmation_ttl_seconds,
+        )
+        self.startup_action_repository = StartupActionRepository(settings.database_path)
+        self.interrupted_startup_action_ids = self.startup_action_repository.initialize()
+        self.startup_backup_vault = StartupBackupVault(
+            settings.database_path,
+            WindowsCurrentUserDataProtector(),
+        )
+        self.startup_backup_vault.initialize()
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
         self.process_management_platform = WindowsProcessManagementPlatform()
+        self.startup_management_platform = WindowsStartupManagementPlatform(
+            settings.data_directory / "disabled_startup"
+        )
         self.report_exporter = ReportExporter(
             self.analysis_results,
             on_export=self._audit_report_export,
@@ -641,8 +688,55 @@ class ApplicationRuntime:
             service=service,
         )
 
+    def create_startup_action_services(self) -> StartupActionServices:
+        """Build the Stage 4B inventory, policy, encrypted backup, and narrow tools."""
+        platform = self.startup_management_platform
+        resolver = StartupTargetResolver(platform, max_items=self.settings.diagnostic_max_items)
+        policy = StartupSafetyPolicy(agent_root=Path(__file__).resolve().parents[1])
+        guard = StartupExecutionGuard(self.startup_action_repository)
+        registry = ToolRegistry(write_guard=guard)
+        registry.register(
+            DisableStartupTool(
+                platform,
+                self.startup_backup_vault,
+                self.startup_action_repository,
+            )
+        )
+        registry.register(
+            RestoreStartupTool(
+                platform,
+                self.startup_backup_vault,
+                self.startup_action_repository,
+            )
+        )
+        audit = StartupActionAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        service = StartupActionService(
+            platform,
+            resolver,
+            policy,
+            StartupPreviewEngine(policy),
+            StartupActionSafetyValidator(registry),
+            self.startup_confirmation,
+            self.startup_backup_vault,
+            self.startup_action_repository,
+            registry,
+            audit,
+        )
+        return StartupActionServices(
+            registry=registry,
+            platform=platform,
+            resolver=resolver,
+            service=service,
+        )
+
     def close(self) -> None:
         """Release local persistence resources."""
+        self.startup_backup_vault.close()
+        self.startup_action_repository.close()
         self.process_action_repository.close()
         self.operation_repository.close()
         self.analysis_results.close()

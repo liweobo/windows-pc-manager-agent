@@ -1,5 +1,22 @@
 # Threat model
 
+## Stage 4B additions
+
+| Threat | Boundary/control | Residual risk |
+|---|---|---|
+| Model invents a registry path or bulk action | Fixed source enum, reference-only tool schema, max batch 1 | User can still select the wrong ordinary entry; Preview must be read |
+| Entry changes after Preview | Full identity/state/approval/backup digests and immediate reread | A privileged concurrent attacker can still race after the last check |
+| Protected/security startup is disabled | Default-deny name/path/publisher/scope/source classification | Publisher metadata is auxiliary and can be stale or spoofed; unknown blocks |
+| Backup leaks a command or shortcut | Current-user DPAPI, separate vault, audit stores digests only | Same-user malware may access process or DPAPI context |
+| Restore overwrites a new object | Original location must be absent; exact disabled material must match | Manual external changes can make automatic recovery unavailable |
+| StartupApproved binary is misinterpreted | Read-only evidence; no write path | Windows may add formats that become UNKNOWN/read-only |
+| GUI freeze or shutdown race | COM-initialized bounded workers; shutdown waits for the pool | A stuck OS call can delay cooperative shutdown |
+| Crash leaves uncertain mutation | Durable states; no automatic resume; verification/audit | Manual inspection may be required after abrupt process termination |
+| “Disabled” is treated as a launch guarantee | Result says configuration absent/present only | Other startup mechanisms or application self-repair may still launch it |
+
+Stage 4B does not authorize HKLM/RunOnce/common Startup writes, service changes, software
+uninstall, elevation, arbitrary registry editing or shell commands.
+
 ## Stage 4A additions
 
 | Threat | Boundary/control | Residual risk |

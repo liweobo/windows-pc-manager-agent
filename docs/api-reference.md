@@ -1,5 +1,467 @@
 # API reference
 
+## Stage 4B 启动项安全管理 API
+
+下列接口均属于现有项目的 Stage 4B。除 Windows 适配器和 GUI worker 外，核心接口可在无
+GUI、无模型、无真实注册表写入的环境中测试。所有写接口只接受不可伪造的身份/备份引用，
+不接受任意注册表路径、命令行或 Shell 字符串。
+
+### 领域模型 `domain.startup_actions`
+
+`StartupSource`、`StartupActionType`、`StartupEntryStatus`、`StartupSafetyClass`、
+`StartupManagementMode`、`StartupSafetyDecision`、`StartupErrorCode` 和
+`StartupTransactionState` 是有限枚举，分别约束来源、唯一两种动作、可证明的配置状态、
+安全分类、是否可管理、最终策略决定、稳定错误码和持久化事务状态。它们没有副作用；未知值
+在 Pydantic 校验阶段失败，防止模型或 UI 扩大工具能力。
+
+#### `RegistryStartupIdentity.canonical_digest()`
+
+散列 hive、固定键路径、值名、原始类型/数据摘要、命令指纹、解析路径、StartupApproved
+摘要和注册表视图。返回 64 位 SHA-256 十六进制字符串；不返回或记录原始命令字节。
+
+#### `FolderStartupIdentity.canonical_digest()`
+
+先规范化快捷方式和目标路径大小写，再散列卷序列号、File ID、`.lnk` 内容摘要、参数/
+工作目录指纹和 approval 摘要。用于发现快捷方式被替换、改写或重定向。
+
+#### `StartupIdentity.require_matching_identity()` / `canonical_digest()`
+
+模型校验器确保注册表来源只能携带 registry 身份、Startup Folder 来源只能携带 folder
+身份；混合或缺失会抛 `ValidationError`。摘要以来源值为前缀，避免不同来源的同名对象碰撞。
+
+#### `StartupObservation.current_state_digest()`
+
+绑定身份、状态、状态证据、管理模式、发布者和解析后的程序路径，返回确认使用的当前状态
+摘要。只读，无 I/O；任一可见安全证据变化都会使旧 Preview/确认失效。
+
+#### `StartupBackupPayload.require_source_material()` / `canonical_digest()`
+
+校验 HKCU Run 备份必须有精确值字节和类型，Startup Folder 备份必须有精确 `.lnk` 字节
+和 Agent 存储路径，且两类材料不能混用；只读来源不能生成写备份。摘要覆盖解密后的全部恢复
+材料。原始字节字段在 `repr` 中隐藏，并只能持久化到加密 vault。
+
+#### `StartupActionPlan.validate_contract()` / `canonical_digest()`
+
+强制每个启动项写计划都是 R2、FULL、计划确认加即时确认且只有一个精确目标；违反时抛
+`ValidationError`。摘要覆盖所有执行相关字段，计划文字或动作改变都会失效。
+
+#### `StartupActionPreview.executable` / `canonical_digest()`
+
+`executable` 仅在确定性策略 ALLOW、备份已验证且 observation 仍匹配状态摘要时为真。
+`canonical_digest` 绑定完整 Preview，供确认和事务使用。两者只读。
+
+#### `_canonical_digest(payload)`
+
+内部辅助函数，以排序、紧凑 JSON 编码 `JsonValue` 后计算 SHA-256；为所有 Stage 4B 摘要
+提供唯一规范算法，不读取文件或数据库。
+
+`StartupSafetyAssessment`、`StartupBackupReference`、`StartupActionRequest`、
+`StartupMutationResult`、`StartupActionTransaction` 和 `DisabledStartupRecord` 是不可变数据
+载体。工具 request 只有动作、身份、状态摘要和备份引用，精确命令/快捷方式字节不会通过
+公共工具参数传播。
+
+### 应用运行时与配置
+
+#### `ApplicationRuntime.create_startup_action_services()`
+
+创建一个短生命周期 `StartupActionServices` 组合，注入共享确认、事务 repository、加密 vault
+和审计，以及新的 Windows adapter、resolver、policy、Preview、validator、registry 和两个窄
+工具。它不扫描或修改启动项；实际 I/O 由后续明确调用触发。非 Windows 平台抛运行时错误。
+
+#### `ApplicationRuntime.close()`（Stage 4B 扩展）
+
+在既有资源之外关闭启动项 vault/repository engine。主窗口先等待有限 worker 完成，再调用此
+方法，避免后台线程使用已释放数据库；重复关闭由底层 SQLAlchemy 安全处理。
+
+#### `AppSettings.startup_plan_confirmation_ttl_seconds` / `startup_runtime_confirmation_ttl_seconds`
+
+从环境读取计划与即时确认有效期并返回正整数；缺失时使用保守默认值，非法或非正值让设置加载
+失败，不会退化为永不过期确认。
+
+#### `MainWindow._build_startup_management_tab()` / `shutdown()` / `closeEvent()`（Stage 4B 扩展）
+
+前者只构建并连接 Stage 4B 页面状态；`shutdown` 通知该页拒绝待确认请求并等待全局线程池；无
+托盘的直接关窗也先调用 shutdown。主窗口仍不直接访问 platform 或 ToolRegistry。
+
+### 异常 `domain.startup_errors`
+
+#### `StartupActionError.__init__(code, message)`
+
+保存稳定 `StartupErrorCode` 和面向用户的非敏感消息。`StartupIdentityChangedError.__init__`
+固定为身份变化；`StartupConflictError.__init__` 固定为不覆盖冲突；`StartupBackupError` 用于
+缺失、损坏或未验证备份。异常不会自动重试或降级权限。
+
+### 策略、Preview 与独立复核
+
+#### `StartupSafetyPolicy.__init__(agent_root, windows_directory=None)`
+
+规范化 Agent 根目录和 Windows 目录。默认 Windows 目录来自 `WINDIR`；构造过程不枚举或
+写入启动项。
+
+#### `StartupSafetyPolicy.assess(observation, action)`
+
+按 scope、Agent 路径/名称、程序存在性、Windows 路径、安全/驱动/企业标记、发布者、管理
+模式和允许来源顺序分类。仅普通当前用户、已知发布者、受支持来源和正确状态可 ALLOW；其余
+返回 BLOCK、稳定原因码和解释。发布者只是组合证据，模型不能覆盖结论。
+
+#### `_canonical(path)` / `_is_within(path, root)` / `_explain(reason)`
+
+分别做非严格解析加 Windows 大小写规范、无异常的祖先关系检查、以及稳定错误码到说明的
+映射。均为纯辅助函数，不执行变更。
+
+#### `StartupPreviewEngine.__init__(policy)` / `build(plan, observation, backup)`
+
+注入确定性策略；`build` 先比较身份、备份 ID/摘要和当前状态，再评估策略并创建不可变
+Preview。任何不一致抛 `ValueError`，且在异常前无写操作。
+
+#### `StartupActionSafetyValidator.__init__(registry)` / `review(plan, preview)`
+
+独立检查 `startup.disable`/`startup.restore` 是否注册、manifest 风险/回滚/批量是否精确、
+plan/Preview/action/identity/state/backup 绑定是否一致及策略是否 ALLOW。返回
+`StartupSafetyReview(approved, issues)`；所有问题都收集后拒绝，不执行工具。
+
+### 双重确认 `confirmation.startup_actions`
+
+#### `StartupActionConfirmationService.__init__(plan_ttl_seconds=300, runtime_ttl_seconds=60, now=None)`
+
+设置两个正数有效期和可测试时钟；非正值抛 `ValueError`。确认只保存在当前进程内，重启后
+不会恢复成执行权限。
+
+#### `request_plan(plan, preview)` / `resolve_plan(id, approved, plan, preview)`
+
+前者仅为可执行且完全匹配的 Preview 创建 PLAN 请求；后者只能一次性批准/拒绝尚未过期的
+同一请求。返回不可变 `StartupActionConfirmation`；失配、未知、重复或过期抛
+`StartupConfirmationError`。
+
+#### `request_runtime(plan_confirmation_id, plan, preview)`
+
+要求父 PLAN 已批准、未过期、动作和绑定仍一致；允许绑定经过实时重验的新 Preview，并创建
+较短有效期的 RUNTIME 请求。父确认不能是拒绝、消费或其他动作。
+
+#### `resolve_runtime(...)` / `consume_runtime(...)`
+
+即时确认的决议与消费接口。消费发生在工具写边界，同时把父/子确认标为 CONSUMED；重复消费、
+Preview 变化、父确认失效或过期都抛异常。无平台副作用。
+
+#### `_create` / `_resolve` / `_get` / `_require_not_expired` / `_require_executable` / `_require_current`
+
+内部函数分别创建摘要绑定请求、执行一次性状态变化、查找并拒绝空/未知 ID、标记过期、检查
+Preview 可执行性，以及比较 action/transaction/operation/plan/identity/state/backup/Preview
+绑定。它们是所有公共确认方法共享的 fail-closed 实现。
+
+### 目标解析与编排
+
+#### `StartupTargetResolver.__init__(platform)` / `list_current()`
+
+注入有限平台协议；每次 `list_current` 都重新读取当前配置并按确定性顺序返回，不使用缓存。
+
+#### `resolve_name(query)` / `resolve_identity(identity)`
+
+名称解析先精确再有限模糊匹配，零结果和多结果分别抛未找到/歧义错误；身份解析调用平台
+`inspect`，严格拒绝身份变化。UI 的旧表格行只是查询线索，不是授权。
+
+#### `StartupActionService.list_current()` / `list_disabled()`
+
+前者实时读取并为每项附加 DISABLE 策略评估；后者只读 Agent 的持久化禁用索引。均不执行
+变更。
+
+#### `prepare_disable(user_goal, identity)`
+
+解析一个实时目标、评估策略、捕获精确备份、DPAPI 加密持久化并验证读回，然后建立计划、
+Preview、独立审查、事务和审计。任一前置失败即停止；成功仍未禁用启动项。
+
+#### `prepare_restore(user_goal, backup_id)`
+
+只从 Agent 禁用索引和相同 verified vault 备份建立恢复计划；不会接受任意路径或外部备份。
+确认原位置无新对象和禁用材料未变后返回 plan/Preview/review，仍无平台写入。
+
+#### `request_plan_confirmation` / `resolve_plan_confirmation`
+
+把编排事务与确认服务衔接，持久记录请求/结果和审计。拒绝时进入阻止状态；审计或数据库不可用
+时不授予执行能力。
+
+#### `request_runtime_confirmation` / `resolve_runtime_confirmation`
+
+执行前重新读取身份、发布者/路径/approval、备份和策略，产生新 Preview 后申请短期确认并
+持久化。变化、冲突或备份错误会阻止事务，不会沿用旧 Preview。
+
+#### `execute(plan_confirmation_id, runtime_confirmation_id, plan, preview)`
+
+核对父子确认关联，消费确认，写前审计并生成数据库 execution authorization；再通过唯一
+`ToolRegistry` 路径调用对应窄工具。结果经过类型/后置条件验证并更新禁用索引、事务和审计。
+失败会记录 BLOCKED/FAILED/ROLLBACK 状态并重新抛出，不尝试 shell 或提权。
+
+#### `_prepare` / `_build_plan` / `_revalidate` / `_block` / `_arguments`
+
+内部函数分别完成共享的 Preview/复核/事务持久化，构造不可变 R2 计划，按动作重验 active 或
+disabled 状态，安全地记录阻止原因，以及生成不含秘密的严格工具参数。`_restore_observation`
+从原 observation 生成仅供恢复评估的状态；`_tool_name` 是动作到两个固定工具名的完整映射。
+
+### 加密备份与事务持久化
+
+#### `BackupProtector.protect(plaintext)` / `unprotect(ciphertext)`
+
+平台无关协议：实现必须返回加密字节或解密字节，失败须抛异常。生产实现是当前用户 DPAPI；
+测试可注入确定性 fake。
+
+#### `StartupBackupVault.__init__(database_path, protector)` / `initialize()` / `close()`
+
+创建独立 SQLAlchemy engine 和保护器；`initialize` 建表并启用服务，`close` 释放连接。未初始化
+调用任何数据方法抛 `StartupStoreError`。
+
+#### `StartupBackupVault._require_initialized()` / `StartupActionRepository._require_initialized()`
+
+内部前置检查，engine/session factory 尚未建立时统一抛 `StartupStoreError`。数据库不可用时不会
+创建确认或运行启动项写操作。
+
+#### `StartupBackupVault.store(payload)`
+
+序列化精确 payload、计算明文摘要、调用保护器、写入密文，再强制读回/解密/摘要校验；只在
+全部成功时返回 verified `StartupBackupReference`。数据库或 DPAPI 失败使计划停止。
+
+#### `StartupBackupVault.load(backup_id, expected_digest)` / `_load(...)`
+
+读取密文、解密和 Pydantic 校验，检查已验证标志、存储摘要及调用方期望摘要；任一不一致抛
+`StartupStoreError`。公共 `load` 永远不允许未验证记录。
+
+#### `StartupActionRepository.__init__` / `initialize` / `close`
+
+管理事务、确认和禁用索引表。初始化时把不可能安全继续的活动事务标为中断；关闭释放 engine。
+
+#### `create(plan, preview)` / `transition(transaction_id, expected, target, ...)`
+
+`create` 持久化新事务及精确摘要；`transition` 使用允许的前态集合做比较并更新目标状态、错误和
+结果摘要。状态竞争、非法跳转或数据库错误抛 `StartupStoreError`。
+
+#### `bind_runtime_preview(...)` / `record_confirmation(...)` / `bind_confirmation(...)`
+
+分别保存实时 Preview 摘要、两级确认记录和事务上的确认 ID。只保存引用、决定和时间，不保存
+原始命令或快捷方式字节。
+
+#### `consume_confirmation_pair(transaction_id, plan_confirmation_id, runtime_confirmation_id)`
+
+在一个数据库事务中验证同 action/plan/preview/identity/state/backup 的父子确认并一次性消费；
+返回 `ExecutionAuthorization` 所需证明。重复、过期或摘要变化均拒绝。
+
+#### `record_disabled` / `mark_restored` / `get_disabled` / `list_disabled`
+
+维护 Agent 可恢复索引：成功禁用后记录原 observation 和 backup 引用；成功恢复后标记恢复；
+查询不存在或已恢复记录会失败/排除。索引不是 backup，本身不含精确恢复字节。
+
+#### `get(transaction_id)` / `require_execution_authorization(authorization, tool_name, arguments)`
+
+读取 typed 事务；授权检查比较事务状态、固定工具、完整参数摘要和已消费确认，确保绕过编排器
+直接调用 registry 仍失败。
+
+#### `StartupExecutionGuard.require(...)`
+
+把通用 `WriteExecutionGuard` 协议桥接到 repository 的严格授权检查，无返回值；不匹配抛
+`WriteAuthorizationError`/存储错误。
+
+`_transaction_from_row`、`_disabled_from_row` 将 ORM 行恢复为 typed 模型；`_as_utc` 统一
+SQLite naive 时间为 UTC。它们只做数据转换。
+
+### 平台协议、Windows 与 DPAPI
+
+#### `StartupManagementPlatform.list_entries(max_items=5000)`
+
+返回有限 `StartupObservation` 元组。生产实现只枚举六个固定来源，按上限截断；单项无法解析
+时产生 READ_ONLY/UNKNOWN observation，而不是猜测可执行状态。
+
+#### `inspect(identity)` / `capture_backup(identity, backup_id)`
+
+`inspect` 在原来源重新定位并比较完整身份，未找到返回 `None`，变化抛身份错误；
+`capture_backup` 只为可写当前用户来源读取精确原始字节、类型、approval 证据和禁用存储位置。
+
+#### `disable(payload)` / `restore(payload)` / `disabled_material_matches(payload)`
+
+前两者是唯一平台写 API：校验固定来源、当前状态和 approval 后，事务删除/还原 HKCU Run 值，
+或同卷无覆盖移动 `.lnk`。后者只读验证禁用材料仍与 backup 精确一致。冲突、权限、身份和平台
+错误均抛 typed 异常；没有 fallback。
+
+#### `WindowsStartupManagementPlatform.__init__(disabled_storage_root)`
+
+规范化并创建 Agent 自有禁用存储根，加载固定 Win32/COM 函数签名。它不接受注册表根或任意
+来源配置。
+
+#### `_list_registry_source` / `_list_folder_source` / `_registry_observation` / `_folder_observation`
+
+内部只读枚举与 observation 构造函数：读取原始注册表值/`.lnk`，生成隐私最小化命令摘要、
+稳定身份、解析程序和发布者证据。不会把完整命令暴露给 UI、audit 或模型。
+
+#### `_inspect_location` / `_approval_for_registry` / `_require_approval_unchanged`
+
+精确定位身份、只读 StartupApproved 字节/摘要、并在写入前比较捕获证据。不存在和改变是不同
+结果；approval 未知格式保持只读且从不写入。
+
+#### `_read_optional_raw_value` / `_read_raw_value` / `_query_raw_handle`
+
+通过 `RegQueryValueExW` 两阶段读取保留精确注册表类型和原始字节，处理值增长并设置大小上限。
+可选版本把“值不存在”转为 `None`；其他错误不吞掉。
+
+#### `_delete_registry_value_transacted` / `_set_registry_value_transacted`
+
+在固定 HKCU Run 键上通过 transacted handle 删除或按原类型/字节恢复一个值；不存在、已存在、
+范围不符均拒绝，commit 前不会报告成功。
+
+#### `_open_transacted_run_key` / `_commit_transaction` / `_rollback_transaction` / `_close_registry_key` / `_close_handle`
+
+创建 Windows transaction、只打开编译期固定 native-view HKCU Run 键、提交/回滚并确定释放
+句柄。任一 Win32 返回码转为明确平台错误；rollback/close 用于异常清理。
+
+#### `_decode_registry_command` / `_resolve_command` / `_command_line_to_argv` / `_resolve_executable_path`
+
+按注册表类型解码字符串、用 `CommandLineToArgvW` 解析、展开受控环境变量并只接受可确定的绝对
+`.exe` 路径。歧义、非字符串类型或解析失败返回 unresolved/read-only，不执行命令。
+
+#### `_read_shell_link` / `_publisher` / `_approval_status`
+
+分别通过 ShellLink COM 只读 target/arguments/working directory，通过版本资源读取辅助公司名，
+以及仅解释已知 12-byte StartupApproved 状态。可执行文件没有版本资源时 `_publisher` 返回
+`None` 并由策略保持只读，而不是中断整个清单；未知证据不推断成 enabled/disabled。
+
+#### `_unresolved_registry_observation` / `_unresolved_folder_observation`
+
+为不可安全解析的条目创建可展示但不可操作的 observation，保留来源/范围/错误证据而不泄露
+完整命令。
+
+#### `_require_registry` / `_require_folder` / `_require_disabled_path` / `_read_bounded_file` / `_view_flag` / `_raise_registry_error`
+
+内部 fail-closed 守卫：验证来源和 identity 类型、禁用路径必须在 Agent 根内、文件大小受限、
+注册表视图仅限固定枚举、Win32 错误转换为 stable exceptions。
+
+#### `WindowsCurrentUserDataProtector.__init__(entropy=None)`
+
+准备可选应用熵和 Win32 `CryptProtectData`/`CryptUnprotectData` 签名。熵不是密码；安全性仍由
+当前 Windows 用户 DPAPI 上下文提供。
+
+#### `protect(plaintext)` / `unprotect(ciphertext)`
+
+加密或解密 bytes，正确释放 `LocalAlloc` 输出。空/损坏/其他用户上下文等失败抛
+`OSError`，不会退回明文存储。
+
+### 命令对象和注册工具
+
+#### `DisableStartupCommand.execute()` / `verify()` / `rollback()`
+
+`execute` 调平台 disable；`verify` 要求 active 位置缺失且禁用材料精确匹配；`rollback` 调
+exact restore 并重新 inspect。它不吞异常，也不改变风险/确认。
+
+#### `RestoreStartupCommand.execute()` / `verify()` / `rollback()`
+
+`execute` 调 exact restore；`verify` 要求原 identity 恢复；`rollback` 重新 disable 并验证
+active 缺失且禁用材料匹配。
+
+#### `DisableStartupTool.__init__` / `manifest` / `execute(request, cancellation)` / `_load_payload`
+
+注入平台、vault、repository；manifest 固定为 R2/FULL/双确认/单对象。执行时校验 action、
+写前取消和 backup identity，运行命令并验证；验证失败立刻尝试 rollback，返回 typed
+`StartupMutationResult`，不声称未来启动行为。
+
+#### `RestoreStartupTool.__init__` / `manifest` / `execute(request, cancellation)`
+
+除相同 manifest 约束外，还要求 Agent disabled 索引存在且身份匹配，再从 verified vault
+恢复。验证失败执行 inverse disable；取消仅在 mutation 前生效。
+
+#### `_manifest(name, description)`
+
+构造固定 manifest：ordinary-user、current-user-startup-only、30 秒、批量 1、支持取消/
+Preview、两级确认、FULL、Windows-only。调用方不能改变风险或来源。
+
+### 审计
+
+#### `StartupActionAuditLogger.__init__(repository, app_version, git_commit)`
+
+注入通用审计库和版本信息；不持有 backup vault，避免审计接触恢复字节。
+
+#### `previewed(plan, preview)` / `confirmation_resolved(plan, confirmation)`
+
+记录计划/Preview/身份/状态/backup 摘要、风险、策略和用户决议。参数经过固定字段选择，原始
+命令和精确 backup 字段不会被写入。
+
+#### `started(plan, preview, runtime_confirmation_id)` / `completed(plan, result)` / `failed(...)`
+
+分别记录强制性的写前证据、验证完成结果和阻止/失败/回滚状态。审计失败由编排器视为执行
+阻断条件；写后审计失败不会伪造成功或自动重复系统写。
+
+#### `_tool_name(plan)`
+
+把 DISABLE/RESTORE 映射到唯一两个固定工具名，仅用于审计字段。
+
+### GUI 与 worker
+
+#### `StartupManagementTab.__init__(runtime)` / `_build_ui()` / `refresh()`
+
+创建两个表格、筛选、刷新和单对象操作按钮；初始化后启动只读 worker。`refresh` 防止并发重复
+读取并禁用操作按钮，UI 线程不访问平台。
+
+#### `_inventory_ready` / `_render` / `_selection_changed`
+
+类型校验 worker 结果、按文本筛选并填充 active/disabled 表、依据精确 ALLOW/管理模式控制
+按钮。显示值从不变成新的执行参数。
+
+#### `_disable_selected` / `_restore_selected` / `_open_dialog` / `_selected_active` / `_selected_disabled`
+
+只从当前明确选中行取一个 typed 身份或 backup ID，创建模态式安全对话；无选择/多义时不猜测。
+对话结束刷新清单。
+
+#### `_failed(message)` / `shutdown()` / `_table` / `_active_text` / `_disabled_text`
+
+显示友好错误、拒绝所有打开确认对话、构造只读表格和生成本地筛选文本。shutdown 不授权或
+恢复动作。
+
+#### `StartupActionDialog.__init__` / `_build_ui` / `_start_prepare`
+
+默认取消、禁用确认按钮并在 worker 中捕获 backup/构建 Preview；窗口创建本身不写启动配置。
+
+#### `_prepared` / `_show_preview` / `_has_plan_state` / `_risk_text` / `_preview_html`
+
+验证 typed worker 结果并显示对象、来源、状态、程序路径、安全分类、风险、权限、备份、回滚
+条件和原因。HTML 全部转义；只有 ALLOW、verified backup 和匹配状态允许继续。
+
+#### `_primary_clicked` / `_approve_plan` / `_runtime_prepared` / `_approve_runtime`
+
+驱动两个明确阶段：批准计划后启动实时重验，返回新 Preview 后才允许短期即时确认。按钮文字
+描述具体动作；状态不完整会安全失败。
+
+#### `_completed` / `_result_html` / `_cancel_clicked` / `_reject_plan_and_close` / `_reject_runtime_and_close` / `_failed`
+
+显示 verified/rollback 结果；取消/关闭会记录相应拒绝并不调用工具；错误显示后恢复安全按钮
+状态。结果文字不把配置状态说成未来启动保证。
+
+#### `_set_busy` / `closeEvent` / `shutdown`
+
+管理 worker 期间按钮状态；用户关窗默认为取消，`shutdown` 主动拒绝尚未决确认并关闭。已开始
+的单个 Win32 mutation 不被强杀，而由 worker 完成验证。
+
+#### `_require_plan_state()`
+
+在确认/拒绝边界显式要求 services、plan 和 Preview 同时存在，缺失时抛 `RuntimeError`。
+生产安全状态不依赖 Python 优化模式会移除的 `assert`。
+
+#### `StartupInventoryWorker.run()` / `StartupPrepareWorker.run()`
+
+每个 worker 在线程内 `CoInitialize/CoUninitialize`；前者读取/分类 active 与 disabled 清单，
+后者只为明确 action+identity/backup 准备计划。异常转为一个 failed signal。
+
+这两个 worker 的 `__init__` 只保存 runtime 和明确选择的 action/identity/backup 引用；
+`StartupRuntimePreviewWorker.__init__` 保存 service、父确认和 plan；
+`StartupExecutionWorker.__init__` 保存 service、父子确认、plan 和 Preview。构造函数均不执行
+扫描、确认或写操作。
+
+#### `StartupRuntimePreviewWorker.run()` / `StartupExecutionWorker.run()`
+
+前者执行实时重验和申请即时确认；后者消费两级批准并执行一个窄工具。两者都在后台运行并只
+通过 typed Qt signal 返回。
+
+#### `require_inventory` / `require_prepared_startup` / `require_runtime_startup` / `require_startup_result`
+
+Qt `object` signal 的运行时类型收窄函数。类型不符抛 `TypeError`，防止 UI 把任意对象当作
+授权或结果。
+
+`StartupWorkerSignals` 只定义 completed/failed 信号；`StartupInventory`、
+`PreparedStartupAction` 和 `RuntimeStartupPreview` 是冻结的数据传输对象，无系统副作用。
+
 ## Stage 4A 受控进程管理 API
 
 ### 领域模型与摘要

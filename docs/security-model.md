@@ -1,5 +1,27 @@
 # Security model
 
+## Stage 4B startup controls
+
+- Inventory comes only from fixed HKCU/HKLM Run/RunOnce keys and current/common Startup
+  folders. No model/UI text can supply a registry key, value, storage path or command.
+- Only a supported current-user HKCU Run value or current-user `.lnk` can reach a write tool.
+  Machine-wide, RunOnce, common-folder, unresolved, unknown-publisher, Microsoft/system,
+  security, driver, enterprise and Agent entries are read-only or blocked.
+- The original registry bytes/type or shortcut bytes and identity are captured first,
+  encrypted with current-user DPAPI, stored outside audit and read-back verified. A missing,
+  corrupt or undecryptable backup stops the action.
+- Disable and restore are R2, one object per transaction, with plan and immediate runtime
+  confirmation. Both approvals bind action, plan/Preview, identity, visible state, backup and
+  expiry and are consumed once.
+- The runtime boundary rereads identity, executable path, publisher evidence,
+  StartupApproved evidence and exact backup. Any change, conflict or permission error fails
+  closed. The adapter never writes StartupApproved.
+- Registry mutation is confined to native-view HKCU Run and uses a Windows transaction.
+  Startup-folder mutation is a same-volume no-overwrite move to Agent-owned storage.
+- Verification failure triggers the exact inverse command. FULL rollback remains conditional
+  on unchanged material and an empty destination; no future-launch behavior is guaranteed.
+- No generic registry/path tool, bulk disable, delete, shell, elevation or R3 fallback exists.
+
 ## Stage 4A process-action controls
 
 - Only two non-generic tools exist: graceful `WM_CLOSE` (`R2`) and force termination
