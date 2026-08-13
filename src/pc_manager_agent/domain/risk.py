@@ -16,13 +16,21 @@ class RiskLevel(StrEnum):
     R0 = "R0"
     R1 = "R1"
     R2 = "R2"
+    R2_HIGH_IMPACT = "R2_HIGH_IMPACT"
     R3 = "R3"
     R4 = "R4"
 
     @property
     def severity(self) -> int:
         """Return a sortable risk severity."""
-        return int(self.value[1])
+        return {
+            RiskLevel.R0: 0,
+            RiskLevel.R1: 1,
+            RiskLevel.R2: 2,
+            RiskLevel.R2_HIGH_IMPACT: 3,
+            RiskLevel.R3: 4,
+            RiskLevel.R4: 5,
+        }[self]
 
 
 class RollbackLevel(StrEnum):

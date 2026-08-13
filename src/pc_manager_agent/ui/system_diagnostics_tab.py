@@ -23,6 +23,10 @@ from PySide6.QtWidgets import (
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, SystemDiagnosticServices
 from pc_manager_agent.confirmation.models import ConfirmationRequest
+from pc_manager_agent.domain.process_actions import (
+    ProcessTargetQuery,
+    ProcessTargetQueryType,
+)
 from pc_manager_agent.domain.system_diagnostics import (
     DiagnosticIntent,
     DiagnosticPlan,
@@ -30,6 +34,7 @@ from pc_manager_agent.domain.system_diagnostics import (
     ProcessSnapshot,
 )
 from pc_manager_agent.orchestration.system_diagnostic_planner import extract_software_search_term
+from pc_manager_agent.ui.process_action_dialog import ProcessActionDialog
 from pc_manager_agent.ui.system_workers import DiagnosticWorker, require_diagnostic_report
 
 
@@ -47,6 +52,7 @@ class SystemDiagnosticsTab(QWidget):
     """Present local planning, confirmation, progress, findings, and inventories."""
 
     status_message = Signal(str)
+    process_reference_changed = Signal(int, str)
 
     def __init__(self, runtime: ApplicationRuntime) -> None:
         super().__init__()
@@ -56,6 +62,7 @@ class SystemDiagnosticsTab(QWidget):
         self._confirmation: ConfirmationRequest | None = None
         self._report: DiagnosticReport | None = None
         self._worker: DiagnosticWorker | None = None
+        self._process_dialogs: set[ProcessActionDialog] = set()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -141,6 +148,8 @@ class SystemDiagnosticsTab(QWidget):
                 "访问完整性",
             )
         )
+        self.process_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.process_table.itemSelectionChanged.connect(self._process_selection_changed)
         self.process_group_table = self._table(
             ("规范名称", "进程数", "合计 CPU %", "合计内存", "PID 列表")
         )
@@ -155,6 +164,16 @@ class SystemDiagnosticsTab(QWidget):
         self.results_tabs.addTab(self.service_table, "服务")
         self.results_tabs.addTab(self.software_table, "软件")
 
+        process_action_row = QHBoxLayout()
+        self.process_action_label = QLabel(
+            "选择一行后可生成受控关闭 Preview；选中表格不会授权任何写操作。"
+        )
+        self.process_action_button = QPushButton("审查选中进程的关闭选项")
+        self.process_action_button.setEnabled(False)
+        self.process_action_button.clicked.connect(self._open_selected_process_action)
+        process_action_row.addWidget(self.process_action_label, 1)
+        process_action_row.addWidget(self.process_action_button)
+
         layout.addLayout(goal_row)
         layout.addLayout(quick_row)
         layout.addWidget(self.risk_label)
@@ -165,6 +184,7 @@ class SystemDiagnosticsTab(QWidget):
         layout.addWidget(self.cache_label)
         layout.addLayout(filter_row)
         layout.addWidget(self.results_tabs, 2)
+        layout.addLayout(process_action_row)
 
     @staticmethod
     def _table(headers: tuple[str, ...]) -> QTableWidget:
@@ -362,6 +382,12 @@ class SystemDiagnosticsTab(QWidget):
                 reverse=True,
             )
         )
+        if (
+            processes
+            and self._plan is not None
+            and self._plan.intent in {DiagnosticIntent.CPU, DiagnosticIntent.MEMORY}
+        ):
+            self.process_reference_changed.emit(processes[0].pid, processes[0].name)
         self._fill(
             self.process_table,
             [
@@ -482,6 +508,61 @@ class SystemDiagnosticsTab(QWidget):
     def shutdown(self) -> None:
         """Cancel outstanding sampling during controlled application shutdown."""
         self.cancel()
+        for dialog in tuple(self._process_dialogs):
+            dialog.shutdown()
+
+    @Slot()
+    def _process_selection_changed(self) -> None:
+        selected = self._selected_process()
+        self.process_action_button.setEnabled(selected is not None)
+        if selected is not None:
+            pid, name = selected
+            self.process_action_label.setText(
+                f"已选择 {name}（PID {pid}）；点击后会重新读取身份并进行安全分类。"
+            )
+            self.process_reference_changed.emit(pid, name)
+
+    @Slot()
+    def _open_selected_process_action(self) -> None:
+        selected = self._selected_process()
+        if selected is None:
+            self._show_error("请先选择一个具体进程。")
+            return
+        pid, name = selected
+        query = ProcessTargetQuery(
+            query_type=ProcessTargetQueryType.SELECTED_PROCESS,
+            pid=pid,
+            include_application_group=True,
+        )
+        self.open_process_action(f"关闭选中的 {name}（PID {pid}）", query=query)
+
+    def open_process_action(
+        self,
+        user_goal: str,
+        *,
+        query: ProcessTargetQuery | None = None,
+    ) -> None:
+        """Open a modeless Preview dialog; execution remains in orchestration workers."""
+        dialog = ProcessActionDialog(self._runtime, user_goal, query=query, parent=self)
+        self._process_dialogs.add(dialog)
+        dialog.finished.connect(lambda _result, value=dialog: self._process_dialogs.discard(value))
+        dialog.show()
+        self.status_message.emit("正在后台生成实时进程 Preview；尚未执行任何进程操作")
+
+    def _selected_process(self) -> tuple[int, str] | None:
+        rows = self.process_table.selectionModel().selectedRows()
+        if len(rows) != 1:
+            return None
+        row = rows[0].row()
+        pid_item = self.process_table.item(row, 0)
+        name_item = self.process_table.item(row, 1)
+        if pid_item is None or name_item is None:
+            return None
+        try:
+            pid = int(pid_item.text())
+        except ValueError:
+            return None
+        return pid, name_item.text()
 
     def _show_error(self, message: str) -> None:
         QMessageBox.warning(self, "操作未执行", message)

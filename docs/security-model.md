@@ -1,5 +1,34 @@
 # Security model
 
+## Stage 4A process-action controls
+
+- Only two non-generic tools exist: graceful `WM_CLOSE` (`R2`) and force termination
+  (`R2_HIGH_IMPACT`). Both require Preview, PLAN and RUNTIME confirmation, and durable exact
+  authorization. Force approval can never be derived from graceful approval.
+- Target resolution is local. An LLM cannot author executable PIDs or expand an application
+  group. Ambiguous names fail closed; selected/stale rows are freshly inspected.
+- Every identity binds PID, process creation time, executable path, owner SID and session.
+  The adapter repeats those fields on the same opened process handle immediately before
+  mutation. PID reuse becomes `PROCESS_IDENTITY_CHANGED`, not a new target.
+- System/critical/protected/security/SCM-service/other-user/other-session/Agent processes are
+  blocked. Unreadable or incomplete identity/protection data is not eligible.
+- `WM_CLOSE` is sent only to windows currently owned by the confirmed PID. Force uses only a
+  checked handle and `TerminateProcess`; there is no `taskkill`, shell, arbitrary command,
+  debug privilege, UAC prompt, or administrator retry.
+- Limits are 5 applications and 20 member processes. Timeouts are 5–30 seconds. Workers keep
+  the GUI responsive. Cancel only stops waiting or future members; already sent actions are
+  real and not undone.
+- Verification waits on the original opened handle. `ALREADY_EXITED`, `IDENTITY_CHANGED`,
+  `ACCESS_DENIED`, `STILL_RUNNING`, `NOT_ATTEMPTED`, `FAILED`, and `UNKNOWN` are distinct.
+- Rollback is `NONE`. Audit records the target query, process identity evidence, policy class,
+  reason codes, action, both confirmations, state changes and verified result, but never a
+  process command line, window text, document content, token or credential.
+
+Process management remains ordinary-user only. The residual risks are unsaved application
+data loss, application state corruption after force termination, a kernel/in-process attacker,
+and unavoidable races after a final handle-bound check. These risks are displayed before both
+confirmations and are never described as recoverable.
+
 ## Stage 3 system-query boundary
 
 Every Stage 3 tool is `R0`, read-only, `RollbackLevel.NONE`, plan-confirmed, and registered

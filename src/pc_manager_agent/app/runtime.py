@@ -11,6 +11,7 @@ from uuid import UUID
 from pc_manager_agent import __version__
 from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
+from pc_manager_agent.audit.process_actions import ProcessActionAuditLogger
 from pc_manager_agent.audit.repository import AuditRepository
 from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
@@ -25,6 +26,7 @@ from pc_manager_agent.confirmation.file_operations import (
     OperationConfirmationService,
     RollbackConfirmationService,
 )
+from pc_manager_agent.confirmation.process_actions import ProcessActionConfirmationService
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
 from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmationService
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
@@ -50,6 +52,9 @@ from pc_manager_agent.orchestration.file_operation_planner import (
     FileOperationSourceResolver,
 )
 from pc_manager_agent.orchestration.file_operation_service import FileOperationService
+from pc_manager_agent.orchestration.process_action_planner import ProcessActionPlanCompiler
+from pc_manager_agent.orchestration.process_actions import ProcessActionService
+from pc_manager_agent.orchestration.process_target_resolver import ProcessTargetResolver
 from pc_manager_agent.orchestration.service import ScanOrchestrator
 from pc_manager_agent.orchestration.system_diagnostic_planner import DiagnosticPlanCompiler
 from pc_manager_agent.orchestration.system_diagnostics import (
@@ -65,6 +70,11 @@ from pc_manager_agent.persistence.file_operations import (
     OperationRepository,
     TransactionExecutionGuard,
 )
+from pc_manager_agent.persistence.process_actions import (
+    ProcessActionRepository,
+    ProcessExecutionGuard,
+)
+from pc_manager_agent.platform_support.processes import ProcessManagementPlatform
 from pc_manager_agent.platform_support.windows.explorer import WindowsExplorerService
 from pc_manager_agent.platform_support.windows.file_operations import (
     WindowsFileOperationPlatform,
@@ -72,6 +82,9 @@ from pc_manager_agent.platform_support.windows.file_operations import (
 from pc_manager_agent.platform_support.windows.path_info import (
     is_network_path,
     last_access_time_reliable,
+)
+from pc_manager_agent.platform_support.windows.process_management import (
+    WindowsProcessManagementPlatform,
 )
 from pc_manager_agent.platform_support.windows.recycle_bin import WindowsRecycleBinPlatform
 from pc_manager_agent.platform_support.windows.system_diagnostics import (
@@ -86,6 +99,9 @@ from pc_manager_agent.safety.file_operation_validator import FileOperationSafety
 from pc_manager_agent.safety.operation_preview import OperationPreviewEngine
 from pc_manager_agent.safety.path_policy import PathPolicy
 from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
+from pc_manager_agent.safety.process_policy import ProcessSafetyPolicy
+from pc_manager_agent.safety.process_preview import ProcessPreviewEngine
+from pc_manager_agent.safety.process_validator import ProcessActionSafetyValidator
 from pc_manager_agent.safety.system_diagnostics import DiagnosticSafetyValidator
 from pc_manager_agent.safety.trash_policy import TrashPathPolicy
 from pc_manager_agent.safety.trash_preview import TrashPreviewEngine
@@ -112,6 +128,10 @@ from pc_manager_agent.tools.system_tools.collectors import (
     SoftwareTool,
     StartupTool,
     SystemInfoTool,
+)
+from pc_manager_agent.tools.system_tools.process_actions import (
+    ForceTerminateProcessTool,
+    RequestProcessExitTool,
 )
 
 
@@ -162,6 +182,17 @@ class SystemDiagnosticServices:
     explainer: DiagnosticExplainer | None
 
 
+@dataclass(frozen=True, slots=True)
+class ProcessActionServices:
+    """Dependency bundle for controlled Stage 4A process actions."""
+
+    registry: ToolRegistry
+    platform: ProcessManagementPlatform
+    resolver: ProcessTargetResolver
+    compiler: ProcessActionPlanCompiler
+    service: ProcessActionService
+
+
 class ApplicationRuntime:
     """Own shared infrastructure and create root-scoped orchestrators."""
 
@@ -197,8 +228,15 @@ class ApplicationRuntime:
         self.diagnostic_confirmation = DiagnosticConfirmationService(
             settings.confirmation_ttl_seconds
         )
+        self.process_confirmation = ProcessActionConfirmationService(
+            settings.confirmation_ttl_seconds,
+            settings.process_runtime_confirmation_ttl_seconds,
+        )
+        self.process_action_repository = ProcessActionRepository(settings.database_path)
+        self.interrupted_process_action_ids = self.process_action_repository.initialize()
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
+        self.process_management_platform = WindowsProcessManagementPlatform()
         self.report_exporter = ReportExporter(
             self.analysis_results,
             on_export=self._audit_report_export,
@@ -556,8 +594,56 @@ class ApplicationRuntime:
             ),
         )
 
+    def create_process_action_services(self) -> ProcessActionServices:
+        """Build the Stage 4A resolver, policy, confirmations, registry, and executor."""
+        platform = self.process_management_platform
+        own_process = platform.inspect_process(os.getpid())
+        if own_process is None:
+            raise RuntimeError("Cannot establish the Agent process identity safely")
+        resolver = ProcessTargetResolver(platform, 2_000)
+        compiler = ProcessActionPlanCompiler(resolver)
+        policy = ProcessSafetyPolicy(
+            current_owner_sid=own_process.identity.owner_sid,
+            current_session_id=own_process.identity.session_id,
+            agent_pids=frozenset({os.getpid()}),
+        )
+        guard = ProcessExecutionGuard(self.process_action_repository)
+        registry = ToolRegistry(write_guard=guard)
+        registry.register(RequestProcessExitTool(platform))
+        registry.register(ForceTerminateProcessTool(platform))
+        validator = ProcessActionSafetyValidator(
+            registry,
+            self.settings.process_action_max_applications,
+            self.settings.process_action_max_processes,
+        )
+        audit = ProcessActionAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        service = ProcessActionService(
+            compiler,
+            resolver,
+            ProcessPreviewEngine(policy),
+            validator,
+            self.process_confirmation,
+            self.process_action_repository,
+            registry,
+            audit,
+            graceful_timeout_seconds=self.settings.process_graceful_timeout_seconds,
+            force_timeout_seconds=self.settings.process_force_timeout_seconds,
+        )
+        return ProcessActionServices(
+            registry=registry,
+            platform=platform,
+            resolver=resolver,
+            compiler=compiler,
+            service=service,
+        )
+
     def close(self) -> None:
         """Release local persistence resources."""
+        self.process_action_repository.close()
         self.operation_repository.close()
         self.analysis_results.close()
         self.authorized_path_repository.close()

@@ -68,5 +68,7 @@ def test_plan_rejects_duplicate_step_ids(tmp_path: Path) -> None:
 
 def test_risk_severity_and_rollback_values() -> None:
     assert RiskLevel.R0.severity == 0
-    assert RiskLevel.R4.severity == 4
+    assert RiskLevel.R2.severity < RiskLevel.R2_HIGH_IMPACT.severity
+    assert RiskLevel.R2_HIGH_IMPACT.severity < RiskLevel.R3.severity
+    assert RiskLevel.R4.severity == 5
     assert RollbackLevel.MANUAL.value == "MANUAL"

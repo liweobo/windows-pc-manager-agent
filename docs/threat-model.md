@@ -1,5 +1,20 @@
 # Threat model
 
+## Stage 4A additions
+
+| Threat | Boundary/control | Residual risk |
+|---|---|---|
+| Model invents PID or broad kill | Local resolver, exact enum query, ambiguity/batch denial | User can still select the wrong ordinary app; Preview must be read |
+| PID is reused after Preview | Creation time/path/SID/session digest plus same-handle recheck | Compromised kernel/process memory is out of scope |
+| System/security/service is targeted | Critical/protection/SID/session/name/path/SCM default-deny policy | Security-product naming can evolve; unknown protection blocks |
+| Graceful silently becomes force | Separate action/risk/tool/transaction and two new confirmations | User may explicitly choose force after reading warning |
+| Browser helper changes membership | Exact application-group digest at confirmation/execution; fresh force plan uses remaining members | Highly dynamic apps may require repeated Preview |
+| GUI blocks during service/process inspection | All resolution, Preview, revalidation, wait and execution run in workers | A platform call can still delay cooperative cancellation |
+| Cancel is mistaken for Undo | UI labels “stop waiting/future objects”, rollback NONE everywhere | An already sent WM_CLOSE/TerminateProcess remains effective |
+| Crash creates misleading status | Additive transaction state; active work becomes INTERRUPTED, never auto-retried | Actual outcome can require manual inspection |
+| Audit failure hides action | Mandatory Preview and pre-execution audit fail closed | Post-action audit failure cannot reverse an executed process exit |
+| Command line leaks secrets | Command line has no domain field and is never queried/audited | Executable path and username remain locally sensitive |
+
 ## Stage 3 additions
 
 | Threat | Control | Residual risk |
@@ -14,8 +29,9 @@
 | Startup/file names inject prompts | Untrusted display data, excluded from provider payload | User may misread deceptive names |
 | Audit leaks inventory | Counts/status/timing and sanitized errors only | Original request is locally retained |
 
-Stage 4 has not started. No Stage 3 interface authorizes termination, service/startup changes,
-registry writes, uninstall, elevation, firewall changes, or arbitrary commands.
+Stage 4A authorizes only the two exact current-user process actions described above. No
+interface authorizes service/startup changes, registry writes, uninstall, elevation,
+firewall changes, arbitrary commands, or automated multi-capability system modification.
 
 ## Stage 2B additions
 

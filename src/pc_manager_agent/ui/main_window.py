@@ -28,7 +28,15 @@ from pc_manager_agent.app.runtime import ApplicationRuntime
 from pc_manager_agent.audit.repository import AuditUnavailableError
 from pc_manager_agent.confirmation.models import ConfirmationRequest
 from pc_manager_agent.domain.plans import TaskPlan
+from pc_manager_agent.domain.process_actions import (
+    ProcessTargetQuery,
+    ProcessTargetQueryType,
+)
 from pc_manager_agent.domain.reports import ScanReport
+from pc_manager_agent.orchestration.process_action_planner import (
+    is_process_action_request,
+    process_target_query,
+)
 from pc_manager_agent.orchestration.service import ScanOrchestrator
 from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnostic_request
 from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
@@ -52,7 +60,8 @@ class MainWindow(QMainWindow):
         self._worker: ScanWorker | None = None
         self._tray: SystemTrayController | None = None
         self._quitting = False
-        self.setWindowTitle("Windows PC Manager Agent — Stage 3 只读系统诊断")
+        self._last_process_reference: tuple[int, str] | None = None
+        self.setWindowTitle("Windows PC Manager Agent — Stage 4A 受控进程管理")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -76,12 +85,12 @@ class MainWindow(QMainWindow):
         self._conversation = QTextBrowser()
         self._conversation.setPlainText(
             "Agent：当前支持阶段 1 只读分析、Stage 2A 安全移动/重命名/回滚，"
-            "以及 Stage 2B 双确认回收站操作。\n"
+            "Stage 2B 双确认回收站、Stage 3 只读系统诊断和 Stage 4A 受控进程关闭。\n"
             "聊天不会直接执行系统操作；所有写操作都要经过真实 Preview 和明确确认。"
         )
         input_row = QHBoxLayout()
         self._chat_input = QLineEdit()
-        self._chat_input.setPlaceholderText("输入只读文件分析目标")
+        self._chat_input.setPlaceholderText("输入文件分析、系统诊断或明确的进程关闭目标")
         send_button = QPushButton("发送")
         send_button.clicked.connect(self._handle_chat)
         self._chat_input.returnPressed.connect(self._handle_chat)
@@ -175,6 +184,9 @@ class MainWindow(QMainWindow):
         """Attach the independent Stage 3 read-only diagnostic dashboard."""
         self._system_diagnostics_tab = SystemDiagnosticsTab(self._runtime)
         self._system_diagnostics_tab.status_message.connect(self.statusBar().showMessage)
+        self._system_diagnostics_tab.process_reference_changed.connect(
+            self._remember_process_reference
+        )
         self._tabs.addTab(self._system_diagnostics_tab, "系统诊断")
 
     def _build_audit_tab(self) -> None:
@@ -206,7 +218,13 @@ class MainWindow(QMainWindow):
             QLabel("Stage 2A 仅支持已授权目录内的同卷移动、同父重命名、mkdir 和回滚。")
         )
         layout.addWidget(QLabel("Stage 2B 仅支持双确认后移入 Windows 回收站；恢复能力为 MANUAL。"))
-        layout.addWidget(QLabel("不覆盖、不跨卷、不永久删除、不执行系统修改。"))
+        layout.addWidget(
+            QLabel(
+                "Stage 4A 仅关闭当前用户普通进程；双确认、无提权、回滚 NONE，"
+                "强制终止必须是全新流程。"
+            )
+        )
+        layout.addWidget(QLabel("不覆盖、不跨卷、不永久删除、不修改服务/启动项/注册表。"))
         layout.addStretch(1)
         self._tabs.addTab(page, "设置")
 
@@ -217,6 +235,38 @@ class MainWindow(QMainWindow):
             return
         self._conversation.append(f"你：{text}")
         self._chat_input.clear()
+        if is_process_action_request(text):
+            self._tabs.setCurrentWidget(self._system_diagnostics_tab)
+            query: ProcessTargetQuery | None = None
+            if _references_previous_process(text) and self._last_process_reference is not None:
+                pid, name = self._last_process_reference
+                query = ProcessTargetQuery(
+                    query_type=ProcessTargetQueryType.SELECTED_PROCESS,
+                    pid=pid,
+                    include_application_group=True,
+                )
+                self._conversation.append(
+                    f"Agent：已将“它”绑定到最近明确显示或选择的 {name}（PID {pid}）。"
+                    "现在只生成实时 Preview；不会直接关闭进程。"
+                )
+            else:
+                try:
+                    process_target_query(text)
+                except ValueError as exc:
+                    if is_diagnostic_request(text):
+                        self._conversation.append(
+                            "Agent：这句话同时包含诊断和关闭意图，但目前没有唯一目标。"
+                            "请先运行进程诊断并选中一行，再点击“审查选中进程的关闭选项”。"
+                        )
+                    else:
+                        self._conversation.append(f"Agent：未执行。{exc}")
+                    return
+                self._conversation.append(
+                    "Agent：正在本地解析具体进程并生成 Stage 4A Preview。"
+                    "必须完成计划确认和即时确认才可能执行。"
+                )
+            self._system_diagnostics_tab.open_process_action(text, query=query)
+            return
         if is_diagnostic_request(text):
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             self._conversation.append(
@@ -310,6 +360,10 @@ class MainWindow(QMainWindow):
         self._trash_tab.set_sources(paths)
         self._tabs.setCurrentWidget(self._trash_tab)
         self.statusBar().showMessage("已传入明确勾选对象；请生成 R2 Preview 并完成两次确认")
+
+    @Slot(int, str)
+    def _remember_process_reference(self, pid: int, name: str) -> None:
+        self._last_process_reference = (pid, name)
 
     @Slot()
     def _choose_directory(self) -> None:
@@ -500,3 +554,11 @@ class MainWindow(QMainWindow):
     def _show_error(self, message: str) -> None:
         QMessageBox.warning(self, "操作未执行", message)
         self.statusBar().showMessage(message)
+
+
+def _references_previous_process(text: str) -> bool:
+    normalized = text.casefold()
+    return any(
+        marker in normalized
+        for marker in ("它", "这个进程", "选中的", "that process", "close it", "kill it")
+    )

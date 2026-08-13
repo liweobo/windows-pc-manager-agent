@@ -38,11 +38,20 @@ software inventory, deterministic threshold findings, partial failure, cancellat
 optional minimal-data model explanation, and a dashboard. No system mutation, command-line
 collection, shell, WMI, elevation, malware diagnosis, or `Win32_Product`.
 
-## Stage 4 — controlled system operations (not started)
+## Stage 4A — controlled process management (complete)
 
-Process termination, startup/service changes, software uninstall, and other R3 operations
-remain design-only. Each capability requires its own threat model, confirmation design,
-recovery plan, Windows API experiment, and isolated test/review before any implementation.
+Ordinary-user process resolution, application grouping, deterministic protected-process
+classification, read-only impact Preview, `WM_CLOSE` graceful exit, separate
+`TerminateProcess` force flow, two confirmations per exact action, PID-reuse defense,
+postcondition verification, additive transaction/audit records, restart interruption
+handling, and GUI/chat entry points. Force never follows automatically and cannot reuse a
+graceful approval. Process command lines, elevation, shell and automatic rollback are absent.
+
+## Stage 4B+ — other controlled system operations (not started)
+
+Startup/service changes, software uninstall, firewall changes, cleanup and other R3
+operations remain design-only. Each capability requires its own threat model, confirmation,
+recovery plan, Windows API experiment, and isolated test/review before implementation.
 
 ## Later stages
 
