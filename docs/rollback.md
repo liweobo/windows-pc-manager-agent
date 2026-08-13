@@ -1,5 +1,23 @@
 # Rollback design
 
+## Stage 4B startup actions
+
+| Operation | Risk | Rollback | Valid only while |
+|---|---|---|---|
+| Disable supported HKCU Run entry | R2 | FULL | Exact backup decrypts; value remains absent; approval evidence is unchanged |
+| Disable supported current-user `.lnk` | R2 | FULL | Exact moved link remains in Agent storage and original path is empty |
+| Restore Agent-disabled entry | R2 | FULL | Restored identity matches and exact inverse disable remains conflict-free |
+| Blocked/cancelled before write | R2 | NONE needed | No platform mutation occurred |
+| Interrupted/rollback failure | R2 | Manual inspection | Inspect active source, Agent disabled index and encrypted backup |
+
+FULL is a checked conditional capability, not a promise to override new state. The exact
+backup is created and verified before confirmation. Audit and backup are separate: audit
+contains identifiers/digests and decisions, while the DPAPI vault contains restore bytes.
+HKCU Run restore writes the original type and bytes only when the fixed original value is
+absent. Startup-folder restore moves the exact same link back only when the original path is
+empty; it never replaces a file. A failed postcondition causes an immediate inverse attempt,
+with `ROLLED_BACK` or `ROLLBACK_FAILED` recorded truthfully. Restart never auto-resumes.
+
 ## Stage 4A process lifecycle actions
 
 | Operation | Risk | Rollback | Truthful recovery statement |

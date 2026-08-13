@@ -1,5 +1,43 @@
 # Architecture
 
+## Stage 4B startup-management boundary
+
+```text
+startup management page / explicit selected row
+  -> WindowsStartupManagementPlatform.list_entries (fixed read-only sources)
+  -> StartupTargetResolver (exact identity; ambiguity fails)
+  -> StartupSafetyPolicy (default-deny classification)
+  -> capture exact material -> DPAPI encrypted StartupBackupVault -> verify readback
+  -> StartupActionPlan + StartupPreviewEngine + StartupActionSafetyValidator
+  -> PLAN confirmation
+  -> fresh source/identity/approval/publisher/path/backup revalidation
+  -> new Preview -> short-lived RUNTIME confirmation
+  -> SQLite consumed-capability guard -> ToolRegistry
+       startup.disable OR startup.restore
+  -> fixed Windows adapter mutation -> postcondition verification
+  -> automatic inverse attempt on verification failure -> transaction/audit/UI
+```
+
+The domain, safety, confirmation, persistence and orchestration layers do not depend on Qt.
+The platform protocol exposes finite inventory, inspection, backup, disable, restore and
+verification methods; it exposes neither an arbitrary registry path nor a command executor.
+The Windows implementation reads six compile-time sources but writes only native-view HKCU
+Run and the current-user Startup folder. It treats StartupApproved as read-only concurrent
+state evidence because its binary format is not used as a write contract.
+
+Registry value bytes/type and shortcut bytes are captured before mutation, encrypted with
+current-user DPAPI, persisted independently from audit, read back and digest-verified. HKCU
+Run uses `RegOpenKeyTransactedW` plus transaction commit/rollback. Startup-folder disabling
+moves one unchanged `.lnk` to an Agent-owned path on the same volume without overwrite.
+Restore requires the Agent disabled index, the exact backup, an empty original location and
+unchanged disabled material. FULL rollback is conditional on those checked preconditions.
+
+All writes are R2 single-object operations. Plan and runtime confirmations bind action,
+transaction, operation, plan and Preview digests, exact startup identity, current-state
+digest, backup ID/digest and expiry. Restart never resumes a mutation automatically. The UI
+uses finite workers, initializes COM per worker and waits during shutdown; it never invokes a
+platform or registered tool directly.
+
 ## Stage 4A controlled process-action boundary
 
 ```text

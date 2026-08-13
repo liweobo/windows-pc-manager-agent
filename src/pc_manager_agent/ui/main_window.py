@@ -42,6 +42,7 @@ from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnost
 from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
+from pc_manager_agent.ui.startup_management_tab import StartupManagementTab
 from pc_manager_agent.ui.system_diagnostics_tab import SystemDiagnosticsTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
 from pc_manager_agent.ui.trash_tab import TrashTab
@@ -61,7 +62,7 @@ class MainWindow(QMainWindow):
         self._tray: SystemTrayController | None = None
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 4A 受控进程管理")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 4B 启动项安全管理")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -70,6 +71,7 @@ class MainWindow(QMainWindow):
         self._build_operation_tab()
         self._build_trash_tab()
         self._build_system_diagnostics_tab()
+        self._build_startup_management_tab()
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
@@ -188,6 +190,12 @@ class MainWindow(QMainWindow):
             self._remember_process_reference
         )
         self._tabs.addTab(self._system_diagnostics_tab, "系统诊断")
+
+    def _build_startup_management_tab(self) -> None:
+        """Attach current-user startup inventory, Preview, confirmation, and restore UI."""
+        self._startup_management_tab = StartupManagementTab(self._runtime)
+        self._startup_management_tab.status_message.connect(self.statusBar().showMessage)
+        self._tabs.addTab(self._startup_management_tab, "启动项管理")
 
     def _build_audit_tab(self) -> None:
         page = QWidget()
@@ -538,6 +546,7 @@ class MainWindow(QMainWindow):
         self._operation_tab.shutdown()
         self._trash_tab.shutdown()
         self._system_diagnostics_tab.shutdown()
+        self._startup_management_tab.shutdown()
         if self._worker:
             self._worker.cancel()
         QThreadPool.globalInstance().waitForDone(5_000)
@@ -549,6 +558,8 @@ class MainWindow(QMainWindow):
             self.hide()
             self.statusBar().showMessage("应用仍在托盘运行")
             return
+        if not self._quitting:
+            self.shutdown()
         event.accept()
 
     def _show_error(self, message: str) -> None:

@@ -7,6 +7,16 @@ once release tags are introduced.
 
 ### Added
 
+- Stage 4B fixed-source startup inventory and conservative classification for HKCU/HKLM
+  Run/RunOnce plus current/common Startup folders, with only current-user HKCU Run and
+  supported `.lnk` entries eligible for management.
+- Narrow R2 `startup.disable` and `startup.restore` tools, exact DPAPI-encrypted backups,
+  transaction-bound two-tier confirmations, execution-time identity revalidation, verified
+  FULL rollback under conflict-free preconditions, privacy-minimized audit, and GUI.
+- Stage 4B unit, integration, security, GUI, and real-Windows read-only adapter tests,
+  including stale state, confirmation replay/expiry, source expansion, backup corruption,
+  conflict, cancellation, verification and rollback boundaries.
+
 - Stage 4A deterministic current-user process resolution, application grouping,
   protected/system/security/service/Agent classification, live impact Preview, and
   handle-bound PID-reuse defense.
@@ -77,6 +87,11 @@ once release tags are introduced.
   positive recycle evidence remains mandatory.
 
 ### Security
+
+- Stage 4B has no generic registry/file/shell primitive and never writes StartupApproved.
+  Machine-wide, RunOnce, common-folder, Microsoft/system/security/driver/enterprise/Agent,
+  unresolved and changed entries are read-only or blocked. Exact command/shortcut bytes are
+  encrypted separately from audit and are never accepted as public tool arguments.
 
 - Stage 4A blocks critical/protected/system/security/service/other-user/other-session/Agent
   targets, collects no command line, never elevates or invokes shell/taskkill, and never

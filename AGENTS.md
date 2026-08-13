@@ -101,12 +101,10 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-Stage 4A retains Stage 0–3 and adds only controlled current-user process lifecycle actions:
-registered `system.process.request_exit` (`R2`) and separately planned/confirmed
-`system.process.force_terminate` (`R2_HIGH_IMPACT`). Every target is resolved locally,
-classified, bound by PID + creation time + executable path + owner SID + session, rechecked
-immediately before execution, and verified afterward. System/critical/protected/security/
-service/other-user/other-session/Agent processes are blocked. Rollback is truthfully `NONE`.
-No process command line is collected. No elevation, shell, taskkill, service/startup/registry
-change, uninstall, firewall action, arbitrary PID supplied by a model, or automatic force
-fallback exists. Later Stage 4 capabilities remain unimplemented.
+Stage 4B retains earlier stages and adds exactly two R2 startup tools: single-entry disable
+and restore for supported current-user HKCU Run or Startup Folder `.lnk` entries. Both require
+an exact DPAPI-encrypted backup, deterministic allow classification, Preview, plan approval,
+fresh revalidation, immediate approval, verification and audit. HKLM, RunOnce, common
+Startup, Microsoft/system/security/driver/enterprise/Agent/unresolved entries are read-only
+or blocked. StartupApproved is never written. There is no generic registry/path tool, batch
+disable, permanent deletion, shell, elevation, service modification or software uninstall.

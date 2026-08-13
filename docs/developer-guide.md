@@ -1,5 +1,28 @@
 # Developer guide
 
+## Stage 4B development
+
+Stage 4B is split across `domain/startup_actions.py`, `platform_support/startup.py`, the
+Windows startup/DPAPI adapters, `safety/startup_*`, `confirmation/startup_actions.py`,
+`persistence/startup_actions.py`, orchestration, two narrow registered tools, audit and GUI
+workers. Never add arbitrary registry/path parameters, StartupApproved writes, a shell
+fallback, batch mutation or machine-wide behavior to these interfaces.
+
+Focused verification:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_startup_*.py tests/security/test_startup_safety.py -q
+uv run pytest tests/integration/test_startup_action_workflow.py -q
+uv run pytest tests/gui/test_startup_management.py -q
+uv run pytest tests/integration/test_windows_startup_readonly.py -q
+```
+
+Mutation integration tests must use a fake adapter and disposable app data. The real-Windows
+test is query-only; do not change a user's startup configuration from a test. A new source
+requires an explicit identity model, risk decision, exact backup/recovery proof, confirmation
+text, platform experiment, safety tests and an independent review before registration.
+
 ## Stage 4A development
 
 Stage 4A code is split across `domain/process_actions.py`, `platform_support/processes.py`,
