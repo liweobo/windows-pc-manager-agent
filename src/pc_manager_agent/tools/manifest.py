@@ -57,6 +57,7 @@ class ToolManifest:
     requires_confirmation: bool = True
     requires_runtime_confirmation: bool = False
     supports_preview: bool = False
+    irreversible: bool = False
     scope_argument_names: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -75,14 +76,33 @@ class ToolManifest:
             raise ValueError(msg)
         if not self.read_only and not self.requires_confirmation:
             raise ValueError("Write tools must require confirmation")
-        if self.risk_level is RiskLevel.R2 and not self.requires_runtime_confirmation:
+        if (
+            self.risk_level in {RiskLevel.R2, RiskLevel.R2_HIGH_IMPACT}
+            and not self.requires_runtime_confirmation
+        ):
             raise ValueError("R2 tools must require immediate runtime confirmation")
-        if self.requires_runtime_confirmation and self.risk_level is not RiskLevel.R2:
+        if self.requires_runtime_confirmation and self.risk_level not in {
+            RiskLevel.R2,
+            RiskLevel.R2_HIGH_IMPACT,
+        }:
             raise ValueError("Immediate runtime confirmation is reserved for R2 tools")
         if not self.read_only and not self.supports_preview:
             raise ValueError("Write tools must support Preview")
-        if not self.read_only and self.rollback_level is RollbackLevel.NONE:
-            raise ValueError("Write tools must declare a rollback capability")
+        if (
+            not self.read_only
+            and self.rollback_level is RollbackLevel.NONE
+            and not (
+                self.irreversible
+                and self.risk_level in {RiskLevel.R2, RiskLevel.R2_HIGH_IMPACT}
+                and self.requires_runtime_confirmation
+                and self.supports_preview
+            )
+        ):
+            raise ValueError(
+                "Rollback NONE is allowed only for explicitly irreversible, previewed R2 tools"
+            )
+        if self.irreversible and self.rollback_level is not RollbackLevel.NONE:
+            raise ValueError("Irreversible tools must truthfully declare rollback NONE")
 
 
 class RegisteredTool(Protocol):

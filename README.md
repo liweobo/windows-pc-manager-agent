@@ -1,5 +1,22 @@
 # Windows PC Manager Agent
 
+## Stage 4A：受控进程关闭与终止
+
+Stage 4A 在 Stage 3 只读进程清单上增加两个、也只有两个写工具：
+
+- `system.process.request_exit`：R2，向目标应用自己的顶层窗口发送 `WM_CLOSE`；
+- `system.process.force_terminate`：R2_HIGH_IMPACT，仅在独立新计划和新双重确认后调用
+  `TerminateProcess`，绝不从正常退出自动升级。
+
+在“系统诊断”中查询进程、选中一行并点击“审查选中进程的关闭选项”，或在聊天输入
+“关闭 demo”。应用会重新解析当前目标，展示 PID、进程名、路径、用户、启动时间、应用组、
+资源影响、安全分类、风险、权限和 `RollbackLevel.NONE`，然后依次要求计划确认和短时即时
+确认。执行前会再次核对 PID + 创建时间 + 路径 + owner SID + session，防止 PID 复用。
+
+系统/关键/受保护/安全软件/服务/其他用户/其他会话/Agent 自身进程始终阻止。无窗口后台
+进程不会伪装成支持正常退出，只能由用户主动进入全新的强制终止 Preview。全程不收集命令
+行、不使用管理员权限、不调用 shell/taskkill、不修改服务、启动项或注册表，也不承诺 Undo。
+
 ## Stage 3：Windows 系统状态只读诊断
 
 当前分支在已有 Stage 0–2B 基础上加入 Stage 3。应用可以在普通用户权限下查看：
@@ -69,8 +86,9 @@ Stage 2A / `0.1.0` 开发版本在阶段 1 只读分析基础上包含：
 - SQLite `OperationTransaction`、逐项状态、写前 Undo、失败即停止和异常中断检测；
 - 从持久化 Undo 逆序生成的回滚 Preview、独立确认、冲突检查和结果验证。
 
-它不会覆盖、永久删除或把文件移入回收站，也不会执行跨卷移动、管理员提权、Shell、
-注册表、服务、启动项或软件修改。Stage 2A 只允许已授权本地目录内的 R1 可逆操作。
+它不会覆盖或永久删除，不会执行跨卷移动、管理员提权、Shell、注册表、服务、启动项或
+软件修改。Stage 2A 只允许已授权本地目录内的 R1 可逆操作，Stage 2B 仅支持回收站，
+Stage 4A 仅支持上述受控进程生命周期操作。
 
 ## 安装
 
@@ -161,6 +179,7 @@ uv run mypy src
 $env:QT_QPA_PLATFORM = "offscreen"
 uv run pytest -m "not performance" --cov=pc_manager_agent --cov-report=term-missing --cov-fail-under=85
 uv run pytest tests/performance/test_large_scan.py -q -s
+uv run pytest tests/integration/test_windows_process_management_real.py -q
 uv run bandit -q -r src
 uv run pip-audit
 uv build

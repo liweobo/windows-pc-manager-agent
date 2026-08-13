@@ -1,5 +1,275 @@
 # API reference
 
+## Stage 4A 受控进程管理 API
+
+### 领域模型与摘要
+
+#### `RiskLevel.severity`（Stage 4A 扩展）
+
+返回显式映射：R0=0、R1=1、R2=2、R2_HIGH_IMPACT=3、R3=4、R4=5。不能再从枚举字符串
+取数字，因为强制终止使用非数字子等级。安全门槛仍以具体 manifest/动作校验为准。
+
+#### `ToolManifest.__post_init__()`（Stage 4A 扩展）
+
+写工具通常必须声明非 NONE rollback；Stage 4A 仅在 `irreversible=True`、风险为 R2 或
+R2_HIGH_IMPACT、同时需要 runtime confirmation 且支持 Preview 时允许 NONE。反过来，
+irreversible 工具不得声称任何可恢复 rollback。矛盾清单构造时即抛 `ValueError`。
+
+#### `ApplicationRuntime.create_process_action_services()`
+
+读取 Agent 自身完整身份，构造 2000 项本地 resolver、当前 owner/session/Agent PID 策略、
+SQLite 执行守卫、只含两个进程工具的 registry、Preview/validator/audit/service 并注入配置
+超时。若 Agent 身份无法安全建立则失败；不请求管理员权限。
+
+#### `ApplicationRuntime.close()`（Stage 4A 扩展）
+
+在其他本地仓库之前关闭 process action repository，释放数据库连接并使之后的写能力失效。
+
+#### Stage 4A 配置字段
+
+`process_action_max_applications`、`process_action_max_processes`、
+`process_graceful_timeout_seconds`、`process_force_timeout_seconds` 和
+`process_runtime_confirmation_ttl_seconds` 分别限制应用数、成员数、两类等待和即时确认有效
+期；Pydantic 强制安全范围，并支持相应 `PC_MANAGER_*` 环境变量。
+
+#### `ProcessIdentity.canonical_digest()`
+
+将 PID、进程名、UTC 创建时间、规范化可执行路径、owner SID 和 session ID 编码为稳定
+SHA-256。该摘要防止 PID 复用，并绑定计划、Preview、确认、工具参数和验证结果。只读；
+字段无法证明时上游不得创建可执行身份。
+
+#### `ProcessObservation.graceful_supported`
+
+当该成员拥有至少一个顶层窗口时返回 `True`。应用组 Preview 会把“任一成员有窗口”作为
+组级正常退出能力，但所有成员仍分别分类、列出和验证。
+
+#### `ProcessTargetQuery.require_one_query_value()`
+
+校验 NAME 只能有 `text`，PID/SELECTED_PROCESS 只能有 `pid`。混合或缺失选择器抛出
+`ValueError`，阻止模型/界面用模糊文本和 PID 同时扩大目标。
+
+#### `ResolvedProcessTarget.identity_set_digest()`
+
+排序所有成员身份摘要后计算组摘要。浏览器/多进程应用成员变化会使旧 Preview 失效。
+
+#### `ProcessActionPlan.validate_safety_contract()`
+
+强制正常退出为 R2、强制终止为 R2_HIGH_IMPACT；两者都必须双确认且 rollback 为 NONE；
+预计进程数必须与实际成员完全一致。违约抛出 `ValueError`。
+
+#### `ProcessActionPlan.canonical_digest()` / `target_set_digest()`
+
+前者摘要完整不可变计划，后者只摘要所有目标身份。任一执行字段或身份变化都会改变确认
+绑定；均无系统副作用。
+
+#### `ProcessActionPreview.executable` / `validate_counts()` / `canonical_digest()`
+
+`executable` 仅在每个成员都有 ALLOW 评估时为真；`validate_counts` 核对应用数、进程数和
+身份集合摘要；`canonical_digest` 绑定完整实时 Preview。伪造总数/成员/分类会校验失败。
+
+#### `ProcessActionRequest.validate_digest()`
+
+注册工具输入的身份集合必须与 `target_set_digest` 一致。工具只接受 1–20 个身份和 1–30
+秒超时，不接受命令、自由参数、管理员标志或未验证 PID。
+
+#### `ProcessActionToolResult.all_exited`
+
+仅当所有成员状态为 EXITED 或 ALREADY_EXITED 时返回真。IDENTITY_CHANGED、超时、取消、
+未尝试、权限失败都不能伪装成完成。
+
+### 目标解析与计划
+
+#### `is_process_action_request(user_goal)` / `preferred_process_action(user_goal)`
+
+用有限关键词识别进程生命周期请求。只有显式“强制终止/force kill”等选择强制动作，其他
+关闭意图默认正常退出。返回布尔值或 `ProcessActionType`；不解析系统状态。
+
+#### `process_target_query(user_goal)`
+
+本地提取 PID 或精确名称；拒绝“所有进程”和无上下文“它”。返回严格
+`ProcessTargetQuery`；模糊/空目标抛出 `ValueError`。输出仍只是查询，不是执行授权。
+
+#### `ProcessActionPlanCompiler.compile(...)` / `compile_from_text(...)`
+
+通过 resolver 读取新状态，创建一个有限不可变计划并设置确定风险。名称歧义、目标缺失、
+数量超限由解析/Schema 抛错；不调用模型或平台写 API。
+
+#### `ProcessActionPlanCompiler.compile_resolved(...)`
+
+仅用于正常退出后的独立强制流程，把 resolver 刚取得的“仍存活成员”写入新事务；空集合
+拒绝。它不允许复用旧 plan/operation/transaction ID。
+
+#### `ProcessTargetResolver.resolve(query)`
+
+PID/表格选择会重新 inspect；名称会在最多 2000 个可完整识别进程中精确匹配进程名/文件名/
+stem，并按规范化可执行路径分组。不同路径同名返回 TARGET_AMBIGUOUS；找不到返回
+TARGET_NOT_FOUND。`include_application_group` 决定是否绑定同可执行路径所有成员。
+
+#### `re_resolve(target)` / `resolve_current_application_group(target)` / `inspect_pid(pid)`
+
+`re_resolve` 要求当前应用组身份集合与旧组完全相同，否则 TARGET_GROUP_CHANGED；用于确认和
+执行前失效检查。`resolve_current_application_group` 只为新强制计划返回当前剩余成员，不会
+继承旧授权。`inspect_pid` 返回当前完整观察或 `None`。
+
+### 安全 Preview 与验证
+
+#### `ProcessSafetyPolicy.assess(observation, action, application_has_window=None)`
+
+按顺序阻止 Agent PID、SYSTEM SID、其他 owner/session、关键/系统进程、受保护进程、安全
+软件、SCM 服务和 Windows 目录程序；无法可靠分类时默认阻止。正常退出另要求应用组有可
+关闭窗口。返回分类、ALLOW/BLOCK、稳定原因码和说明；模型不能覆盖。
+
+#### `ProcessPreviewEngine.build(plan, targets=None)`
+
+对原始或重验证目标逐成员执行策略，计算身份摘要、应用/进程/窗口数、CPU 和内存影响，
+返回不可变 Preview。只读；目标集合与计划不符会在独立 validator 中拒绝。
+
+#### `ProcessActionSafetyValidator.review(plan, preview)`
+
+核对注册工具、输入 Schema、精确风险、双确认、Preview、irreversible/NONE 声明、5 应用/
+20 进程上限和每个 ALLOW 评估。返回 `ProcessSafetyReview`；任一 issue 都使 approved=false。
+
+### 双确认
+
+#### `ProcessActionConfirmationService.request_plan(...)` / `resolve_plan(...)`
+
+只为可执行且匹配计划的 Preview 创建 PLAN 请求，并在有效期内批准/拒绝。绑定 action、
+transaction、operation、plan/preview/target 摘要和进程数；状态不对或过期抛
+`ProcessConfirmationError`。
+
+#### `request_runtime(...)` / `resolve_runtime(...)` / `consume_runtime(...)`
+
+RUNTIME 请求要求同动作的已批准 PLAN，并绑定刚重验证的新 Preview。`consume_runtime` 在
+执行边界同时消费父/子确认，防重放；动作、身份、摘要、数量、Preview ID 或有效期变化均
+拒绝。确认只存内存授权，重启不可恢复。
+
+### 平台协议与 Windows 实现
+
+#### `ProcessManagementPlatform.list_processes(max_processes)` / `inspect_process(pid)`
+
+协议返回完整 `ProcessObservation`，或对无法安全识别的 PID 返回 `None`。Windows 实现查询
+窗口、服务关系、路径、创建时间、owner SID、session、关键标志、保护等级和有限资源值；
+从不读取命令行或窗口文本。
+
+#### `request_graceful_exit(identity, timeout_seconds, cancellation)`
+
+打开 QUERY_LIMITED + SYNCHRONIZE 句柄，在同一句柄上重读身份，枚举当前 PID 的顶层窗口，
+用 `PostMessageW(WM_CLOSE)` 请求退出，再轮询 `WaitForSingleObject`。取消仅停止等待；已经
+发送的消息不能撤销。返回逐成员状态，不提权。
+
+#### `force_terminate(identity, timeout_seconds)`
+
+打开 QUERY_LIMITED + TERMINATE + SYNCHRONIZE 句柄，先做同句柄身份比较，再调用
+`TerminateProcess` 并等待原句柄 signal。权限不足返回 ACCESS_DENIED；不尝试 UAC 或备用
+命令。Wait 异常/超时分别返回 FAILED/STILL_RUNNING。
+
+#### Windows 私有辅助函数
+
+`_identity_from_handle` 组合路径、创建时间、owner、session 和父 PID；`_query_*` 各查询一
+个字段；`_is_process_critical` 和 `_process_protection_level` 失败时让整个观察不可执行；
+`_window_counts`/`_windows_for_pid` 用 EnumWindows + GetWindowThreadProcessId；
+`_active_service_processes` 仅用 SCM 枚举/查询句柄；`_wait_for_process` 支持取消；
+`_open_failure`、`_identity_changed`、`_platform_failure` 把 Win32 错误转换为稳定成员结果；
+`protection_level_none()` 返回 Windows 未保护 sentinel。均不使用 shell。
+
+### 注册工具
+
+#### `RequestProcessExitTool.execute(request, cancellation)`
+
+校验 action 必须为 REQUEST_GRACEFUL_EXIT，然后并发请求应用组成员，确保组总等待时间不按
+成员倍增。取消前未开始成员返回 CANCELLED_WAITING。返回固定长度 typed result。
+
+#### `ForceTerminateProcessTool.execute(request, cancellation)`
+
+校验 action 必须为 FORCE_TERMINATE，按顺序处理成员；取消阻止后续成员，意外 FAILED 后
+停止并把剩余成员标为 NOT_ATTEMPTED。无自动 fallback。
+
+#### `_manifest(name, description, risk)`
+
+构造完整 Windows 普通用户工具清单：非只读、非幂等、可取消、Preview、PLAN+RUNTIME、
+irreversible、rollback NONE、20 项、35 秒、固定审计字段。错误风险/声明在模型校验时拒绝。
+
+### 持久化、审计与编排
+
+#### `ProcessActionRepository.initialize()` / `create()` / `transition()`
+
+创建 additive 表并验证 SQLite。启动时把 VALIDATING/REQUESTING/FORCE_TERMINATING 等活动
+状态标为 INTERRUPTED，把仅等待确认的旧状态取消；绝不自动恢复。`create` 持久化精确工具/
+参数摘要，`transition` 只允许显式状态图边。数据库失败抛 `ProcessActionStoreError`。
+
+#### 确认/能力方法
+
+`record_confirmation` 保存非秘密证据；`bind_plan_confirmation`、
+`bind_runtime_confirmation` 和 `bind_runtime_preview` 更新精确绑定；
+`consume_confirmation_pair` 原子验证并消费双确认；`require_execution_authorization` 同时核对
+事务状态、operation/plan/preview、工具、参数摘要、父子确认和 action。任何不一致拒绝工具。
+
+#### `get()` / `list_recent()` / `close()`
+
+读取单事务、返回最多 500 条最新记录、释放 engine。未初始化或未知事务抛存储错误。
+
+#### `ProcessExecutionGuard.require(...)`
+
+把 ToolRegistry 写能力检查委派给持久化仓库，确保 UI 或模型无法直接调用非只读工具。
+
+#### `ProcessActionAuditLogger.previewed()` / `confirmation_resolved()` / `started()` /
+`completed()` / `failed()`
+
+分别记录 Preview 决策、两层确认、写前事件、逐成员验证结果和失败阶段。写前审计不可用会
+fail closed。记录身份/路径但不含命令行、窗口内容、token 或文档内容；所有事件仍经过通用
+递归脱敏。
+
+#### `ProcessActionService.prepare*()`
+
+`prepare_from_text`、`prepare`、`prepare_plan` 串联解析、Preview、独立审查、事务和审计。
+阻止计划不会发确认。`prepare_force_after_graceful` 只从当前仍存活原应用成员创建全新的
+高影响事务；目标已退出则拒绝。
+
+#### 计划/即时确认服务方法
+
+`request_plan_confirmation`、`resolve_plan_confirmation`、
+`request_runtime_confirmation`、`resolve_runtime_confirmation` 同步内存确认、SQLite 状态和
+审计。即时请求先重新解析身份/组和策略；变化会转 BLOCKED/ALREADY_EXITED。
+
+#### `ProcessActionService.execute(...)`
+
+消费双确认，持久化 VALIDATING，再次解析身份/策略，核对目标和分类，写 mandatory started
+审计，构造 `ExecutionAuthorization` 并通过 registry 调用唯一动作工具。验证结果映射到明确
+终态并审计。工具异常在可能开始写后标 UNKNOWN；不猜测完成。
+
+#### 编排私有辅助函数
+
+`_arguments` 生成 exact typed 工具参数并让窗口成员优先；`_revalidate_targets` 检查组集合或
+单 PID 身份；`_tool_name` 只映射两个注册名；`_terminal_state` 把成员状态映射事务终态；
+`_already_exited_result` 为执行前自然退出生成零写操作的可验证结果。
+
+### Qt 后台与对话框
+
+#### `ProcessPrepareWorker.run()` / `ProcessForcePreviewWorker.run()`
+
+后台创建服务并生成正常/强制 Preview。异常转为 failed signal；不会在 GUI 线程查询 SCM 或
+进程。`PreparedProcessAction` 承载 typed 结果。
+
+#### `ProcessRuntimePreviewWorker.run()` / `ProcessExecutionWorker.run()` / `cancel()`
+
+分别后台即时重验证和消费确认执行。`cancel` 设置协作 token，仅停止等待/后续对象。三个
+`require_*` 函数校验跨线程 object 类型，错误抛 `TypeError`。
+
+#### `ProcessActionDialog`
+
+构造即启动只读 Preview；`_show_prepared` 只给通过策略的目标请求 PLAN；`_approve_plan` 后台
+重验证；`_approve_runtime_and_execute` 才启动工具 Worker；`_completed` 显示逐成员验证；
+`_start_force_preview` 创建全新高影响事务；`_cancel_clicked` 按阶段拒绝确认或协作取消；
+`closeEvent` 不允许遗留未处理确认/worker；`shutdown` 用于应用退出。Cancel 是默认按钮。
+
+#### GUI 辅助函数与系统诊断入口
+
+`_risk_text`、`_preview_html`、`_result_html` 只格式化已验证对象；
+`_force_is_valid_alternative` 仅在所有阻止原因都是 UNSUPPORTED_GRACEFUL_EXIT 时开放强制
+Preview。`SystemDiagnosticsTab.open_process_action`、`_selected_process` 和选择槽只传具体
+本地查询；`MainWindow._remember_process_reference` 与 `_references_previous_process` 仅在
+最近明确 PID 存在时解析“它”，实际身份仍会重新读取。
+
 ## Stage 3 Windows 系统只读诊断 API
 
 本节逐项说明 Stage 3 新增或扩展的生产函数。除 Qt 展示方法外，所有入口均可在无 GUI、

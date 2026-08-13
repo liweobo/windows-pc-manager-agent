@@ -1,5 +1,29 @@
 # Developer guide
 
+## Stage 4A development
+
+Stage 4A code is split across `domain/process_actions.py`, `platform_support/processes.py`,
+`platform_support/windows/process_management.py`, `orchestration/process_*`,
+`safety/process_*`, `confirmation/process_actions.py`, `persistence/process_actions.py`,
+`tools/system_tools/process_actions.py`, audit, workers and the Preview dialog.
+
+Never add a generic PID-kill, shell, taskkill, elevation or “force fallback” entry point.
+Any additional process action needs a distinct enum, manifest, risk, transaction transition,
+confirmation text, platform method, verifier and tests. PID alone is never identity.
+
+Focused verification:
+
+```powershell
+uv run pytest tests/unit/test_process_*.py tests/security/test_process_policy.py -q
+uv run pytest tests/integration/test_process_action_flow.py -q
+uv run pytest tests/gui/test_process_action_dialog.py -q
+uv run pytest tests/integration/test_windows_process_management_real.py -q
+```
+
+The real adapter test creates and terminates only a child Python process started by that
+test. Never point a test at an existing user process. The GUI worker tests must use
+`FakeProcessPlatform`; no confirmation test should mutate the real operating system.
+
 ## Stage 3 development
 
 Stage 3 is split across domain models, eight registered system tools, the platform protocol,

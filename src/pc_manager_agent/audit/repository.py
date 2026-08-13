@@ -40,7 +40,7 @@ class AuditEventRow(Base):
     step_id: Mapped[str | None] = mapped_column(String(100))
     tool_name: Mapped[str | None] = mapped_column(String(120), index=True)
     parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
-    risk_level: Mapped[str | None] = mapped_column(String(2), index=True)
+    risk_level: Mapped[str | None] = mapped_column(String(20), index=True)
     confirmation_required: Mapped[bool] = mapped_column(Boolean)
     confirmation_result: Mapped[str | None] = mapped_column(String(40))
     before_state: Mapped[dict[str, Any] | None] = mapped_column(JSON)

@@ -127,6 +127,30 @@ def test_manifest_rejects_invalid_or_contradictory_metadata() -> None:
                 "requires_runtime_confirmation": True,
             },
         )
+    with pytest.raises(ValueError, match="Rollback NONE"):
+        ToolManifest(
+            name="test.r2-none-not-irreversible",
+            **{
+                **base,
+                "risk_level": RiskLevel.R2,
+                "read_only": False,
+                "supports_preview": True,
+                "requires_runtime_confirmation": True,
+            },
+        )
+    with pytest.raises(ValueError, match="rollback NONE"):
+        ToolManifest(
+            name="test.r2-irreversible-false-rollback",
+            **{
+                **base,
+                "risk_level": RiskLevel.R2_HIGH_IMPACT,
+                "read_only": False,
+                "rollback_level": RollbackLevel.MANUAL,
+                "supports_preview": True,
+                "requires_runtime_confirmation": True,
+                "irreversible": True,
+            },
+        )
 
 
 def test_cancellation_token() -> None:

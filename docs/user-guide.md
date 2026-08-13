@@ -1,5 +1,25 @@
 # User guide
 
+## 使用 Stage 4A 受控进程关闭
+
+1. 在“系统诊断”页运行“进程”或性能诊断，选中一个明确进程，再点击“审查选中进程的
+   关闭选项”；也可在聊天输入“关闭 demo”。
+2. 等待后台实时查询。旧的 Stage 3 表格行只是线索，程序会重新读取 PID、进程名、路径、
+   用户、启动时间、会话、窗口、服务和保护状态。
+3. 阅读计划 Preview：具体应用组/成员、资源影响、安全分类、R2、普通用户权限和回滚
+   `NONE`。系统、服务、安全软件、其他用户、Agent 等阻止项不会出现可执行确认按钮。
+4. 点击“确认计划并重新验证”。此时仍未关闭进程；程序会再次读取身份和安全状态。
+5. 阅读即时 Preview，在短时有效期内点击“请求正常退出”。应用可能自己弹出保存提示。
+6. 查看逐 PID 验证结果。`EXITED`/`ALREADY_EXITED` 表示原身份已不存在；超时不等于成功。
+7. 只有正常退出不支持或超时后，才可主动打开“查看强制终止选项”。它会创建全新的
+   R2_HIGH_IMPACT 计划并再次要求两次确认，绝不会自动执行。
+
+强制终止可能丢失未保存数据或损坏应用状态，回滚等级为 `NONE`。重新启动应用不是 Undo。
+“停止等待/后续对象”也不是 Undo。程序不会请求管理员权限或在权限不足时重试提权。
+
+聊天中的“关掉它”只有在最近一次性能结果给出了一个明确第一名，或你明确选择了一行时才
+绑定目标；否则会要求选择，不会猜测。名称对应多个不同安装路径时也会拒绝并要求选行。
+
 ## 使用“系统诊断”页
 
 1. 输入目标，或选择“系统概览”“性能诊断”“进程”“启动项”“服务”“软件”。
@@ -131,6 +151,12 @@ are not intentionally stored in audit events.
   and API key in the same PowerShell environment. Never paste a key into chat.
 - **audit database failure**: verify the local data directory is writable and not locked;
   do not continue by deleting safety code or using administrator mode.
+- **TARGET_AMBIGUOUS**：同名进程来自不同路径；回到进程表选择具体一行。
+- **PROCESS_IDENTITY_CHANGED / TARGET_GROUP_CHANGED**：进程或浏览器帮助进程已经变化；
+  生成新 Preview，不要复用旧确认。
+- **UNSUPPORTED_GRACEFUL_EXIT**：没有可接收 `WM_CLOSE` 的顶层窗口；若确实需要，阅读并
+  主动进入独立强制终止流程。
+- **PROCESS_ACCESS_DENIED**：普通用户权限不足；Stage 4A 不会提权，请不要以管理员方式绕过。
 
 Closing the window normally hides it to the tray. Use the tray's safe exit action to cancel
 work, wait for workers, hide the icon, and close the application.

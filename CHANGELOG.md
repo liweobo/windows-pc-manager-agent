@@ -7,6 +7,14 @@ once release tags are introduced.
 
 ### Added
 
+- Stage 4A deterministic current-user process resolution, application grouping,
+  protected/system/security/service/Agent classification, live impact Preview, and
+  handle-bound PID-reuse defense.
+- Registered R2 `system.process.request_exit` (`WM_CLOSE`) and independently planned
+  R2_HIGH_IMPACT `system.process.force_terminate` tools with two one-time confirmations,
+  SQLite transaction states, verification, audit, restart interruption handling, and GUI.
+- Unit, integration, security, GUI, and disposable real-Windows child-process tests for
+  Stage 4A, including stale identity, replay, no-window, timeout, cancellation, and failure.
 - Stage 3 R0 Windows diagnostics for system identity, multi-sample CPU, memory,
   local fixed disks, processes, startup entries, services, and installed-software
   registry records behind registered tools and exact plan confirmation.
@@ -70,6 +78,11 @@ once release tags are introduced.
 
 ### Security
 
+- Stage 4A blocks critical/protected/system/security/service/other-user/other-session/Agent
+  targets, collects no command line, never elevates or invokes shell/taskkill, and never
+  upgrades graceful exit into force termination without a new plan and two new approvals.
+- Process termination is explicitly non-reversible (`RollbackLevel.NONE`); cancel stops
+  waiting/future work only and never claims to restore a process or unsaved application data.
 - Stage 3 never collects process command lines or uninstall commands and has no process,
   service, startup, registry, software, elevation, shell, WMI, or system mutation tool.
 - Diagnostic model output is finite untrusted intent only; local compilation, registered

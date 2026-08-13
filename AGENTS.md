@@ -24,8 +24,9 @@ tools, verifies results, and records a structured audit trail.
 
 - R0: read-only. May run only inside a confirmed plan and approved scope.
 - R1: low-risk and reversible. Requires plan confirmation and an undo record.
-- R2: destructive but potentially recoverable. Requires plan confirmation plus
-  an immediate, object-specific confirmation.
+- R2: destructive or lifecycle-changing. Requires plan confirmation plus an
+  immediate, object-specific confirmation. `R2_HIGH_IMPACT` is the Stage 4A
+  force-termination sublevel and never reuses graceful-exit approval.
 - R3: high-risk system change. Interface/roadmap only in MVP 0.1.
 - R4: prohibited. Reject and audit the reason.
 - A confirmation is bound to plan ID, canonical plan digest, step ID, argument
@@ -100,10 +101,12 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-Stage 3 retains Stage 2B and adds only confirmed R0 queries for Windows/system identity,
-multi-sample CPU, memory/pagefile, local fixed disks, metadata-only processes, Run/Startup
-entries, SCM service state/configuration, and uninstall-registry software inventory.
-Process command lines and uninstall commands are not collected. Diagnostic findings are
-threshold-based observations, never malware or root-cause diagnoses. No Stage 3 tool can
-terminate a process, modify a service/startup item/registry value, uninstall software,
-elevate, run PowerShell/CMD/WMI/Win32_Product, or mutate system state. Stage 4 has not begun.
+Stage 4A retains Stage 0–3 and adds only controlled current-user process lifecycle actions:
+registered `system.process.request_exit` (`R2`) and separately planned/confirmed
+`system.process.force_terminate` (`R2_HIGH_IMPACT`). Every target is resolved locally,
+classified, bound by PID + creation time + executable path + owner SID + session, rechecked
+immediately before execution, and verified afterward. System/critical/protected/security/
+service/other-user/other-session/Agent processes are blocked. Rollback is truthfully `NONE`.
+No process command line is collected. No elevation, shell, taskkill, service/startup/registry
+change, uninstall, firewall action, arbitrary PID supplied by a model, or automatic force
+fallback exists. Later Stage 4 capabilities remain unimplemented.

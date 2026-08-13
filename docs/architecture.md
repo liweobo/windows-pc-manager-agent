@@ -1,5 +1,49 @@
 # Architecture
 
+## Stage 4A controlled process-action boundary
+
+```text
+chat / selected Stage 3 process row
+  -> ProcessTargetResolver (fresh local PID/name/application-group resolution)
+  -> ProcessActionPlanCompiler (graceful-first finite action)
+  -> ProcessPreviewEngine + ProcessSafetyPolicy (default-deny classification)
+  -> ProcessActionSafetyValidator (exact registered manifest/schema/risk/bounds)
+  -> PLAN confirmation
+  -> fresh identity/group/policy revalidation -> new Preview
+  -> short-lived RUNTIME confirmation
+  -> SQLite consumed-capability check -> ToolRegistry
+       system.process.request_exit OR system.process.force_terminate
+  -> WindowsProcessManagementPlatform (checked handle / WM_CLOSE / TerminateProcess)
+  -> WaitForSingleObject verification -> transaction + audit + GUI result
+```
+
+`domain.process_actions` has no Qt, model, or Windows dependency. `ProcessIdentity` binds
+PID, creation time, executable path, owner SID and session; its digest is carried by plan,
+Preview, both confirmations, exact tool arguments and audit. Name matching and application
+grouping are local and fail on ambiguity. The UI never turns a stale Stage 3 row into
+authority: it supplies a selected PID only as a query, and the resolver rereads all identity
+and protection metadata in a worker.
+
+`ProcessSafetyPolicy` is deterministic and default-deny. It blocks Agent PIDs, system SIDs,
+other owners/sessions, critical names/flags, non-NONE process protection, known security
+processes, active SCM service PIDs and Windows-directory executables. A graceful group is
+supported when at least one member owns a top-level window; helper members remain visible
+and verified. Unknown/inaccessible metadata is omitted or blocked, never guessed.
+
+The Windows adapter uses query-limited process handles, `GetProcessTimes`,
+`QueryFullProcessImageNameW`, token owner SID, session ID, `IsProcessCritical`, process
+protection information, top-level-window enumeration, SCM query handles, `PostMessageW`,
+`TerminateProcess`, and `WaitForSingleObject`. It exposes no command string, shell, elevation,
+service-control, registry-write or arbitrary process primitive. Graceful group requests run
+concurrently under a single configured timeout instead of multiplying it per helper process.
+
+Normal exit and force termination are separate immutable plans and separate transaction IDs.
+A graceful timeout or unsupported window can only expose a button that creates a fresh force
+Preview from currently remaining application members. It cannot reuse either confirmation.
+Transactions persist exact digests and lifecycle states. Restart changes active mutations to
+`INTERRUPTED`; nothing auto-resumes. Because process exit cannot restore unsaved state,
+rollback is always `NONE`; starting an executable again is not Undo.
+
 ## Stage 3 read-only system diagnostics
 
 Stage 3 follows the same plan-first boundaries without reusing file-operation authority:

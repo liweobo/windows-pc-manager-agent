@@ -40,6 +40,11 @@ class AppSettings(BaseModel):
     diagnostic_sample_interval_seconds: float = Field(default=1.5, ge=0.1, le=2.0)
     diagnostic_max_processes: int = Field(default=500, ge=1, le=2_000)
     diagnostic_max_items: int = Field(default=5_000, ge=1, le=20_000)
+    process_action_max_applications: int = Field(default=5, ge=1, le=10)
+    process_action_max_processes: int = Field(default=20, ge=1, le=50)
+    process_graceful_timeout_seconds: float = Field(default=10.0, ge=5.0, le=30.0)
+    process_force_timeout_seconds: float = Field(default=10.0, ge=2.0, le=30.0)
+    process_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -99,6 +104,21 @@ class AppSettings(BaseModel):
             ),
             "diagnostic_max_processes": os.getenv("PC_MANAGER_DIAGNOSTIC_MAX_PROCESSES", "500"),
             "diagnostic_max_items": os.getenv("PC_MANAGER_DIAGNOSTIC_MAX_ITEMS", "5000"),
+            "process_action_max_applications": os.getenv(
+                "PC_MANAGER_PROCESS_ACTION_MAX_APPLICATIONS", "5"
+            ),
+            "process_action_max_processes": os.getenv(
+                "PC_MANAGER_PROCESS_ACTION_MAX_PROCESSES", "20"
+            ),
+            "process_graceful_timeout_seconds": os.getenv(
+                "PC_MANAGER_PROCESS_GRACEFUL_TIMEOUT_SECONDS", "10"
+            ),
+            "process_force_timeout_seconds": os.getenv(
+                "PC_MANAGER_PROCESS_FORCE_TIMEOUT_SECONDS", "10"
+            ),
+            "process_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_PROCESS_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
         if data_directory:

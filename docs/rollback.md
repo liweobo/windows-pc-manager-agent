@@ -1,5 +1,26 @@
 # Rollback design
 
+## Stage 4A process lifecycle actions
+
+| Operation | Risk | Rollback | Truthful recovery statement |
+|---|---|---|---|
+| Request application `WM_CLOSE` | R2 | NONE | A closed process and unsaved data cannot be restored by the Agent |
+| Force `TerminateProcess` | R2_HIGH_IMPACT | NONE | Restarting the executable is not Undo and cannot recover unsaved/in-memory state |
+| Blocked/cancelled before action | R2/R2_HIGH_IMPACT | NONE needed | No process mutation was sent |
+| Interrupted/unknown result | R2/R2_HIGH_IMPACT | Manual inspection | Check whether the original identity remains; never auto-retry |
+
+Process actions deliberately do not implement `UndoRecord` or feed `RollbackManager`.
+Transactions instead retain the original identity digest, exact action, both confirmation
+bindings, result state and verification evidence. Cancellation after `WM_CLOSE` means only
+“stop waiting”; cancellation in a force batch means “do not begin later members”. It never
+claims to reverse a request already sent to Windows.
+
+After a graceful timeout or an unsupported no-window result, force termination is not a
+rollback. It is a new higher-impact transaction with a new Preview, fresh current identities,
+new plan confirmation and new immediate confirmation. If the application already exited,
+the new action is not created. A restart changes in-flight records to `INTERRUPTED` and does
+not resume them.
+
 ## Stage 3
 
 System diagnostics are R0 query-only operations, so rollback is `NONE`: there is no changed
@@ -90,16 +111,16 @@ prohibited.
 
 ## Code rollback
 
-After Stage 2A is committed, use a new branch and revert its commit(s) newest first:
+After Stage 4A is committed, use a new branch and revert its commit(s) newest first:
 
 ```powershell
-git switch -c fix/revert-stage-2a
-git revert <stage-2a-sha>
-git push -u origin fix/revert-stage-2a
+git switch -c fix/revert-stage-4a
+git revert <stage-4a-sha>
+git push -u origin fix/revert-stage-4a
 ```
 
 Review and test the revert before merging. Do not force-push or use `git reset --hard` as
-the normal recovery procedure. Reverting code does not move user files back and does not
-automatically remove additive SQLite tables. First use the running Stage 2A rollback Preview
-for any desired user-file restoration, verify it, then revert code. Keep/back up local state
-according to user intent.
+the normal recovery procedure. Reverting code does not restart terminated applications,
+recover unsaved data, move user files back, or automatically remove additive SQLite tables.
+Inspect transaction history and verify any desired file rollback first, then test the code
+revert before merging.
