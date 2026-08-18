@@ -130,28 +130,52 @@ class ServiceTransactionState(StrEnum):
     INTERRUPTED = "INTERRUPTED"
 
 
-class ServiceIdentity(FrozenModel):
-    """Configuration identity revalidated immediately before SCM control."""
+class ServiceStartupType(StrEnum):
+    """Normalized SCM startup types used by read and write safety checks."""
+
+    AUTOMATIC = "AUTOMATIC"
+    AUTOMATIC_DELAYED = "AUTOMATIC_DELAYED"
+    MANUAL = "MANUAL"
+    DISABLED = "DISABLED"
+    BOOT = "BOOT"
+    SYSTEM = "SYSTEM"
+    UNKNOWN = "UNKNOWN"
+
+
+class ServiceStartupConfiguration(FrozenModel):
+    """Mutable startup configuration kept separate from stable service identity."""
+
+    startup_type: ServiceStartupType
+    delayed_auto_start: bool
+
+    def canonical_digest(self) -> str:
+        """Hash exactly the startup fields that Stage 4C2 can observe."""
+        return _digest(self.model_dump(mode="json"))
+
+
+class ServiceStableIdentity(FrozenModel):
+    """Stable service evidence revalidated before every SCM operation."""
 
     service_name: str = Field(min_length=1, max_length=256)
-    display_name: str = Field(min_length=1, max_length=256)
     service_type: int = Field(ge=0)
     binary_path_fingerprint: str = Field(min_length=64, max_length=64)
     service_account: str = Field(min_length=1, max_length=512)
-    start_type: int = Field(ge=0)
 
     def canonical_digest(self) -> str:
-        """Hash configuration fields while excluding dynamic service state."""
+        """Hash stable fields while excluding display, startup, and runtime state."""
         return _digest(
             {
                 "service_name": self.service_name.casefold(),
-                "display_name": self.display_name,
                 "service_type": self.service_type,
                 "binary_path_fingerprint": self.binary_path_fingerprint,
                 "service_account": self.service_account.casefold(),
-                "start_type": self.start_type,
             }
         )
+
+
+# Compatibility alias retained for Stage 4C1 public imports. The model itself now
+# intentionally represents only stable identity fields.
+ServiceIdentity = ServiceStableIdentity
 
 
 class ServiceRelation(FrozenModel):
@@ -198,7 +222,9 @@ class ServicePermissionEvidence(FrozenModel):
 class ServiceObservation(FrozenModel):
     """Fresh local service configuration, state, and relationship evidence."""
 
-    identity: ServiceIdentity
+    identity: ServiceStableIdentity
+    display_name: str = Field(min_length=1, max_length=256)
+    startup_configuration: ServiceStartupConfiguration
     state: ServiceState
     controls_accepted: int = Field(ge=0)
     process_id: int = Field(ge=0)
@@ -210,14 +236,19 @@ class ServiceObservation(FrozenModel):
     dependents: tuple[ServiceRelation, ...] = ()
 
     def state_digest(self) -> str:
-        """Bind a Preview to live state without changing configuration identity."""
+        """Bind a Preview to stable identity, startup configuration, and live state."""
         return _digest(
             {
-                "configuration": self.identity.canonical_digest(),
+                "identity": self.identity.canonical_digest(),
+                "startup_configuration": self.startup_configuration.canonical_digest(),
                 "state": self.state.value,
                 "controls_accepted": self.controls_accepted,
             }
         )
+
+    def configuration_digest(self) -> str:
+        """Return the independent startup-configuration digest for TOCTOU checks."""
+        return self.startup_configuration.canonical_digest()
 
     def dependency_digest(self) -> str:
         """Hash dependency names and states in deterministic order."""
@@ -271,7 +302,8 @@ class ServiceActionPlan(FrozenModel):
     summary: str = Field(min_length=1, max_length=500)
     target_query: str = Field(min_length=1, max_length=500)
     action: ServiceActionType
-    target_identity: ServiceIdentity
+    target_identity: ServiceStableIdentity
+    target_startup_configuration: ServiceStartupConfiguration
     expected_state_digest: str = Field(min_length=64, max_length=64)
     expected_dependency_digest: str = Field(min_length=64, max_length=64)
     expected_permission_digest: str = Field(min_length=64, max_length=64)
@@ -345,8 +377,9 @@ class ServiceStepRequest(FrozenModel):
 
     transaction_id: UUID
     step: ServiceStepType
-    identity: ServiceIdentity
-    expected_configuration_digest: str = Field(min_length=64, max_length=64)
+    identity: ServiceStableIdentity
+    expected_identity_digest: str = Field(min_length=64, max_length=64)
+    expected_startup_configuration_digest: str = Field(min_length=64, max_length=64)
     expected_state: ServiceState
     timeout_seconds: float = Field(gt=0, le=120)
 

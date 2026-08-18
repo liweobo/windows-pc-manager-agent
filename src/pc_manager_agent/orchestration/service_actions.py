@@ -485,7 +485,10 @@ class ServiceActionService:
             transaction_id=plan.transaction_id,
             step=step,
             identity=plan.target_identity,
-            expected_configuration_digest=plan.target_identity.canonical_digest(),
+            expected_identity_digest=plan.target_identity.canonical_digest(),
+            expected_startup_configuration_digest=(
+                plan.target_startup_configuration.canonical_digest()
+            ),
             expected_state=expected_state,
             timeout_seconds=self._timeout,
         )

@@ -17,7 +17,10 @@ tools, verifies results, and records a structured audit trail.
   path scope.
 - Never use `eval`, `exec`, arbitrary shell commands, `shell=True`, silent
   overwrite, permanent deletion, UAC bypass, or credential extraction.
-- R3 operations are not executable in MVP 0.1. R4 operations are always denied.
+- R3 operations are not executable in MVP 0.1. The sole narrow exception is the
+  explicitly approved Stage 4C2 non-delayed `Automatic` ↔ `Manual` service
+  startup-type transition, classified R2 only when every Stage 4C2 gate passes.
+  All other service configuration remains R3. R4 operations are always denied.
 - Do not request or run the application as administrator for MVP work.
 
 ## Risk and confirmation
@@ -101,13 +104,20 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-Stage 4C1 retains earlier stages and adds exactly two narrow SCM tools:
-`system.service.start` and `system.service.stop`. START/STOP are R2 and RESTART is an explicit
-R2_HIGH_IMPACT STOP/verify/revalidate/START/verify transaction. Only one exact ServiceName for
-a signed, own-process, current-user third-party service can pass policy, permission,
-dependency, Preview, plan-confirmation and immediate-confirmation gates. Driver/shared/system/
-Microsoft/security/network/login/storage/update/enterprise/Agent/unknown services are
-read-only or blocked. Never cascade dependencies, retry automatically, elevate, use shell,
-WMI, `sc.exe`, kill a service process, change service configuration, uninstall software, or
-auto-resume interrupted transactions. Service recovery is MANUAL and partial restart outcomes
-must display the freshly observed state.
+Stage 4C2 retains earlier stages and adds exactly three narrow startup-configuration tools:
+`system.service.startup.set_automatic`, `system.service.startup.set_manual`, and
+`system.service.startup.restore`. They may change only one exact signed, own-process,
+current-user third-party service between non-delayed Automatic and Manual after policy,
+permission, dependency-impact, verified DPAPI backup, Preview, plan-confirmation,
+immediate-confirmation, execution-time revalidation, read-back verification, and unchanged
+runtime-state gates. Delayed Automatic is read-only. Disabled, Boot, System, driver, shared,
+Microsoft, security, network, login, storage, update, enterprise, Agent, unknown, or dependent
+services are blocked. Restore is conditional FULL: it needs fresh confirmations and current
+configuration must exactly equal the Agent-written state, otherwise `RESTORE_CONFLICT`.
+
+Stage 4C1 still provides only `system.service.start` and `system.service.stop`; restart remains
+an explicit R2_HIGH_IMPACT STOP/verify/revalidate/START/verify transaction with MANUAL
+recovery. Never cascade dependencies, retry automatically, elevate, use shell, WMI, `sc.exe`,
+kill a service process, call `ChangeServiceConfig2`, alter delayed/Disabled/service binary/
+account/password/dependencies/recovery/security fields, uninstall software, or auto-resume an
+interrupted transaction.

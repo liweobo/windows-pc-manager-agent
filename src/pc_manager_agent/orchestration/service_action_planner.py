@@ -38,6 +38,7 @@ class ServiceActionPlanCompiler:
             target_query=target_query,
             action=action,
             target_identity=observation.identity,
+            target_startup_configuration=observation.startup_configuration,
             expected_state_digest=observation.state_digest(),
             expected_dependency_digest=observation.dependency_digest(),
             expected_permission_digest=permissions.canonical_digest(),

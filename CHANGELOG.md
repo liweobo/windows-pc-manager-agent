@@ -7,6 +7,14 @@ once release tags are introduced.
 
 ### Added
 
+- Stage 4C2 exact-service startup configuration workflow with three narrow registered tools:
+  set non-delayed Automatic, set Manual, and restore an Agent-owned verified backup.
+- Pre-Preview DPAPI-encrypted backup verification, immutable R2 plan, two digest-bound one-time
+  confirmations, execution-time identity/configuration/runtime/dependency/permission revalidation,
+  write-ahead SQLite transactions, privacy-minimized audit, and conditional FULL restore history.
+- Service-management UI for Automatic/Manual Preview and restore history, plus fake-SCM unit,
+  integration, security and GUI coverage and an opt-in real-Windows read-only permission probe.
+
 - Stage 4C1 bounded service inventory and conservative classification for exact ServiceName,
   current-user own-process third-party services with verified signatures.
 - Registered R2 `system.service.start` and `system.service.stop` tools; Restart is an explicit
@@ -85,6 +93,10 @@ once release tags are introduced.
 
 ### Changed
 
+- Service stable identity is now separated from mutable startup configuration. Stage 4C1 control
+  confirmations bind both digests, while Stage 4C2 can prove a deliberate configuration change
+  without weakening ServiceName, type, binary fingerprint, account, state or dependency checks.
+
 - Startup inventory now treats Windows executables without version-resource publisher
   metadata as unknown/read-only instead of aborting the complete inventory.
 
@@ -100,6 +112,16 @@ once release tags are introduced.
   positive recycle evidence remains mandatory.
 
 ### Security
+
+- The user-approved Stage 4C2 R2 exception is limited to one dependency-free, Stage 4C1-eligible
+  service and exact Automatic (not delayed) to/from Manual transitions. Disabled, delayed,
+  driver/Boot/System, protected, unknown and dependent services remain read-only or blocked.
+- Configuration writes require existing ordinary-user `SERVICE_CHANGE_CONFIG` access and call only
+  `ChangeServiceConfig` with every field except start type set to no-change. There is no UAC,
+  elevation retry, shell, `sc.exe`, WMI, `ChangeServiceConfig2`, runtime control or generic adapter.
+- Restore is a new R2 transaction and succeeds only while the stable identity and Agent-written
+  current value still match and the encrypted backup verifies. Interrupted transactions never
+  auto-resume, and audit never stores service command lines, account secrets or encrypted payloads.
 
 - Stage 4B has no generic registry/file/shell primitive and never writes StartupApproved.
   Machine-wide, RunOnce, common-folder, Microsoft/system/security/driver/enterprise/Agent,

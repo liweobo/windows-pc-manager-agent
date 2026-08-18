@@ -12,6 +12,7 @@ from pc_manager_agent.domain.service_actions import (
     ServiceSafetyAssessment,
     ServiceSafetyClass,
     ServiceSafetyDecision,
+    ServiceStartupType,
     ServiceState,
     canonical_path,
 )
@@ -130,7 +131,7 @@ class ServiceSafetyPolicy:
             value.casefold()
             for value in (
                 identity.service_name,
-                identity.display_name,
+                observation.display_name,
                 observation.description or "",
                 observation.publisher or "",
                 str(path or ""),
@@ -207,7 +208,7 @@ class ServiceSafetyPolicy:
             reasons.append(ServiceErrorCode.ACTION_NOT_SUPPORTED)
         if (
             action in {ServiceActionType.START, ServiceActionType.RESTART}
-            and identity.start_type == 4
+            and observation.startup_configuration.startup_type is ServiceStartupType.DISABLED
         ):
             reasons.append(ServiceErrorCode.ACTION_NOT_SUPPORTED)
         decision = ServiceSafetyDecision.BLOCK if reasons else ServiceSafetyDecision.ALLOW

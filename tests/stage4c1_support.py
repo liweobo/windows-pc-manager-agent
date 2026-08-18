@@ -12,6 +12,8 @@ from pc_manager_agent.domain.service_actions import (
     ServiceObservation,
     ServicePermissionEvidence,
     ServiceRelation,
+    ServiceStartupConfiguration,
+    ServiceStartupType,
     ServiceState,
     ServiceStepResult,
     ServiceStepType,
@@ -29,6 +31,7 @@ def service_observation(
     account: str = r"DESKTOP\alice",
     service_type: int = 0x10,
     start_type: int = 3,
+    delayed_auto_start: bool = False,
     publisher: str | None = "Example Vendor",
     publisher_verified: bool = True,
     dependencies: tuple[ServiceRelation, ...] = (),
@@ -39,11 +42,24 @@ def service_observation(
     return ServiceObservation(
         identity=ServiceIdentity(
             service_name=service_name,
-            display_name=display_name,
             service_type=service_type,
             binary_path_fingerprint=canonical_binary_fingerprint(str(binary)),
             service_account=account,
-            start_type=start_type,
+        ),
+        display_name=display_name,
+        startup_configuration=ServiceStartupConfiguration(
+            startup_type={
+                0: ServiceStartupType.BOOT,
+                1: ServiceStartupType.SYSTEM,
+                2: (
+                    ServiceStartupType.AUTOMATIC_DELAYED
+                    if delayed_auto_start
+                    else ServiceStartupType.AUTOMATIC
+                ),
+                3: ServiceStartupType.MANUAL,
+                4: ServiceStartupType.DISABLED,
+            }.get(start_type, ServiceStartupType.UNKNOWN),
+            delayed_auto_start=delayed_auto_start,
         ),
         state=state,
         controls_accepted=controls_accepted,
@@ -108,6 +124,7 @@ class FakeServicePlatform:
     def start(
         self,
         identity: ServiceIdentity,
+        expected_startup_configuration_digest: str,
         expected_state: ServiceState,
         timeout_seconds: float,
         cancellation: CancellationToken,
@@ -117,6 +134,7 @@ class FakeServicePlatform:
         return self._control(
             ServiceStepType.START,
             identity,
+            expected_startup_configuration_digest,
             expected_state,
             ServiceState.RUNNING,
             timeout_seconds,
@@ -128,6 +146,7 @@ class FakeServicePlatform:
     def stop(
         self,
         identity: ServiceIdentity,
+        expected_startup_configuration_digest: str,
         expected_state: ServiceState,
         timeout_seconds: float,
         cancellation: CancellationToken,
@@ -137,6 +156,7 @@ class FakeServicePlatform:
         return self._control(
             ServiceStepType.STOP,
             identity,
+            expected_startup_configuration_digest,
             expected_state,
             ServiceState.STOPPED,
             timeout_seconds,
@@ -149,6 +169,7 @@ class FakeServicePlatform:
         self,
         step: ServiceStepType,
         identity: ServiceIdentity,
+        expected_startup_configuration_digest: str,
         expected_state: ServiceState,
         target_state: ServiceState,
         timeout_seconds: float,
@@ -160,6 +181,8 @@ class FakeServicePlatform:
         started = datetime.now(UTC)
         if identity.canonical_digest() != self.observation.identity.canonical_digest():
             raise RuntimeError("identity changed")
+        if expected_startup_configuration_digest != self.observation.configuration_digest():
+            raise RuntimeError("startup configuration changed")
         if expected_state is not self.observation.state:
             raise RuntimeError("state changed")
         if cancellation.is_cancelled:
@@ -216,8 +239,8 @@ class FakeServicePlatform:
         if step is ServiceStepType.STOP and self.mutate_identity_after_stop:
             self.observation = self.observation.model_copy(
                 update={
-                    "identity": self.observation.identity.model_copy(
-                        update={"start_type": self.observation.identity.start_type + 1}
+                    "startup_configuration": self.observation.startup_configuration.model_copy(
+                        update={"startup_type": ServiceStartupType.AUTOMATIC}
                     )
                 }
             )

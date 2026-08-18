@@ -286,7 +286,7 @@ def _preview_html(prepared: PreparedServiceAction) -> str:
         f"<h3>{escape(prepared.plan.summary)}</h3>"
         "<table border='1' cellspacing='0' cellpadding='4'>"
         f"<tr><th>Service name</th><td>{escape(observation.identity.service_name)}</td></tr>"
-        f"<tr><th>显示名称</th><td>{escape(observation.identity.display_name)}</td></tr>"
+        f"<tr><th>显示名称</th><td>{escape(observation.display_name)}</td></tr>"
         f"<tr><th>当前状态</th><td>{observation.state.value}</td></tr>"
         f"<tr><th>安全分类</th><td>{preview.safety.safety_class.value}</td></tr>"
         f"<tr><th>执行步骤</th><td>{steps}</td></tr>"
@@ -306,7 +306,7 @@ def _runtime_html(value: RuntimeServicePreview) -> str:
     return (
         f"<h3>即时确认：{preview.action.value}</h3>"
         f"<p>唯一对象：{escape(preview.observation.identity.service_name)} / "
-        f"{escape(preview.observation.identity.display_name)}</p>"
+        f"{escape(preview.observation.display_name)}</p>"
         f"<p>当前状态：{preview.observation.state.value}；"
         f"依赖摘要：{preview.dependencies.graph_digest[:12]}…；"
         f"身份摘要：{preview.observation.identity.canonical_digest()[:12]}…</p>"

@@ -1,5 +1,36 @@
 # Security model
 
+## Stage 4C2 service startup-type controls
+
+The explicitly approved R2 exception is the exact, single-object transition
+`Automatic (non-delayed) <-> Manual`. All gates are cumulative:
+
+- the fresh object must pass the Stage 4C1 current-user, signed, own-process third-party policy;
+- stable identity, startup configuration, runtime state, dependency graph and permission evidence
+  must be known and digest-bound;
+- the service must have no dependencies and no dependents;
+- source and target must both be non-delayed Automatic or Manual and must differ;
+- the process must not be elevated and the existing service DACL must grant both query and
+  `SERVICE_CHANGE_CONFIG` access to the ordinary user;
+- an exact DPAPI-encrypted backup must be stored, decrypted and digest-verified before Preview;
+- the immutable plan and first Preview must pass an independent deterministic review;
+- PLAN and fresh RUNTIME confirmations must both match plan, Preview, identity, source/target,
+  runtime state, impact, permissions, backup and expiry, and may be consumed once;
+- the platform must revalidate all evidence immediately before calling the single-field adapter;
+- post-write configuration must equal the target and runtime state must equal the pre-write state.
+
+Delayed Automatic, Disabled, Boot/System, driver, shared/system/protected/unknown services and every
+service with a dependency relationship remain read-only or blocked. Stage 4C2 has no API for account,
+password, binary path, delayed flag, dependencies, recovery actions, security descriptor, service
+start/stop, deletion or bulk change. It never calls `ChangeServiceConfig2`, shell, PowerShell, WMI or
+`sc.exe`, and it never requests elevation or changes a DACL.
+
+The backup vault and transaction journal are separate from audit. Audit records identifiers, hashes,
+policy/confirmation outcomes and verified before/after enum values, but not command lines, binary paths,
+account secrets, passwords or ciphertext. If backup, journal or mandatory audit evidence is unavailable,
+the write is denied. If a write may already have been dispatched but journaling later fails, the result
+is reported as uncertain and never auto-retried.
+
 ## Stage 4C1 service controls
 
 - Service actions are default-deny. Eligible objects must be Win32 own-process services,

@@ -1,5 +1,37 @@
 # Developer guide
 
+## Stage 4C2 development
+
+Stage 4C2 is split across `domain/service_startup_actions.py`, `safety/service_startup_*`,
+`confirmation/service_startup_actions.py`, `persistence/service_startup_actions.py`,
+`platform_support/service_startup.py`, `platform_support/windows/service_startup.py`, three exact
+registered tools, orchestration, audit, rollback command, Qt workers/dialogs and the runtime composition
+root. `ServiceStableIdentity` must remain separate from `ServiceStartupConfiguration`.
+
+The only approved mutation is one dependency-free eligible service changing between non-delayed
+Automatic and Manual. Do not add Disabled or delayed transitions, `ChangeServiceConfig2`, a generic
+configuration object, arbitrary access masks, runtime Start/Stop, account/password/binary/dependency/
+recovery/security changes, batch operations, DACL changes, elevation, shell, WMI, `sc.exe`, automatic
+retry or crash resume. A new transition requires a new threat review and explicit user authorization.
+
+Focused verification:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_service_startup_actions.py -q
+uv run pytest tests/integration/test_service_startup_workflow.py -q
+uv run pytest tests/security/test_service_startup_safety.py -q
+uv run pytest tests/gui/test_service_startup_management.py -q
+uv run pytest tests/unit/test_windows_service_startup_adapter.py -q
+uv run pytest tests/integration/test_windows_service_startup_readonly.py -q
+```
+
+All mutation tests must use `FakeServiceStartupPlatform` and a fake protector with disposable SQLite
+files. The real-Windows integration is query-only and must never call `ChangeServiceConfig`. Restore tests
+must cover backup corruption, identity/config/runtime/dependency drift, confirmation expiry/replay,
+ordinary-user permission denial, journal failure, restore conflict and reverse-restore history. Every new
+or changed production function must be described in `docs/api-reference.md`.
+
 ## Stage 4C1 development
 
 Stage 4C1 is split across `domain/service_actions.py`, the narrow
