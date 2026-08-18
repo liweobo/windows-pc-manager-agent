@@ -1,5 +1,26 @@
 # Windows PC Manager Agent
 
+## Stage 4C2：Windows 服务启动类型安全管理
+
+Stage 4C2 在 Stage 4C1 的精确 ServiceName、身份复验和保护服务策略之上，增加三个且只有
+三个配置工具：`system.service.startup.set_automatic`、
+`system.service.startup.set_manual` 与 `system.service.startup.restore`。经用户明确批准的
+安全边界只允许单个合格第三方服务在 **Automatic（非延迟）** 与 **Manual** 之间转换。
+Delayed Automatic、Disabled、Boot/System、驱动、系统/Microsoft/安全/网络/登录/存储/
+更新/企业/Agent 服务，以及存在任一依赖或被依赖服务的对象，仍为只读或阻止。
+
+每次变更先用当前 Windows 用户的 DPAPI 加密并立即回读验证原配置，再展示 Preview、完成
+计划确认、重新读取身份/配置/运行状态/依赖/权限并进行短时即时确认。执行只调用
+`ChangeServiceConfig` 的启动类型字段，不修改延迟标记、二进制路径、账户、密码、依赖、
+恢复策略或安全描述符，也不启动或停止服务。普通用户若本来没有
+`SERVICE_CHANGE_CONFIG` 权限，操作会以 `PRIVILEGE_REQUIRED`/`ACCESS_DENIED` 停止；应用不会
+请求 UAC 或以管理员模式重试。
+
+成功变更会保存可验证的 Agent-owned 记录。`FULL` 仅表示在稳定身份未变、当前配置仍精确
+等于 Agent 上次写入值、加密备份可解密验证且没有冲突时，能够通过一套全新的双确认 RESTORE
+事务恢复原启动类型；它不恢复服务运行状态或内部会话。应用重启后未完成事务标记为
+`INTERRUPTED`，绝不自动继续。
+
 ## Stage 4C1：Windows 服务安全启停与重启
 
 Stage 4C1 新增“服务管理”页，但服务修改仍采用默认拒绝。程序只会为当前普通用户账户
@@ -100,7 +121,7 @@ restore claim.
 
 ## 当前版本
 
-Stage 4C1 / `0.1.0` 开发版本在此前阶段基础上包含：
+Stage 4C2 / `0.1.0` 开发版本在此前阶段基础上包含：
 
 - PySide6 主窗口和系统托盘；
 - 基础聊天、计划、风险提示与确认界面；
@@ -123,9 +144,9 @@ Stage 4C1 / `0.1.0` 开发版本在此前阶段基础上包含：
 - SQLite `OperationTransaction`、逐项状态、写前 Undo、失败即停止和异常中断检测；
 - 从持久化 Undo 逆序生成的回滚 Preview、独立确认、冲突检查和结果验证。
 
-它不会覆盖或永久删除，不会执行跨卷移动、管理员提权、Shell、注册表、服务、启动项或
-软件修改。Stage 2A 只允许已授权本地目录内的 R1 可逆操作，Stage 2B 仅支持回收站，
-Stage 4A 仅支持上述受控进程生命周期操作。
+它不会覆盖或永久删除，不会执行跨卷移动、管理员提权、Shell 或软件修改。Stage 2A 只允许
+已授权本地目录内的 R1 可逆操作，Stage 2B 仅支持回收站，Stage 4A 仅支持上述受控进程生命
+周期操作，Stage 4B/4C1/4C2 也只开放各节列出的窄工具；不存在通用注册表、服务或命令接口。
 
 ## 安装
 

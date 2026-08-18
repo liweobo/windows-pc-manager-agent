@@ -42,10 +42,11 @@ class StartServiceTool:
         typed = ServiceStepRequest.model_validate(request)
         if typed.step is not ServiceStepType.START:
             raise ValueError("Service start tool accepts only START")
-        if typed.expected_configuration_digest != typed.identity.canonical_digest():
+        if typed.expected_identity_digest != typed.identity.canonical_digest():
             raise ValueError("Service start identity digest is inconsistent")
         return self._platform.start(
             typed.identity,
+            typed.expected_startup_configuration_digest,
             typed.expected_state,
             typed.timeout_seconds,
             cancellation,
@@ -85,10 +86,11 @@ class StopServiceTool:
         typed = ServiceStepRequest.model_validate(request)
         if typed.step is not ServiceStepType.STOP:
             raise ValueError("Service stop tool accepts only STOP")
-        if typed.expected_configuration_digest != typed.identity.canonical_digest():
+        if typed.expected_identity_digest != typed.identity.canonical_digest():
             raise ValueError("Service stop identity digest is inconsistent")
         return self._platform.stop(
             typed.identity,
+            typed.expected_startup_configuration_digest,
             typed.expected_state,
             typed.timeout_seconds,
             cancellation,

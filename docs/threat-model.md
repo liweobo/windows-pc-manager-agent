@@ -1,5 +1,20 @@
 # Threat model
 
+## Stage 4C2 additions
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| LLM/UI asks for Disabled, delayed, driver or protected-service change | Finite action enum, strict Pydantic plan, Stage 4C1 base policy and separate Stage 4C2 policy reject before confirmation | Windows policy or publisher evidence can change later; execution re-reads and fails closed |
+| A ServiceName is reused or binary/account changes | Stable identity digest binds type, binary fingerprint and account; every Preview and adapter call revalidates it | An attacker with stronger SCM rights may race after the final read; post-write read-back exposes mismatch |
+| Configuration changes between Preview and write | Source/target configuration, state, impact and permission digests bind both confirmations; adapter revalidates on the exact handle | Windows provides no multi-field compare-and-swap; the boundary minimizes the last-check/write interval |
+| A configuration change unexpectedly starts/stops a service | Adapter never calls runtime control and verifies the runtime state is unchanged after `ChangeServiceConfig` | The service or another administrator may independently change state; reported as verification failure |
+| Broad SCM API misuse changes binary/account/dependencies | Platform accepts a typed request and supplies `SERVICE_NO_CHANGE`/null for every field except start type; no generic passthrough | pywin32/Windows defects remain platform dependencies |
+| Missing ordinary-user permission is bypassed with UAC | Elevated process is blocked; permission probe and write require existing DACL rights; access denied has no elevation path | Most services will correctly remain unavailable to an ordinary user |
+| Backup is corrupt, substituted or disclosed through audit | Current-user DPAPI, payload digest, immediate decrypt verification, separate tables and audit minimization | Loss of the Windows profile/DPAPI material can make restore unavailable |
+| Restore overwrites a later administrator/user decision | Restore requires current identity and config to exactly equal the Agent-written value, then uses a new plan, backup and two confirmations | A conflict requires manual review; the Agent intentionally does not merge or overwrite |
+| Crash causes a hidden retry | Active records become `INTERRUPTED`; confirmations are not reconstructed and nothing auto-resumes | A write dispatched immediately before failure may need manual observation |
+| Confirmation replay or plan drift | Parent-child, expiry, canonical plan/Preview/argument/object/backup bindings and atomic one-time consumption | None within one intact local database; database corruption disables the write boundary |
+
 ## Stage 4C1 additions
 
 | Threat | Control | Residual risk |

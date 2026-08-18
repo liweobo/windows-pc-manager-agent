@@ -66,7 +66,17 @@ Only signed current-user own-process third-party services can be eligible. Confi
 changes, cascade controls, service deletion/configuration, elevation, shell, WMI, process kill,
 automatic retry/resume and automatic rollback are absent.
 
-## Stage 4C2+ — other controlled system operations (not started)
+## Stage 4C2 — controlled service startup type management (complete)
+
+Stable service identity/configuration separation, exact non-delayed Automatic/Manual transitions,
+ordinary-user `SERVICE_CHANGE_CONFIG` evidence, dependency-free policy, DPAPI-encrypted original-value
+backup, immutable R2 Preview, two confirmations, execution-time revalidation, single-field SCM write,
+runtime-state invariant, verified conditional FULL restore history, additive audit and GUI are complete.
+Delayed Automatic, Disabled, Boot/System, driver/protected/unknown/dependent services, runtime changes,
+generic configuration, account/binary/dependency/recovery/security edits, elevation, shell and automatic
+retry/resume remain absent.
+
+## Stage 4C3+ — other controlled system operations (not started)
 
 Broader service changes, software uninstall, firewall changes, cleanup and other system
 operations remain design-only. Each capability requires its own threat model, confirmation,

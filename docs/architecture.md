@@ -1,5 +1,47 @@
 # Architecture
 
+## Stage 4C2 service startup-configuration boundary
+
+Stage 4C2 is additive to Stage 4C1 and deliberately separates immutable service identity from
+mutable startup configuration:
+
+- `ServiceStableIdentity` binds ServiceName, service type, binary-path fingerprint and account;
+- `ServiceStartupConfiguration` separately binds startup type and delayed-auto evidence;
+- Stage 4C1 state controls revalidate both, while Stage 4C2 authorizes one explicit configuration
+  transition without treating the intended source-to-target change as an identity mismatch.
+
+The data flow is:
+
+```text
+fresh SCM observation + permission probe
+  -> Stage 4C1 base policy + Stage 4C2 transition/impact policy
+  -> DPAPI-encrypted backup, immediate decrypt/digest verification
+  -> immutable R2 plan + Preview + independent safety review
+  -> persisted PLAN confirmation
+  -> fresh observation/permission/impact Preview
+  -> short-lived RUNTIME confirmation
+  -> persisted execution authorization
+  -> one registered ChangeServiceConfig adapter
+  -> read-back configuration/runtime verification
+  -> change history + privacy-minimized audit
+```
+
+`domain/service_startup_actions.py` owns provider-neutral plans, Preview, backup references,
+transactions and results. `safety/service_startup_*` owns default-deny classification and independent
+cross-model review. `confirmation/service_startup_actions.py` owns two one-time bindings.
+`persistence/service_startup_actions.py` keeps backup, transaction, confirmation and change-history
+tables separate. `platform_support/windows/service_startup.py` exposes only Automatic, Manual and
+verified restore; it has no generic configuration dictionary. `orchestration/service_startup_actions.py`
+is the only coordinator, and the UI only starts workers and resolves explicit confirmations.
+
+The write adapter sets only SCM start type and requires the current runtime state to remain unchanged.
+Backup bytes are protected for the current Windows user and never enter a public tool request or audit.
+Restore is another complete transaction: it first proves that the current configuration still equals
+the Agent-written value, creates a new backup, obtains two new confirmations, writes one field and
+verifies it. Each successful restore creates another change record, so a later reverse restore remains
+possible under the same conflict checks. Startup transactions found active on restart become
+`INTERRUPTED`; no transaction or confirmation is reconstructed for automatic continuation.
+
 ## Stage 4C1 controlled service-action boundary
 
 Stage 4C1 keeps the Stage 3 service inventory as read-only evidence and adds a separate

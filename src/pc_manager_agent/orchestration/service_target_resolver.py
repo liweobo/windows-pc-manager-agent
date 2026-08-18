@@ -32,9 +32,7 @@ class ServiceTargetResolver:
         )
         if len(by_name) == 1:
             return by_name[0]
-        by_display = tuple(
-            item for item in inventory if item.identity.display_name.casefold() == normalized
-        )
+        by_display = tuple(item for item in inventory if item.display_name.casefold() == normalized)
         if len(by_display) == 1:
             return by_display[0]
         if len(by_display) > 1:

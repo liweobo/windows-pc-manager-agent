@@ -103,6 +103,8 @@ def test_service_page_shows_only_eligible_actions(
     assert not tab._start.isEnabled()
     assert tab._stop.isEnabled()
     assert tab._restart.isEnabled()
+    assert tab._set_automatic.isEnabled()
+    assert not tab._set_manual.isEnabled()
     tab._search.setText("missing")
     assert tab._table.rowCount() == 0
 
@@ -128,6 +130,8 @@ def test_protected_service_page_has_no_action_buttons(
     assert not tab._start.isEnabled()
     assert not tab._stop.isEnabled()
     assert not tab._restart.isEnabled()
+    assert not tab._set_automatic.isEnabled()
+    assert not tab._set_manual.isEnabled()
 
 
 @pytest.mark.gui

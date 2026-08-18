@@ -1,5 +1,31 @@
 # Rollback design
 
+## Stage 4C2 startup configuration
+
+| Operation | Risk | Rollback | Exact meaning |
+|---|---|---|---|
+| Set non-delayed Automatic | R2 | FULL, conditional | A verified original Manual backup can be restored only while identity and the Agent-written Automatic value still match |
+| Set Manual | R2 | FULL, conditional | A verified original non-delayed Automatic backup can be restored under the same conflict-free conditions |
+| Restore an Agent-owned change | R2 | FULL, conditional | Restore itself creates a new verified backup/change record, enabling a later reverse restore if its conditions still hold |
+| Blocked/cancelled before dispatch | R2 | No rollback needed | No `ChangeServiceConfig` call was sent |
+| Verification/journal uncertainty after dispatch | R2 | Manual inspection first | Never auto-write or retry when the current value cannot be proved |
+
+`FULL` covers only the single startup-configuration field inside this narrow boundary. It does not
+restore runtime state, service memory, an application session, dependency behavior, a future boot result
+or changes made by another administrator. The UI and audit use “conditional FULL” to preserve this
+distinction.
+
+Before every Preview, `ServiceStartupBackupVault` serializes stable identity, display name, exact source
+configuration, runtime state and capture time; encrypts it with current-user DPAPI; persists it separately;
+then decrypts and verifies the payload digest. No Preview or write is available if this proof fails.
+
+Restore never runs automatically. `prepare_restore` loads an Agent-owned change, verifies its backup,
+re-reads the exact ServiceName, and requires stable identity plus the current configuration to equal the
+previous Agent-written target. It then creates a fresh backup of the current value and follows the same
+Preview, PLAN confirmation, runtime revalidation, RUNTIME confirmation, write and read-back sequence.
+Any mismatch yields `RESTORE_CONFLICT` without overwrite. An interrupted transaction is retained for
+audit and manual inspection and is never resumed on application restart.
+
 ## Stage 4C1 service state actions
 
 | Operation/outcome | Risk | Rollback | Truthful recovery statement |

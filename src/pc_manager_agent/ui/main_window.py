@@ -68,7 +68,7 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
         self._last_service_reference: tuple[str, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 4C1 服务安全管理")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 4C2 服务启动类型安全管理")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -205,7 +205,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._startup_management_tab, "启动项管理")
 
     def _build_service_management_tab(self) -> None:
-        """Attach protected service inventory and exact Stage 4C1 action workflow."""
+        """Attach Stage 4C1 state control and Stage 4C2 startup configuration workflows."""
         self._service_management_tab = ServiceManagementTab(self._runtime)
         self._service_management_tab.status_message.connect(self.statusBar().showMessage)
         self._service_management_tab.service_reference_changed.connect(

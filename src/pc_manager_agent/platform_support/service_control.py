@@ -38,6 +38,7 @@ class ServiceControlPlatform(Protocol):
     def start(
         self,
         identity: ServiceIdentity,
+        expected_startup_configuration_digest: str,
         expected_state: ServiceState,
         timeout_seconds: float,
         cancellation: CancellationToken,
@@ -49,6 +50,7 @@ class ServiceControlPlatform(Protocol):
     def stop(
         self,
         identity: ServiceIdentity,
+        expected_startup_configuration_digest: str,
         expected_state: ServiceState,
         timeout_seconds: float,
         cancellation: CancellationToken,

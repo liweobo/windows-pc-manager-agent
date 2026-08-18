@@ -50,7 +50,7 @@ class ServiceActionAuditLogger:
                     "transaction_id": str(plan.transaction_id),
                     "preview_id": str(preview.preview_id),
                     "service_name": observation.identity.service_name,
-                    "display_name": observation.identity.display_name,
+                    "display_name": observation.display_name,
                     "identity_digest": observation.identity.canonical_digest(),
                     "state": observation.state.value,
                     "state_digest": preview.current_state_digest,

@@ -1,5 +1,260 @@
 # API reference
 
+## Stage 4C2 Windows 服务启动类型安全管理 API
+
+本节覆盖 Stage 4C2 新增或因稳定身份拆分而修改的每个生产函数和方法。所有写入均为单个
+ServiceName 的 R2 操作；“Automatic”在本节始终表示非延迟 Automatic。Delayed Automatic、
+Disabled 以及任意其他服务配置字段没有写入口。
+
+### 领域模型 `domain.service_startup_actions`
+
+| 类/函数 | 作用、输入、返回值、异常与安全约束 |
+|---|---|
+| `ServiceStartupActionType` | 有限动作枚举：`SET_AUTOMATIC`、`SET_MANUAL`、`RESTORE`；工具和编排不接受任意配置动作。 |
+| `ServiceStartupManagementMode` | UI/策略结论：可变更、可恢复、只读或阻止；只负责表达确定性结论，不授权执行。 |
+| `ServiceStartupErrorCode` | 隐私安全的稳定错误码，覆盖身份/配置/状态/依赖漂移、权限、备份、确认、审计、事务、冲突和验证失败；消息不携带命令或秘密。 |
+| `ServiceStartupTransactionState` | 写前持久化状态机，从 `BACKUP_CREATED`、Preview、两级确认、验证/执行/复验直到终态；`INTERRUPTED` 不可自动恢复执行。 |
+| `ServiceStartupPermissionEvidence` | 一次精确服务句柄权限探测，记录查询配置、修改配置和当前进程是否提权。 |
+| `ServiceStartupPermissionEvidence.allows_change` | 无参数属性；仅在 query 与 `SERVICE_CHANGE_CONFIG` 都可用且进程未提权时返回 `True`，不修改 DACL、不请求 UAC。 |
+| `ServiceStartupPermissionEvidence.canonical_digest()` | 对三个稳定权限结论生成 SHA-256，排除采集时间，使运行时权限漂移能使确认失效。 |
+| `ServiceStartupImpact` | 展示排序后的依赖/被依赖名称、当前运行状态、“不应改变运行状态”和固定摘要。 |
+| `ServiceStartupImpact.canonical_digest()` | 摘要完整影响模型；关系或运行状态变化会改变两级确认绑定。 |
+| `ServiceStartupSafetyAssessment` | 策略输出：身份/源配置摘要、安全分类、管理模式、允许结论、原因码和固定解释。 |
+| `ServiceStartupBackupPayload` | 仅在加密 vault 内使用的原始材料：稳定身份、显示名、原启动配置、原运行状态和时间；不进入工具参数或审计。 |
+| `ServiceStartupBackupPayload.canonical_digest()` | 对解密后的完整备份内容生成摘要，供存入后立即验证和恢复时再次验证。 |
+| `ServiceStartupBackupReference` | 对外只暴露 backup UUID、身份摘要、payload 摘要、时间和 verified 标记，不暴露密文或配置序列化字节。 |
+| `ServiceStartupActionPlan` | 单对象不可变计划，绑定事务/操作、动作、稳定身份、源/目标配置、状态/影响/权限摘要、备份、R2、条件 FULL 和两级确认。 |
+| `ServiceStartupActionPlan.validate_contract()` | Pydantic 后校验；拒绝非 Automatic/Manual、延迟、no-op、动作与目标不符、RESTORE 未绑定原记录、非 R2、非 FULL 或缺少任一确认层。失败抛 `ValidationError`。 |
+| `ServiceStartupActionPlan.canonical_digest()` | 摘要所有授权字段；计划任一变化都会使已有 Preview 和确认无效。 |
+| `ServiceStartupActionPreview` | 将计划、当前观察、目标、策略、影响、权限和已验证备份组合成只读 Preview。 |
+| `ServiceStartupActionPreview.executable` | 仅当策略允许、普通权限齐全、备份已验证、状态非 pending、状态摘要自洽且明确不改变运行状态时为真。 |
+| `ServiceStartupActionPreview.canonical_digest()` | 摘要整个 Preview，作为计划/即时确认和 SQLite 执行授权的一部分。 |
+| `ServiceStartupActionRequest` | 注册工具唯一输入；含有限动作、稳定身份、精确源/目标配置、预期运行状态、影响摘要和已验证备份引用，没有通用字段字典。 |
+| `ServiceStartupMutationResult` | 返回写前/写后配置和运行状态、是否派发、是否复验通过、运行状态是否未变、固定消息和时刻。 |
+| `ServiceStartupActionTransaction` | 不含密文的持久化事务投影；包含全部绑定摘要、确认 ID、状态、隐私安全错误和结果。 |
+| `ServiceStartupChangeRecord` | 一次成功 Agent-owned 变更；保存原/写入配置和备份引用，用于冲突检查后的新 RESTORE 事务。 |
+| `canonical_service_startup_digest(payload)` | 对 JSON 可序列化对象进行排序、紧凑 UTF-8 编码并返回 SHA-256；供 Stage 4C2 的规范绑定，不授予任何权限。 |
+
+### 领域异常 `domain.service_startup_errors`
+
+| 类/方法 | 作用 |
+|---|---|
+| `ServiceStartupActionError.__init__(code, message)` | 构造带 `ServiceStartupErrorCode` 的工作流异常；编排用 code 决定终态，UI 使用 message，异常本身不触发退路或提权。 |
+
+### 策略、影响、Preview 与独立复核
+
+| 类/函数 | 作用、输入、返回值与拒绝条件 |
+|---|---|
+| `ServiceStartupSafetyPolicy.__init__(base_policy)` | 组合既有 Stage 4C1 保护服务策略；Stage 4C2 不复制或弱化其身份、账户、签名与路径检查。 |
+| `ServiceStartupSafetyPolicy.assess(observation, action, target)` | 检查基础策略、源/目标类型、延迟标记、no-op 和依赖关系；只有无依赖的 Automatic/Manual 精确互转可允许，返回可审计 assessment。 |
+| `build_service_startup_impact(observation)` | 排序依赖与被依赖 ServiceName，绑定当前状态并固定 `runtime_change_expected=False`；只读，无 SCM 副作用。 |
+| `_blocked_mode(reasons)` | 仅延迟/不支持的转换显示 `READ_ONLY`，保护、Disabled、驱动或依赖风险显示 `BLOCKED`。 |
+| `_explain(code)` | 将策略错误码映射为固定用户说明；只接受策略能够产生的码，避免模型解释改变风险。 |
+| `ServiceStartupPreviewEngine.__init__(policy)` | 注入确定性策略。 |
+| `ServiceStartupPreviewEngine.build(plan, observation, target, permissions, backup)` | 从新鲜本地证据构造 Preview，并绑定计划、状态、影响、权限和备份摘要；不调用写 API。 |
+| `ServiceStartupSafetyReview` | 独立复核结果，含 approved 与去重后的问题列表。 |
+| `ServiceStartupSafetyValidator.review(plan, preview)` | 逐项复核 plan/transaction/digest、稳定身份、源/目标、状态、影响、权限、备份和 executable；返回问题而非擅自修正计划。 |
+
+### 两级确认 `confirmation.service_startup_actions`
+
+| 类/方法 | 作用、输入、返回值与状态规则 |
+|---|---|
+| `ServiceStartupConfirmationTier` | 区分 `PLAN` 与更短时的 `RUNTIME` 确认。 |
+| `ServiceStartupConfirmationState` | pending、approved、rejected、consumed、expired 的有限状态。 |
+| `ServiceStartupActionConfirmation` | 一次不可变确认，绑定动作、事务/操作/计划/Preview、稳定身份、源/目标配置、状态/影响/权限、备份、对象摘要、父确认和到期时间。 |
+| `ServiceStartupConfirmationError` | 未知、过期、重放、跨层或摘要漂移时抛出；没有“尽量继续”分支。 |
+| `ServiceStartupActionConfirmationService.__init__(plan_ttl_seconds, runtime_ttl_seconds, now=...)` | 创建内存确认状态机并注入可测试时钟；TTL 非正或 runtime 大于 plan 时拒绝。持久化由 repository 单独负责。 |
+| `request_plan(plan, preview)` | 要求 executable 且所有绑定一致，创建第一层 pending 确认。 |
+| `resolve_plan(id, approved, plan, preview)` | 校验 pending、未过期和当前绑定后批准/拒绝，只能解析一次。 |
+| `request_runtime(plan_confirmation_id, plan, preview)` | 要求父 PLAN 已批准且仍匹配，使用重新读取后的 Preview 创建子确认。 |
+| `resolve_runtime(id, approved, plan, preview)` | 在短 TTL 内校验并批准/拒绝即时确认；任何对象证据变化都拒绝。 |
+| `consume_runtime(id, plan, preview)` | 工具执行前一次性消费已批准 RUNTIME 确认，同时再核对父子与全部摘要；重放失败。 |
+| `_create(tier, plan, preview, parent_confirmation_id, ttl)` | 生成 UUID、对象摘要、绑定摘要和起止时间的内部构造器。 |
+| `_require_pending(id, tier)` | 读取指定层级确认并要求状态为 pending；未知 ID、错误层级或已处理状态抛确认异常。 |
+| `_require_unexpired(request)` | 比较注入时钟；到期后拒绝，防止旧授权长期存活。 |
+| `_require_executable(plan, preview)` | 要求 Preview executable，且 plan/transaction/动作/备份关系一致。 |
+| `_require_same_binding(request, plan, preview)` | 比较计划、Preview、身份、源/目标、状态、影响、权限、备份和对象摘要；变化即拒绝。 |
+| `_resolve(id, approved, tier, plan, preview)` | 两层共享的解析实现；先做状态/过期/绑定校验，再以不可变副本保存结论。 |
+
+### 备份、事务与执行守卫 `persistence.service_startup_actions`
+
+| 类/方法 | 作用、输入、返回值与副作用 |
+|---|---|
+| `ServiceStartupStoreError` | vault/repository 未初始化、记录缺失、非法状态、确认/参数不匹配和备份问题的失败关闭异常。 |
+| `ServiceStartupBackupProtector.protect(plaintext)` | 协议：把 exact backup bytes 交给当前用户范围保护器；生产实现使用 Windows DPAPI。 |
+| `ServiceStartupBackupProtector.unprotect(ciphertext)` | 协议：仅由同一用户上下文解密；失败必须向上抛出，不能使用明文退路。 |
+| `ServiceStartupBase` | Stage 4C2 独立 SQLAlchemy 声明基类。 |
+| `ServiceStartupBackupRow` | 加密备份表；保存 UUID、身份/payload 摘要、ciphertext 与时间，不与审计表混用。 |
+| `ServiceStartupTransactionRow` | 事务表；保存计划/Preview/备份/确认/状态和脱敏结果。 |
+| `ServiceStartupConfirmationRow` | 两级确认表；保存父子、摘要、状态、到期和消费证据。 |
+| `ServiceStartupChangeRow` | 成功变更历史；保存原/写入配置、恢复来源和 restored 时间，不保存解密备份。 |
+| `ServiceStartupBackupVault.__init__(database_path, protector)` | 创建专用 engine/session 与注入式保护器；尚未建表。 |
+| `ServiceStartupBackupVault.initialize()` | 建立 backup 表并将 vault 标为可用。数据库失败向上抛出并阻止 Preview。 |
+| `ServiceStartupBackupVault.store(payload)` | 序列化、计算摘要、加密并持久化；随后立即 `_load` 解密比较，只有完全相同才返回 verified reference。 |
+| `ServiceStartupBackupVault.load(backup_id, expected_digest=...)` | 解密指定备份并要求 payload 摘要等于调用方绑定；损坏、替换或缺失均拒绝恢复。 |
+| `ServiceStartupBackupVault._load(backup_id, expected_digest)` | 内部读取/解密/JSON/Pydantic 验证路径；把保护器或格式异常转换为安全 store error。 |
+| `ServiceStartupBackupVault.close()` | 释放 vault engine；之后必须新建/初始化才能使用。 |
+| `ServiceStartupBackupVault._require_initialized()` | 所有操作的内部前置条件；数据库损坏/未初始化不会被当作空备份。 |
+| `ServiceStartupActionRepository.__init__(database_path)` | 创建事务数据库 engine/session factory；不执行迁移或恢复写操作。 |
+| `ServiceStartupActionRepository.initialize()` | 建表；上次活动写标为 `INTERRUPTED`，未派发 pending 流程取消；返回中断 ID，绝不自动继续。 |
+| `create(plan, preview)` | 在备份已存在后写入事务及全部摘要；重复 UUID 或不可执行 Preview 拒绝。 |
+| `transition(transaction_id, state, error_code=None, error_message=None, result=None)` | 按白名单状态图原子前进；保存隐私安全错误/结果，非法跳转不修改数据库。 |
+| `bind_runtime_preview(transaction_id, preview)` | 将新鲜 Preview 摘要写入同一事务；plan/identity/source/target/backup 不匹配时拒绝。 |
+| `record_confirmation(value)` | 严格收窄为 Stage 4C2 确认并新增/更新绑定、结论和到期信息。 |
+| `bind_confirmation(transaction_id, confirmation_id, runtime)` | 把正确层级 ID 绑定到事务；不能用另一计划的确认替换。 |
+| `consume_confirmation_pair(runtime_confirmation_id)` | 在单一数据库事务中验证父 PLAN 与子 RUNTIME 均批准、未过期/未消费且摘要一致，然后一次性消费。 |
+| `record_change(plan, result, restored_source_backup_id=None)` | 仅接受 verified、已派发且 runtime unchanged 的结果；原子新增 change history，并在 RESTORE 成功时标记来源记录已恢复。 |
+| `mark_restored(backup_id)` | 将指定成功变更标记已恢复；重复或未知记录拒绝。正常恢复路径优先由 `record_change` 原子完成。 |
+| `get_change(backup_id)` | 返回一条领域 change record；用于 prepare_restore，缺失则失败。 |
+| `list_changes(limit=500)` | 按时间返回有界 Agent-owned 历史；非法上限拒绝，永不扫描系统服务配置。 |
+| `get(transaction_id)` | 把 ORM 行严格转换为公开事务；缺失/损坏数据拒绝。 |
+| `require_execution_authorization(manifest, arguments, authorization)` | 校验工具名、R2/确认要求、事务状态、计划/Preview/参数摘要、两个已消费确认和备份绑定；这是 registry 写守卫。 |
+| `close()` | 释放 repository engine。 |
+| `_require_initialized()` | 内部初始化断言，数据库不可用时禁止任何配置写。 |
+| `ServiceStartupExecutionGuard.__init__(repository)` | 将 Stage 4C2 repository 注入 `ToolRegistry`。 |
+| `ServiceStartupExecutionGuard.require(manifest, arguments, authorization)` | 将通用 write-guard 调用转发到 repository 的完整执行授权检查。 |
+| `_transaction_from_row(row)` | 严格解析枚举、UUID、JSON 和 UTC 时间，构造不含密文的事务领域对象。 |
+| `_change_from_row(row)` | 将 history ORM 行转换为稳定身份及原/写入配置的领域记录。 |
+| `_as_utc(value)` | SQLite 返回 naive 时间时补 UTC；已有时区则规范化到 UTC。 |
+
+### 平台协议与 Windows SCM 适配器
+
+| 类/函数 | 作用、输入、返回值与平台副作用 |
+|---|---|
+| `ServiceStartupPlatform.evaluate_permissions(service_name)` | 协议：对精确 ServiceName 形成 query/change-config/提权证据，不改变配置。 |
+| `ServiceStartupPlatform.set_automatic(request, cancellation, on_dispatched=None)` | 协议：只接受 SET_AUTOMATIC 严格请求，必须复验并返回 read-back 结果。 |
+| `ServiceStartupPlatform.set_manual(...)` | 协议：只接受 SET_MANUAL 严格请求。 |
+| `ServiceStartupPlatform.restore(...)` | 协议：只接受由已验证备份构造的 RESTORE 请求，且目标仍局限于 Automatic/Manual。 |
+| `WindowsServiceStartupPlatform.evaluate_permissions(service_name)` | 分别尝试 query 与 `SERVICE_CHANGE_CONFIG` 句柄并检测当前进程 elevation；句柄立即关闭，不改 DACL。 |
+| `WindowsServiceStartupPlatform.set_automatic(request, cancellation, on_dispatched=None)` | 校验动作/目标后调用 `_change`，raw start type 固定 `SERVICE_AUTO_START`。 |
+| `WindowsServiceStartupPlatform.set_manual(...)` | 校验动作/目标后调用 `_change`，raw start type 固定 `SERVICE_DEMAND_START`。 |
+| `WindowsServiceStartupPlatform.restore(...)` | 只把已验证的 Automatic/Manual 目标映射为上述两个常量；延迟或其他目标抛 `ValueError`。 |
+| `WindowsServiceStartupPlatform._change(request, raw_target, cancellation, on_dispatched)` | 打开精确 handle，复验稳定身份、源配置、运行状态和影响；调用一次 `ChangeServiceConfig`，其余字段全部 no-change/null；随后回读配置与运行状态并返回 verified 结果。Access denied 转稳定错误且不提权。 |
+| `_can_open_service(service_name, desired_access)` | 以给定最小权限尝试打开精确服务；access denied/不存在返回 `False`，其他 Windows 错误上抛，所有句柄 finally 关闭。 |
+| `_cancelled_result(request, started, before=None)` | 取消发生在派发前时构造 change_dispatched=False 的真实 no-write 结果；源/目标都保持观测或预期源值。 |
+
+### 命令对象和注册工具
+
+| 类/函数 | 作用、输入、返回值与执行边界 |
+|---|---|
+| `ServiceStartupUndoRecord` | 条件 FULL 的回滚描述：原动作、备份、稳定身份、原/写入配置和有效条件；不是自动执行凭据。 |
+| `ServiceStartupConfigurationCommand.__init__(platform, request, cancellation, on_dispatched=None)` | 将一个严格请求及窄平台封装成命令对象。 |
+| `ServiceStartupConfigurationCommand.execute()` | 按 action 只分派到 platform 的 automatic/manual/restore 三方法之一，并缓存结果。 |
+| `ServiceStartupConfigurationCommand.verify()` | 仅当已有结果 verified、runtime unchanged 且 after 精确等于目标时为真；未执行返回假。 |
+| `ServiceStartupConfigurationCommand.build_undo_record()` | 只有 `verify()` 为真才构造条件回滚记录，否则抛异常，避免为失败写入虚构 FULL。 |
+| `ServiceStartupConfigurationCommand.rollback(authorized_restore_request, cancellation)` | 只接受 independently authorized 的 RESTORE 严格请求；校验稳定身份及精确反向源/目标后调用 platform.restore，不复用原确认。 |
+| `SetServiceAutomaticTool.__init__(platform, backups)` | 注入窄平台和备份 vault。 |
+| `SetServiceAutomaticTool.manifest` | 返回 `system.service.startup.set_automatic` 的 R2、FULL conditional、两级确认、单对象 Windows-only 清单。 |
+| `SetServiceAutomaticTool.execute(request, cancellation)` | 收窄 Pydantic 请求、验证动作和备份绑定，再运行命令；没有 fallback。 |
+| `SetServiceManualTool.__init__(platform, backups)` / `manifest` / `execute(...)` | 与 Automatic 工具相同，但仅允许 `SET_MANUAL` 和固定工具名。 |
+| `RestoreServiceStartupTool.__init__(platform, backups)` / `manifest` / `execute(...)` | 仅允许 RESTORE；同样重新验证 backup ID/digest/identity/source，不能接受外部任意“原值”。 |
+| `_require_backup(vault, request)` | 解密并验证备份，要求身份与 expected source configuration 精确匹配；失败时工具不调用平台。 |
+| `_manifest(name, description)` | 为三个工具生成共同窄清单：R2、非只读、非幂等、可取消派发前、FULL、两确认、timeout、batch=1 和 Windows 平台。 |
+
+### 编排 `orchestration.service_startup_actions`
+
+| 方法/函数 | 作用、输入、返回值与状态变化 |
+|---|---|
+| `ServiceStartupActionService.__init__(...)` | 注入 Stage 4C1 只读平台/解析器、Stage 4C2 平台、策略、Preview、复核、确认、vault、repository、registry 和 audit；不创建隐藏全局状态。 |
+| `list_changes()` | 返回本 Agent 的有界成功变更历史，供恢复 UI；不枚举或修改系统。 |
+| `prepare_change(user_goal, service_name, action)` | 仅接受 SET_AUTOMATIC/SET_MANUAL；精确重读、先做资格和普通权限检查、创建并验证备份，再构造计划/Preview/复核/事务/审计。没有写 SCM。 |
+| `prepare_restore(user_goal, backup_id)` | 读取 Agent-owned history 与备份，要求未恢复、稳定身份未变、当前配置仍等于 Agent-written 值、运行/依赖/权限可用；创建新的反向备份和完整 RESTORE Preview。 |
+| `request_plan_confirmation(plan, preview)` | 创建 PLAN 确认并持久化，将事务推进到等待确认。 |
+| `resolve_plan_confirmation(id, approved, plan, preview)` | 解析并持久化第一层结论；拒绝进入 BLOCKED/取消终态，批准后绑定事务并等待 runtime 确认。 |
+| `request_runtime_confirmation(plan_confirmation_id, plan)` | 全量重读和 `_revalidate`，保存新 Preview，再创建/持久化子确认。 |
+| `resolve_runtime_confirmation(id, approved, plan, preview)` | 解析并持久化即时结论；批准后把事务推进 CONFIRMED，拒绝不执行。 |
+| `execute(plan_confirmation_id, runtime_confirmation_id, plan, preview, cancellation=None)` | 消费内存和 SQLite 确认，审计开始，最后一次复验，进入写前 EXECUTING，调用唯一注册工具，进入 VERIFYING；仅 verified+runtime unchanged 才记 change/completed。错误按“是否可能已派发”如实记录且不重试。 |
+| `_prepare(user_goal, action, observation, target, restore_source_backup_id=None)` | change/restore 共用只读准备路径；在 eligibility/permission 后创建备份、影响和计划，再审查、建事务和审计。 |
+| `_build_plan(...)` | 构造绑定 identity/source/target/state/impact/permission/backup 的 immutable R2 计划。 |
+| `_create_backup(observation)` | 构造 exact payload，交 vault 加密存储，并要求返回 verified reference。 |
+| `_revalidate(plan)` | 重新解析精确服务并比较稳定身份、配置、运行状态、影响、权限和备份；构建新 Preview 并独立复核。 |
+| `_resolve_exact_identity(service_name)` | 通过 Stage 4C1 resolver 按 exact ServiceName 新鲜读取；不存在或名称变化失败关闭。 |
+| `_require_eligible(observation, action, target)` | 执行 Stage 4C2 policy 并将首个 reason code 转成工作流异常；在资格不明时不创建备份。 |
+| `_require_permissions(permissions)` | 阻止提权进程和缺少 query/change-config 的普通进程；权限不足发生在备份与确认之前。 |
+| `_block(plan, message)` | 尽力将已有事务转 BLOCKED 后抛确认/配置异常；状态记录失败不会变成允许。 |
+| `_arguments(plan)` | 从计划生成唯一 `ServiceStartupActionRequest` 的 JSON 参数，供 registry 校验和摘要。 |
+| `_target_for_action(action)` | SET_AUTOMATIC 映射非延迟 Automatic、SET_MANUAL 映射 Manual；RESTORE 必须由备份显式提供目标，直接调用会拒绝。 |
+| `_tool_name(action)` | 把三个有限动作映射到三个已注册工具名；无动态工具拼接。 |
+
+### 审计 `audit.service_startup_actions`
+
+| 方法/函数 | 作用与隐私边界 |
+|---|---|
+| `ServiceStartupActionAuditLogger.__init__(repository, app_version, git_commit)` | 注入共享结构化审计仓库和版本证据。 |
+| `previewed(plan, preview, review)` | 记录动作、ServiceName、风险、ALLOW/BLOCK、摘要、备份验证和影响计数；不记录 binary path、命令、密码或密文。 |
+| `confirmation_resolved(plan, confirmation)` | 记录确认层级、结果、父子/过期/绑定摘要。 |
+| `started(plan, preview)` | 在真实写入前记录开始证据；审计不可用时编排拒绝继续。 |
+| `completed(plan, result)` | 记录派发、verified、runtime unchanged 和 before/after 枚举，不保存服务内容。 |
+| `failed(plan, phase, code, message, mutation_may_have_started)` | 记录固定阶段、错误码、脱敏消息及是否可能已派发；用于区分安全拒绝和需要人工检查的不确定结果。 |
+| `_tool_name(plan)` | 从有限 action 返回准确工具名供审计；无任意字符串输入。 |
+
+### 运行时、GUI 和 Qt workers
+
+| 类/方法/函数 | 作用、线程和副作用 |
+|---|---|
+| `ServiceStartupActionServices` | runtime bundle，包含 registry、窄平台、精确 resolver 和应用服务。 |
+| `ApplicationRuntime.create_service_startup_action_services()` | 组合 Stage 4C1 base policy、Stage 4C2 policy/validator/vault/repository/audit/guard，注册恰好三个工具并返回 bundle。 |
+| `ApplicationRuntime.close()`（Stage 4C2 增量） | 在 worker 停止后先关闭 service-startup vault/repository，再关闭既有资源。 |
+| `ServiceStartupWorkerSignals` | worker 的 `completed(object)` 与 `failed(str)` 终态信号。 |
+| `PreparedServiceStartupAction` | prepare worker 输出：services、plan、Preview、review。 |
+| `RuntimeServiceStartupPreview` | runtime worker 输出：新鲜 Preview 和 pending 即时确认。 |
+| `ServiceStartupPrepareWorker.__init__(runtime, action, service_name=None, backup_id=None, user_goal=...)` | 保存互斥的变更或恢复请求；GUI 线程不查询/写 SCM。 |
+| `ServiceStartupPrepareWorker.run()` | worker 线程初始化 COM，构造 services，调用 prepare_change 或 prepare_restore，发终态信号并释放 COM。 |
+| `ServiceStartupRuntimePreviewWorker.__init__(service, plan_confirmation_id, plan)` | 保存同一确认服务实例、父确认和计划。 |
+| `ServiceStartupRuntimePreviewWorker.run()` | worker 中全量 revalidation 并请求即时确认；不写 SCM。 |
+| `ServiceStartupExecutionWorker.__init__(service, plan_confirmation_id, runtime_confirmation_id, plan, preview)` | 保存一次执行所需绑定并创建 cancellation token。 |
+| `ServiceStartupExecutionWorker.cancel()` | 仅请求在 `ChangeServiceConfig` 派发前取消；已派发后不能撤销系统调用。 |
+| `ServiceStartupExecutionWorker.run()` | worker 中消费确认并执行/验证，安全发出结果或错误。 |
+| `ServiceStartupHistoryWorker.__init__(runtime)` | 保存 runtime，不在 GUI 线程访问 SQLite。 |
+| `ServiceStartupHistoryWorker.run()` | worker 中读取 Agent-owned change history 并发出 tuple。 |
+| `require_prepared_service_startup(value)` | 收窄 Qt object 为 `PreparedServiceStartupAction`，类型不符抛 `TypeError`。 |
+| `require_runtime_service_startup(value)` | 收窄为 `RuntimeServiceStartupPreview`。 |
+| `require_service_startup_result(value)` | 收窄为 `ServiceStartupMutationResult`。 |
+| `require_service_startup_history(value)` | 要求 tuple 且每项为 `ServiceStartupChangeRecord`。 |
+| `_emit_completed(signals, value)` | 发成功信号；只忽略应用安全关闭后 QObject 已删除造成的 Qt `RuntimeError`。 |
+| `_emit_failed(signals, exc)` | 格式化异常类型/消息并发失败信号；同样只处理 QObject 删除竞态。 |
+| `ServiceStartupActionDialog.__init__(runtime, action, service_name=None, backup_id=None, display_name=None, parent=None)` | 创建单对象分阶段对话框并立即启动只读 prepare；变更用 service_name，恢复用 backup_id。 |
+| `ServiceStartupActionDialog._build_ui()` | 创建详情、状态、PLAN/RUNTIME/关闭按钮；没有直接工具调用。 |
+| `_prepare()` | 禁用推进按钮并启动后台 prepare worker。 |
+| `_prepared(value)` | 类型收窄并展示身份、源/目标、运行状态、权限、备份、风险和 review；不可执行时不开放确认。 |
+| `_advance()` | 仅按当前阶段调用计划或即时确认，防止跳级。 |
+| `_approve_plan()` | 显示对象具体确认框，批准第一层并启动 runtime worker。 |
+| `_runtime_ready(value)` | 展示新鲜证据与短时确认；不自动接受。 |
+| `_approve_runtime()` | 再次显示具体 source->target 和条件 FULL，批准后启动 execution worker。 |
+| `_executed(value)` | 显示 read-back before/after、runtime unchanged、verified 和恢复提示；不把失败说成成功。 |
+| `_failed(message)` | 显示友好错误并禁用写入口。 |
+| `shutdown()` | 请求尚未派发的 execution 取消。 |
+| `_replace_cancel_callback(callback)` | 断开旧连接并绑定当前阶段唯一取消/关闭行为，避免重复触发。 |
+| `closeEvent(event)` | 关闭前调用 shutdown，再交 Qt 处理。 |
+| `ServiceStartupHistoryDialog.__init__(runtime, parent=None)` | 创建 Agent-owned 可恢复历史窗口并后台加载。 |
+| `ServiceStartupHistoryDialog._load()` | 启动 history worker。 |
+| `_loaded(value)` | 类型收窄并填充 display/config/time 表；已恢复项不再提供相同 restore 入口。 |
+| `_failed(message)` | 显示历史加载错误。 |
+| `_selected()` | 返回所选领域记录而非从表格文本重建 backup ID。 |
+| `_request_restore()` | 发出选中 backup UUID/display name 给管理页，仍不直接恢复。 |
+| `_preview_html(prepared)` | HTML 转义显示第一份 Preview 与 review。 |
+| `_runtime_html(value)` | HTML 转义显示新鲜 runtime Preview 和确认到期信息。 |
+| `_result_html(result)` | HTML 转义显示变更派发、验证、配置与运行状态证据。 |
+| `ServiceManagementTab._set_startup_actions(automatic, manual)` | 集中启用/禁用两种配置 Preview 按钮。 |
+| `ServiceManagementTab._open_startup_action(action)` | 仅从选中 `ServiceInventoryItem` 取 exact ServiceName；先检查本地能力，再打开相同工作流对话框。 |
+| `ServiceManagementTab._open_restore_history()` | 打开 Agent-owned history，连接 restore 请求。 |
+| `ServiceManagementTab._open_restore_action(backup_id, display_name)` | 严格要求 UUID 后创建 RESTORE 对话框；不接受任意配置值。 |
+| `_startup_capabilities(item)` | 纯 UI 预筛选：仅 Stage 4C1-safe、无依赖、非 delayed 且当前 Automatic/Manual 时返回相反方向能力；后端仍会全量重验。 |
+| `_startup_management_text(item)` | 把 capability/Delayed/Disabled/其他阻止状态转成表格说明；不授权执行。 |
+
+### Stage 4C1 稳定身份兼容修订
+
+| 类/方法 | Stage 4C2 后的精确定义 |
+|---|---|
+| `ServiceStartupType` | 规范化 SCM 启动类型：Automatic、Automatic Delayed、Manual、Disabled、Boot、System、Unknown。 |
+| `ServiceStartupConfiguration` | 只含可变 `startup_type` 与 `delayed_auto_start`，与稳定身份分离。 |
+| `ServiceStartupConfiguration.canonical_digest()` | 对两个启动配置证据生成独立摘要。 |
+| `ServiceStableIdentity` | 只含 ServiceName、service type、原始 binary 配置指纹与 service account；display/startup/runtime 不属于稳定身份。 |
+| `ServiceStableIdentity.canonical_digest()` | 规范化 name/account 并摘要稳定字段。`ServiceIdentity` 是保留给 Stage 4C1 import 的兼容别名。 |
+| `ServiceObservation.state_digest()` | 现在同时绑定稳定身份摘要、启动配置摘要、状态和 accepted controls。 |
+| `ServiceObservation.configuration_digest()` | 单独返回启动配置摘要，供 Stage 4C1/4C2 TOCTOU 复验。 |
+| `ServiceControlPlatform.start/stop(...)` | 新增 `expected_startup_configuration_digest`，状态控制前同时复验稳定身份与启动配置，防止 Stage 4C2 或外部修改后复用旧确认。 |
+
 ## Stage 4C1 Windows 服务安全启停 API
 
 本节覆盖 Stage 4C1 新增或修改的每个生产函数/方法。`ServiceName` 是执行身份；
@@ -19,14 +274,17 @@
 | `ServiceSafetyDecision` | 确定性最终结论 `ALLOW`/`BLOCK`；LLM 不能覆盖。 |
 | `ServiceErrorCode` | UI/审计可稳定匹配的隐私安全错误码；不嵌入二进制路径或凭据。 |
 | `ServiceTransactionState` | 写前事务状态机；区分计划、两次确认、每个控制/等待步骤、完成、部分完成、失败、取消和中断。 |
-| `ServiceIdentity` | 绑定 ServiceName、显示名、服务类型、二进制路径指纹、运行账户和启动类型；不保存命令参数。 |
-| `ServiceIdentity.canonical_digest()` | 规范化名称/账户并对所有配置身份字段做 SHA-256；返回十六进制摘要，用于 TOCTOU 复验。无系统读取。 |
+| `ServiceStableIdentity` / `ServiceIdentity` | 绑定 ServiceName、服务类型、二进制路径指纹和运行账户；`ServiceIdentity` 是兼容别名。显示名和可变启动配置不属于稳定身份。 |
+| `ServiceStableIdentity.canonical_digest()` | 规范化名称/账户并对稳定字段做 SHA-256；返回十六进制摘要，用于 TOCTOU 复验。无系统读取。 |
+| `ServiceStartupType` / `ServiceStartupConfiguration` | 规范化启动类型及 delayed-auto 证据；配置与稳定身份分离，以便状态控制检测配置漂移、配置工具表达有意变更。 |
+| `ServiceStartupConfiguration.canonical_digest()` | 对启动类型和 delayed 标记生成独立 SHA-256。 |
 | `ServiceRelation` | 一条依赖或被依赖关系，含精确 ServiceName、显示名和当前状态。 |
 | `ServicePermissionEvidence` | 记录 query/start/stop/enumerate-dependents 句柄探测结论、是否提权和采集时间。 |
 | `ServicePermissionEvidence.allows(action)` | 按动作判断最小权限是否齐全；提权进程或缺少 query 立即返回 `False`，Restart 必须同时具备三类控制/枚举权限。 |
 | `ServicePermissionEvidence.canonical_digest()` | 对稳定权限布尔值做摘要，排除采集时间；用于确认后的权限漂移检测。 |
-| `ServiceObservation` | 一次新鲜 SCM 观察：配置身份、状态、可接受控制、PID、可选二进制/发布者/描述及关系图。 |
-| `ServiceObservation.state_digest()` | 将配置摘要、状态和可接受控制绑定为 SHA-256，避免旧状态确认被复用。 |
+| `ServiceObservation` | 一次新鲜 SCM 观察：稳定身份、显示名、独立启动配置、状态、可接受控制、PID、可选二进制/发布者/描述及关系图。 |
+| `ServiceObservation.state_digest()` | 将稳定身份摘要、启动配置摘要、状态和可接受控制绑定为 SHA-256，避免旧状态确认被复用。 |
+| `ServiceObservation.configuration_digest()` | 返回独立启动配置摘要，供执行前复验。 |
 | `ServiceObservation.dependency_digest()` | 先按 ServiceName 排序依赖/被依赖项，再摘要名称与状态；用于阻止关系图漂移。 |
 | `ServiceDependencyAssessment` | 依赖分析结果，含阻止的依赖/被依赖项、图摘要和解释。 |
 | `ServiceSafetyAssessment` | 确定性分类结果，含身份摘要、分类、ALLOW/BLOCK、错误码和用户解释。 |
@@ -137,8 +395,8 @@
 | `ServiceControlPlatform.list_services(max_items=5000)` | 协议：有界枚举观察。实现必须只读。 |
 | `ServiceControlPlatform.inspect(service_name)` | 协议：按精确 ServiceName 读取；不存在返回 `None`。 |
 | `ServiceControlPlatform.evaluate_permissions(service_name, action)` | 协议：只通过最小权限句柄打开来形成证据，不执行控制。 |
-| `ServiceControlPlatform.start(identity, expected_state, timeout_seconds, cancellation, on_dispatched=None)` | 协议：精确身份复验后开始并等待 RUNNING；回调记录派发边界。 |
-| `ServiceControlPlatform.stop(...)` | 协议：精确身份复验后发送 STOP 并等待 STOPPED；不终止 PID、不级联。 |
+| `ServiceControlPlatform.start(identity, expected_startup_configuration_digest, expected_state, timeout_seconds, cancellation, on_dispatched=None)` | 协议：精确稳定身份和独立启动配置复验后开始并等待 RUNNING；回调记录派发边界。 |
+| `ServiceControlPlatform.stop(...)` | 协议：同样复验稳定身份和启动配置后发送 STOP 并等待 STOPPED；不终止 PID、不级联。 |
 | `WindowsServiceControlPlatform.list_services(max_items=5000)` | 用 query-only SCM handle 枚举并逐项观察；权限/删除竞态造成的单项失败被安全跳过，上限受控。 |
 | `WindowsServiceControlPlatform.inspect(service_name)` | 以 query 权限打开精确服务并读取配置、状态、依赖、发布者证据；无修改。 |
 | `WindowsServiceControlPlatform.evaluate_permissions(service_name, action)` | 分别尝试 query/start/stop/enumerate-dependent 权限句柄并检测 token 是否提权；返回布尔证据，句柄立即关闭。 |
@@ -153,6 +411,7 @@
 | `_can_open_service(service_name, desired_access)` | 尝试最小 desired access 并立即关闭；access denied 返回 `False`，非权限类异常上抛。 |
 | `_process_is_elevated()` | 读取当前进程 token elevation；任何检测失败按安全错误处理，策略不借机提权。 |
 | `_state(value)` | 将 Win32 SERVICE_* 数值映射为 `ServiceState`，未知值映射 UNKNOWN。 |
+| `_startup_type(value, delayed_auto_start)` | 将 SCM start type 与只读 delayed 标记组合为规范 `ServiceStartupType`；Automatic+delayed 明确映射为 `AUTOMATIC_DELAYED`，未知数值为 `UNKNOWN`。 |
 | `_extract_executable_path(raw)` | 从服务二进制字符串安全提取可执行文件部分并展开环境变量；不执行命令或参数。无法可靠解析返回 `None`。 |
 | `_publisher(path)` | 读取 Windows 版本资源 CompanyName，仅作显示/辅助分类；不替代 Authenticode 布尔验证。 |
 | `_GUID`、`_WinTrustFileInfo`、`_WinTrustUnion`、`_WinTrustData` | `WinVerifyTrust` 所需固定 ctypes 结构；没有通用 native-call 接口。 |

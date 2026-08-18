@@ -24,6 +24,8 @@ from pc_manager_agent.domain.service_actions import (
     ServiceObservation,
     ServicePermissionEvidence,
     ServiceRelation,
+    ServiceStartupConfiguration,
+    ServiceStartupType,
     ServiceState,
     ServiceStepResult,
     ServiceStepType,
@@ -120,6 +122,7 @@ class WindowsServiceControlPlatform:
     def start(
         self,
         identity: ServiceIdentity,
+        expected_startup_configuration_digest: str,
         expected_state: ServiceState,
         timeout_seconds: float,
         cancellation: CancellationToken,
@@ -128,6 +131,7 @@ class WindowsServiceControlPlatform:
         """Revalidate, start, and wait for RUNNING with a bounded checkpoint loop."""
         return self._control(
             identity,
+            expected_startup_configuration_digest,
             ServiceStepType.START,
             expected_state,
             ServiceState.RUNNING,
@@ -139,6 +143,7 @@ class WindowsServiceControlPlatform:
     def stop(
         self,
         identity: ServiceIdentity,
+        expected_startup_configuration_digest: str,
         expected_state: ServiceState,
         timeout_seconds: float,
         cancellation: CancellationToken,
@@ -147,6 +152,7 @@ class WindowsServiceControlPlatform:
         """Revalidate, stop, and wait for STOPPED without cascading dependents."""
         return self._control(
             identity,
+            expected_startup_configuration_digest,
             ServiceStepType.STOP,
             expected_state,
             ServiceState.STOPPED,
@@ -169,6 +175,7 @@ class WindowsServiceControlPlatform:
     def _control(
         self,
         identity: ServiceIdentity,
+        expected_startup_configuration_digest: str,
         step: ServiceStepType,
         expected_state: ServiceState,
         target_state: ServiceState,
@@ -200,6 +207,8 @@ class WindowsServiceControlPlatform:
             handle = win32service.OpenService(scm, identity.service_name, desired)
             current = _observation_from_handle(scm, handle, identity.service_name)
             if current.identity.canonical_digest() != identity.canonical_digest():
+                raise ServiceConfigurationChangedError()
+            if current.configuration_digest() != expected_startup_configuration_digest:
                 raise ServiceConfigurationChangedError()
             before = current.state
             if before is not expected_state:
@@ -294,6 +303,7 @@ def _observation_from_handle(scm: Any, handle: Any, service_name: str) -> Servic
         for name, display, dependent_status in dependent_rows
     )
     description: str | None = None
+    delayed_auto_start = False
     try:
         raw_description = win32service.QueryServiceConfig2(
             handle,
@@ -302,15 +312,31 @@ def _observation_from_handle(scm: Any, handle: Any, service_name: str) -> Servic
         description = str(raw_description).strip() or None
     except pywintypes.error:
         description = None
+    try:
+        delayed_auto_start = bool(
+            win32service.QueryServiceConfig2(
+                handle,
+                win32service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+            )
+        )
+    except pywintypes.error:
+        # Failing closed as UNKNOWN is safer than assuming an ordinary automatic service.
+        delayed_auto_start = False
+        start_type = ServiceStartupType.UNKNOWN
+    else:
+        start_type = _startup_type(int(config[1]), delayed_auto_start)
     binary = _extract_executable_path(raw_binary)
     return ServiceObservation(
         identity=ServiceIdentity(
             service_name=service_name,
-            display_name=display_name,
             service_type=int(config[0]),
             binary_path_fingerprint=canonical_binary_fingerprint(raw_binary),
             service_account=str(config[7] or "LocalSystem"),
-            start_type=int(config[1]),
+        ),
+        display_name=display_name,
+        startup_configuration=ServiceStartupConfiguration(
+            startup_type=start_type,
+            delayed_auto_start=delayed_auto_start,
         ),
         state=_state(int(status["CurrentState"])),
         controls_accepted=max(0, int(status["ControlsAccepted"])),
@@ -407,6 +433,22 @@ def _state(value: int) -> ServiceState:
         win32service.SERVICE_PAUSE_PENDING: ServiceState.PAUSE_PENDING,
         win32service.SERVICE_PAUSED: ServiceState.PAUSED,
     }.get(value, ServiceState.UNKNOWN)
+
+
+def _startup_type(value: int, delayed_auto_start: bool) -> ServiceStartupType:
+    """Normalize raw SCM constants and preserve delayed-auto semantics."""
+    if value == win32service.SERVICE_AUTO_START:
+        return (
+            ServiceStartupType.AUTOMATIC_DELAYED
+            if delayed_auto_start
+            else ServiceStartupType.AUTOMATIC
+        )
+    return {
+        win32service.SERVICE_DEMAND_START: ServiceStartupType.MANUAL,
+        win32service.SERVICE_DISABLED: ServiceStartupType.DISABLED,
+        win32service.SERVICE_BOOT_START: ServiceStartupType.BOOT,
+        win32service.SERVICE_SYSTEM_START: ServiceStartupType.SYSTEM,
+    }.get(value, ServiceStartupType.UNKNOWN)
 
 
 def _extract_executable_path(raw: str) -> Path | None:

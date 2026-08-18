@@ -77,7 +77,8 @@ def test_service_tool_cannot_execute_without_durable_confirmation(tmp_path: Path
         "transaction_id": "d29d59ae-b270-4a50-bd76-a020f14cfe70",
         "step": "STOP",
         "identity": observation.identity.model_dump(mode="json"),
-        "expected_configuration_digest": observation.identity.canonical_digest(),
+        "expected_identity_digest": observation.identity.canonical_digest(),
+        "expected_startup_configuration_digest": observation.configuration_digest(),
         "expected_state": "RUNNING",
         "timeout_seconds": 5,
     }
