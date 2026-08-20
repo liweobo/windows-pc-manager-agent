@@ -1,5 +1,29 @@
 # Security model
 
+## Stage 4D1 software uninstall-analysis controls
+
+Stage 4D1 is strictly R0 and has no rollback because it performs no change. Plan confirmation allows
+only the fixed read-only chain. Target acknowledgement is bound to plan ID/digest,
+identity/metadata/capability/Preview digests and expiry, but deliberately produces no
+`ExecutionAuthorization`. The workflow always returns a stop reason.
+
+Installed-software names, publishers, paths and uninstall metadata are untrusted. Raw command lines
+are never displayed verbatim, logged or sent to a provider. The parser cannot execute and rejects
+shell/script wrappers, UNC or relative executables, non-EXE files, missing targets and oversized or
+malformed metadata. Package and MSIX sources require exact structured identifiers; absence is
+reported as unsupported rather than guessed.
+
+Protected and unknown classes fail closed. Windows features/components, drivers, Agent components,
+Microsoft/system/security software and insufficient identities are blocked. Package managers,
+VPN/network clients, databases, background platforms, hardware utilities and runtimes receive
+high-impact Preview classification only. Ordinary user applications and developer tools may receive
+Preview, but none becomes executable in this stage.
+
+Fresh inventory is collected at resolve, inspect, capability and Preview boundaries. Disappearance,
+non-unique identity, metadata change or capability change invalidates the flow. Audit records only
+digests, counts, decisions and zero-execution state; database failure stops the workflow. Static
+tests reject process-creation and uninstall primitives in the Stage 4D1 source set.
+
 ## Stage 4C2 service startup-type controls
 
 The explicitly approved R2 exception is the exact, single-object transition

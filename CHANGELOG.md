@@ -7,6 +7,15 @@ once release tags are introduced.
 
 ### Added
 
+- Stage 4D1 normalized software identity, conservative exact target resolution, source-qualified
+  uninstall capability analysis, deterministic safety classification, and process/startup/service
+  impact evidence behind exactly five read-only R0 tools.
+- Expiring uninstall Preview and digest-bound target acknowledgement that deliberately stop without
+  creating execution authority; raw uninstall strings remain ephemeral, local, unlogged and
+  unexecuted.
+- Stage 4D1 GUI/chat entry points, privacy-minimized audit events, zero-execution source guards,
+  Windows read-only inventory probe, 10,000-record benchmark, and dedicated 95% CI coverage gate.
+
 - Stage 4C2 exact-service startup configuration workflow with three narrow registered tools:
   set non-delayed Automatic, set Manual, and restore an Agent-owned verified backup.
 - Pre-Preview DPAPI-encrypted backup verification, immutable R2 plan, two digest-bound one-time

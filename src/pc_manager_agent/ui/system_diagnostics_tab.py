@@ -27,14 +27,18 @@ from pc_manager_agent.domain.process_actions import (
     ProcessTargetQuery,
     ProcessTargetQueryType,
 )
+from pc_manager_agent.domain.software_uninstall_analysis import SoftwareTargetQuery
 from pc_manager_agent.domain.system_diagnostics import (
     DiagnosticIntent,
     DiagnosticPlan,
     DiagnosticReport,
     ProcessSnapshot,
+    SoftwareArchitecture,
+    SoftwareScope,
 )
 from pc_manager_agent.orchestration.system_diagnostic_planner import extract_software_search_term
 from pc_manager_agent.ui.process_action_dialog import ProcessActionDialog
+from pc_manager_agent.ui.software_analysis_dialog import SoftwareAnalysisDialog
 from pc_manager_agent.ui.system_workers import DiagnosticWorker, require_diagnostic_report
 
 
@@ -63,6 +67,7 @@ class SystemDiagnosticsTab(QWidget):
         self._report: DiagnosticReport | None = None
         self._worker: DiagnosticWorker | None = None
         self._process_dialogs: set[ProcessActionDialog] = set()
+        self._software_dialogs: set[SoftwareAnalysisDialog] = set()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -155,7 +160,11 @@ class SystemDiagnosticsTab(QWidget):
         )
         self.startup_table = self._table(("名称", "来源", "范围", "命令或路径"))
         self.service_table = self._table(("服务名", "显示名", "状态", "启动类型", "账户"))
-        self.software_table = self._table(("名称", "版本", "发布者", "范围", "架构"))
+        self.software_table = self._table(
+            ("名称", "版本", "发布者", "范围", "架构", "估算大小", "安装位置", "来源")
+        )
+        self.software_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.software_table.itemSelectionChanged.connect(self._software_selection_changed)
         self.results_tabs.addTab(self.overview_table, "概览")
         self.results_tabs.addTab(self.disk_table, "磁盘")
         self.results_tabs.addTab(self.process_table, "进程")
@@ -174,6 +183,16 @@ class SystemDiagnosticsTab(QWidget):
         process_action_row.addWidget(self.process_action_label, 1)
         process_action_row.addWidget(self.process_action_button)
 
+        software_action_row = QHBoxLayout()
+        self.software_action_label = QLabel(
+            "选择软件后可分析身份、能力和影响；Stage 4D1 没有卸载按钮。"
+        )
+        self.software_action_button = QPushButton("分析选中软件的卸载影响")
+        self.software_action_button.setEnabled(False)
+        self.software_action_button.clicked.connect(self._open_selected_software_analysis)
+        software_action_row.addWidget(self.software_action_label, 1)
+        software_action_row.addWidget(self.software_action_button)
+
         layout.addLayout(goal_row)
         layout.addLayout(quick_row)
         layout.addWidget(self.risk_label)
@@ -185,6 +204,7 @@ class SystemDiagnosticsTab(QWidget):
         layout.addLayout(filter_row)
         layout.addWidget(self.results_tabs, 2)
         layout.addLayout(process_action_row)
+        layout.addLayout(software_action_row)
 
     @staticmethod
     def _table(headers: tuple[str, ...]) -> QTableWidget:
@@ -457,6 +477,11 @@ class SystemDiagnosticsTab(QWidget):
                     item.publisher or "",
                     item.scope.value,
                     item.architecture.value,
+                    _bytes_text(item.estimated_size_bytes)
+                    if item.estimated_size_bytes is not None
+                    else "",
+                    str(item.install_location) if item.install_location else "",
+                    "registry-uninstall-metadata",
                 )
                 for item in snapshot.software
             ],
@@ -508,8 +533,10 @@ class SystemDiagnosticsTab(QWidget):
     def shutdown(self) -> None:
         """Cancel outstanding sampling during controlled application shutdown."""
         self.cancel()
-        for dialog in tuple(self._process_dialogs):
-            dialog.shutdown()
+        for process_dialog in tuple(self._process_dialogs):
+            process_dialog.shutdown()
+        for software_dialog in tuple(self._software_dialogs):
+            software_dialog.shutdown()
 
     @Slot()
     def _process_selection_changed(self) -> None:
@@ -548,6 +575,60 @@ class SystemDiagnosticsTab(QWidget):
         dialog.finished.connect(lambda _result, value=dialog: self._process_dialogs.discard(value))
         dialog.show()
         self.status_message.emit("正在后台生成实时进程 Preview；尚未执行任何进程操作")
+
+    @Slot()
+    def _software_selection_changed(self) -> None:
+        query = self._selected_software_query()
+        self.software_action_button.setEnabled(query is not None)
+        if query is not None:
+            self.software_action_label.setText(
+                f"已选择 {query.display_name}；点击后会重新刷新身份，表格选择本身不授权操作。"
+            )
+
+    @Slot()
+    def _open_selected_software_analysis(self) -> None:
+        query = self._selected_software_query()
+        if query is None:
+            self._show_error("请先选择一个具体软件。")
+            return
+        self.open_software_analysis(f"分析卸载软件 {query.display_name}", query=query)
+
+    def open_software_analysis(
+        self,
+        user_goal: str,
+        *,
+        query: SoftwareTargetQuery | None = None,
+    ) -> None:
+        """Open a modeless Stage 4D1 dialog whose terminal state is always STOP."""
+        dialog = SoftwareAnalysisDialog(self._runtime, user_goal, query=query, parent=self)
+        self._software_dialogs.add(dialog)
+        dialog.finished.connect(lambda _result, value=dialog: self._software_dialogs.discard(value))
+        dialog.show()
+        self.status_message.emit("正在生成软件卸载分析 Preview；Stage 4D1 不执行卸载")
+
+    def _selected_software_query(self) -> SoftwareTargetQuery | None:
+        rows = self.software_table.selectionModel().selectedRows()
+        if len(rows) != 1:
+            return None
+        row = rows[0].row()
+        values = tuple(self.software_table.item(row, column) for column in range(5))
+        if any(item is None for item in values):
+            return None
+        name, version, publisher, scope, architecture = (
+            item.text() for item in values if item is not None
+        )
+        try:
+            parsed_scope = SoftwareScope(scope)
+            parsed_architecture = SoftwareArchitecture(architecture)
+        except ValueError:
+            return None
+        return SoftwareTargetQuery(
+            display_name=name,
+            display_version=version or None,
+            publisher=publisher or None,
+            scope=parsed_scope,
+            architecture=parsed_architecture,
+        )
 
     def _selected_process(self) -> tuple[int, str] | None:
         rows = self.process_table.selectionModel().selectedRows()

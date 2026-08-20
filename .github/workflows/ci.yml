@@ -76,6 +76,27 @@ jobs:
           --cov-fail-under=95
       - name: No permanent-delete production paths
         run: uv run pytest tests/security/test_trash_safety.py -q
+      - name: Stage 4D1 uninstall-analysis zero-execution boundary
+        if: matrix.python-version == '3.13'
+        run: >-
+          uv run pytest tests/unit/test_software_models.py
+          tests/unit/test_software_inventory_and_resolution.py
+          tests/unit/test_uninstall_metadata_and_capability.py
+          tests/unit/test_software_tools.py
+          tests/unit/test_software_boundary_branches.py
+          tests/security/test_software_policy.py
+          tests/security/test_software_uninstall_zero_execution.py
+          --cov-config=.coveragerc-stage4d1
+          --cov=pc_manager_agent.domain.software_uninstall_analysis
+          --cov=pc_manager_agent.orchestration.software_inventory
+          --cov=pc_manager_agent.orchestration.software_target_resolver
+          --cov=pc_manager_agent.orchestration.software_capability
+          --cov=pc_manager_agent.platform_support.windows.uninstall_metadata
+          --cov=pc_manager_agent.safety.software_uninstall_policy
+          --cov=pc_manager_agent.safety.software_uninstall_validator
+          --cov=pc_manager_agent.safety.software_zero_execution
+          --cov=pc_manager_agent.tools.system_tools.software_analysis
+          --cov-report=term-missing --cov-fail-under=95 -q
       - name: Real Windows Recycle Bin disposable probe
         if: matrix.python-version == '3.13'
         env:
@@ -93,9 +114,15 @@ jobs:
       - name: Real Windows service startup-type read-only probe
         if: matrix.python-version == '3.13'
         run: uv run pytest tests/integration/test_windows_service_startup_readonly.py -q
+      - name: Real Windows installed-software read-only probe
+        if: matrix.python-version == '3.13'
+        run: uv run pytest tests/integration/test_windows_software_inventory_readonly.py -q
       - name: 10,000-file streaming benchmark
         if: matrix.python-version == '3.13'
         run: uv run pytest tests/performance/test_large_scan.py -q -s
+      - name: 10,000-record software inventory benchmark
+        if: matrix.python-version == '3.13'
+        run: uv run pytest tests/performance/test_software_inventory_performance.py -q -s
       - name: Python security scan
         run: uv run bandit -q -r src
       - name: Dependency vulnerability scan
