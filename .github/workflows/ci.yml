@@ -57,6 +57,9 @@ jobs:
           tests/unit/test_startup_actions.py
           tests/unit/test_startup_resolver.py
           tests/unit/test_recycle_bin_platform.py
+          tests/unit/test_software_boundary_branches.py
+          tests/unit/test_software_confirmation.py
+          tests/unit/test_software_policy_and_impact.py
           tests/integration/test_file_operations_flow.py
           tests/integration/test_operation_transactions.py
           tests/integration/test_trash_flow.py
@@ -64,6 +67,7 @@ jobs:
           tests/integration/test_process_action_flow.py
           tests/integration/test_service_action_flow.py
           tests/integration/test_service_startup_workflow.py
+          tests/integration/test_software_uninstall_analysis_flow.py
           tests/integration/test_startup_action_workflow.py
           tests/security/test_service_startup_safety.py
           tests/security/test_startup_safety.py
