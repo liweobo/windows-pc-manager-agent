@@ -1,5 +1,17 @@
 # Rollback design
 
+## Stage 4D1 software analysis
+
+All five Stage 4D1 tools are R0 and declare `RollbackLevel.NONE` because they do not change software,
+files, services, processes, registry values or package state. `NONE` here means “nothing to undo”,
+not “an irreversible uninstall occurred”. Target acknowledgement records understanding only and
+cannot be converted into execution authority.
+
+If inventory or Preview data is wrong or stale, close it and create a fresh plan. Identity,
+metadata, capability or plan digest changes invalidate the old confirmation/Preview. Code rollback
+uses `git revert <stage-4d1-commit>`; no software repair is needed because this stage never invokes
+an uninstaller.
+
 ## Stage 4C2 startup configuration
 
 | Operation | Risk | Rollback | Exact meaning |

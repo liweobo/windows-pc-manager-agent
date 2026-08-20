@@ -15,6 +15,9 @@ from pc_manager_agent.audit.process_actions import ProcessActionAuditLogger
 from pc_manager_agent.audit.repository import AuditRepository
 from pc_manager_agent.audit.service_actions import ServiceActionAuditLogger
 from pc_manager_agent.audit.service_startup_actions import ServiceStartupActionAuditLogger
+from pc_manager_agent.audit.software_uninstall_analysis import (
+    SoftwareUninstallAnalysisAuditLogger,
+)
 from pc_manager_agent.audit.startup_actions import StartupActionAuditLogger
 from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
@@ -33,6 +36,9 @@ from pc_manager_agent.confirmation.process_actions import ProcessActionConfirmat
 from pc_manager_agent.confirmation.service_actions import ServiceActionConfirmationService
 from pc_manager_agent.confirmation.service_startup_actions import (
     ServiceStartupActionConfirmationService,
+)
+from pc_manager_agent.confirmation.software_uninstall_analysis import (
+    SoftwareAnalysisConfirmationService,
 )
 from pc_manager_agent.confirmation.startup_actions import StartupActionConfirmationService
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
@@ -69,6 +75,14 @@ from pc_manager_agent.orchestration.service_actions import ServiceActionService
 from pc_manager_agent.orchestration.service_dependency_analyzer import ServiceDependencyAnalyzer
 from pc_manager_agent.orchestration.service_startup_actions import ServiceStartupActionService
 from pc_manager_agent.orchestration.service_target_resolver import ServiceTargetResolver
+from pc_manager_agent.orchestration.software_capability import UninstallCapabilityResolver
+from pc_manager_agent.orchestration.software_impact_analyzer import SoftwareImpactAnalyzer
+from pc_manager_agent.orchestration.software_inventory import SoftwareInventoryService
+from pc_manager_agent.orchestration.software_target_resolver import SoftwareTargetResolver
+from pc_manager_agent.orchestration.software_uninstall_analysis import (
+    SoftwareUninstallAnalysisPlanCompiler,
+    SoftwareUninstallAnalysisService,
+)
 from pc_manager_agent.orchestration.startup_actions import StartupActionService
 from pc_manager_agent.orchestration.startup_target_resolver import StartupTargetResolver
 from pc_manager_agent.orchestration.system_diagnostic_planner import DiagnosticPlanCompiler
@@ -129,6 +143,9 @@ from pc_manager_agent.platform_support.windows.service_control import (
 from pc_manager_agent.platform_support.windows.service_startup import (
     WindowsServiceStartupPlatform,
 )
+from pc_manager_agent.platform_support.windows.software_inventory import (
+    WindowsSoftwareInventoryPlatform,
+)
 from pc_manager_agent.platform_support.windows.startup_management import (
     WindowsStartupManagementPlatform,
 )
@@ -153,6 +170,12 @@ from pc_manager_agent.safety.service_startup_policy import ServiceStartupSafetyP
 from pc_manager_agent.safety.service_startup_preview import ServiceStartupPreviewEngine
 from pc_manager_agent.safety.service_startup_validator import ServiceStartupSafetyValidator
 from pc_manager_agent.safety.service_validator import ServiceActionSafetyValidator
+from pc_manager_agent.safety.software_uninstall_policy import SoftwareUninstallSafetyPolicy
+from pc_manager_agent.safety.software_uninstall_preview import SoftwareUninstallPreviewEngine
+from pc_manager_agent.safety.software_uninstall_validator import (
+    SoftwareUninstallSafetyValidator,
+)
+from pc_manager_agent.safety.software_zero_execution import SoftwareZeroExecutionGuard
 from pc_manager_agent.safety.startup_policy import StartupSafetyPolicy
 from pc_manager_agent.safety.startup_preview import StartupPreviewEngine
 from pc_manager_agent.safety.startup_validator import StartupActionSafetyValidator
@@ -195,6 +218,13 @@ from pc_manager_agent.tools.system_tools.service_startup_actions import (
     RestoreServiceStartupTool,
     SetServiceAutomaticTool,
     SetServiceManualTool,
+)
+from pc_manager_agent.tools.system_tools.software_analysis import (
+    SoftwareInspectTool,
+    SoftwareInventoryTool,
+    SoftwareResolveTool,
+    SoftwareUninstallCapabilityTool,
+    SoftwareUninstallPreviewTool,
 )
 from pc_manager_agent.tools.system_tools.startup_actions import (
     DisableStartupTool,
@@ -247,6 +277,16 @@ class SystemDiagnosticServices:
     orchestrator: DiagnosticOrchestrator
     provider_planner: DiagnosticProviderPlanner | None
     explainer: DiagnosticExplainer | None
+
+
+@dataclass(frozen=True, slots=True)
+class SoftwareAnalysisServices:
+    """Dependency bundle for Stage 4D1 zero-execution software analysis."""
+
+    registry: ToolRegistry
+    inventory: SoftwareInventoryService
+    resolver: SoftwareTargetResolver
+    service: SoftwareUninstallAnalysisService
 
 
 @dataclass(frozen=True, slots=True)
@@ -723,6 +763,56 @@ class ApplicationRuntime:
                 if provider is not None
                 else None
             ),
+        )
+
+    def create_software_analysis_services(self) -> SoftwareAnalysisServices:
+        """Build the exact five-tool R0 Stage 4D1 workflow with no execution registry."""
+        inventory = SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
+        resolver = SoftwareTargetResolver(inventory)
+        capability = UninstallCapabilityResolver()
+        policy = SoftwareUninstallSafetyPolicy(agent_root=Path(__file__).resolve().parents[1])
+        preview = SoftwareUninstallPreviewEngine(
+            policy,
+            capability,
+            SoftwareImpactAnalyzer(
+                WindowsSystemDiagnosticsPlatform(),
+                max_items=self.settings.diagnostic_max_items,
+            ),
+            ttl_seconds=self.settings.confirmation_ttl_seconds,
+        )
+        registry = ToolRegistry()
+        for tool in (
+            SoftwareInventoryTool(inventory),
+            SoftwareResolveTool(resolver),
+            SoftwareInspectTool(resolver),
+            SoftwareUninstallCapabilityTool(resolver, capability),
+            SoftwareUninstallPreviewTool(resolver, preview),
+        ):
+            registry.register(tool)
+        guard = SoftwareZeroExecutionGuard()
+        guard.validate_registry(registry)
+        validator = SoftwareUninstallSafetyValidator(registry, guard)
+        audit = SoftwareUninstallAnalysisAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        service = SoftwareUninstallAnalysisService(
+            SoftwareUninstallAnalysisPlanCompiler(max_items=self.settings.diagnostic_max_items),
+            registry,
+            validator,
+            guard,
+            SoftwareAnalysisConfirmationService(
+                plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+                acknowledgement_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            ),
+            audit,
+        )
+        return SoftwareAnalysisServices(
+            registry=registry,
+            inventory=inventory,
+            resolver=resolver,
+            service=service,
         )
 
     def create_process_action_services(self) -> ProcessActionServices:

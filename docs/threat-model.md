@@ -1,5 +1,17 @@
 # Threat model
 
+## Stage 4D1 additions
+
+| Threat | Control | Residual risk / truthful limitation |
+|---|---|---|
+| A malicious uninstall string asks the Agent to run shell or hidden commands | Raw metadata is untrusted; the parser has no execution primitive and rejects wrappers, relative/UNC/missing/non-EXE targets | A signed vendor uninstaller can still be unsafe; Stage 4D1 never invokes it |
+| Similar display names select the wrong product | Source-qualified identity plus exact filters; substring results require explicit candidate selection and a new plan | Registry metadata can be incomplete or wrong, so warnings remain visible |
+| Software changes after plan confirmation | Fresh inventory/identity/metadata/capability validation at each boundary; changed digests stop | A race remains after the last read, but this stage performs no write |
+| UI or model invents `software.uninstall.execute` | Exact five-tool registry, independent plan review and zero-execution source guard | A future execution stage cannot reuse this acknowledgement |
+| Raw command/path data leaks | Separate raw/normalized models; raw fields excluded from serialization/repr; audit stores digests/counts | Registry metadata remains local OS/user-controlled input |
+| “I understand” is mistaken for uninstall consent | Preview-bound acknowledgement has no execution capability and ends in explicit STOP | Users may still misread third-party metadata; UI states nothing was uninstalled |
+| Impact analysis claims complete dependency knowledge | Known path correlation is separate from heuristic name evidence; unknown impacts are explicit | Proprietary plug-ins, licenses and user data cannot be fully discovered |
+
 ## Stage 4C2 additions
 
 | Threat | Control | Residual risk |

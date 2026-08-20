@@ -1,0 +1,19 @@
+[run]
+branch = true
+source =
+    pc_manager_agent.domain.software_uninstall_analysis
+    pc_manager_agent.orchestration.software_inventory
+    pc_manager_agent.orchestration.software_target_resolver
+    pc_manager_agent.orchestration.software_capability
+    pc_manager_agent.platform_support.windows.uninstall_metadata
+    pc_manager_agent.safety.software_uninstall_policy
+    pc_manager_agent.safety.software_uninstall_validator
+    pc_manager_agent.safety.software_zero_execution
+    pc_manager_agent.tools.system_tools.software_analysis
+
+[report]
+show_missing = true
+skip_covered = true
+exclude_also =
+    if TYPE_CHECKING:
+    raise NotImplementedError

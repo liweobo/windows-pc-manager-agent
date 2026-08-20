@@ -1,5 +1,35 @@
 # Architecture
 
+## Stage 4D1 zero-execution uninstall-analysis boundary
+
+Stage 4D1 adds a read-only slice; it does not extend the write executor. Raw source records and
+normalized domain records are separate. The Windows adapter reads fixed registry views and optional
+structured package providers, then `SoftwareInventoryService` normalizes and deduplicates them. Raw
+uninstall commands stay only in an ephemeral snapshot keyed by a stable, source-qualified identity
+digest; GUI, audit and provider layers receive only safe projections.
+
+```text
+chat/selected software
+  -> local intent + immutable R0 plan
+  -> independent plan validator + plan confirmation
+  -> software.inventory -> software.resolve -> software.inspect
+  -> software.uninstall_capability -> fresh identity/metadata check
+  -> deterministic policy + read-only impact correlations
+  -> software.uninstall_preview -> independent Preview validation
+  -> target acknowledgement -> STOP (no execution capability exists)
+```
+
+The dedicated registry contains exactly five tools. Each manifest is R0, read-only, cancellable,
+has `RollbackLevel.NONE`, and forbids runtime execution confirmation. `SoftwareZeroExecutionGuard`
+validates the allow-list and every result's `execution_performed=false`. The Qt dialog runs analysis
+in workers and contains no uninstall worker or executable button.
+
+Identity includes source, scope, architecture and source anchors. Resolution accepts exact identity
+or exact supplied fields; substring results remain candidates. MSI evidence requires ProductCode and
+WindowsInstaller metadata to agree. Vendor command lines are parsed with `CommandLineToArgvW` only
+to expose sanitized structure; wrappers, relative/UNC/missing/non-EXE targets are unsupported.
+Impact correlation is evidence, not a complete dependency graph.
+
 ## Stage 4C2 service startup-configuration boundary
 
 Stage 4C2 is additive to Stage 4C1 and deliberately separates immutable service identity from

@@ -104,6 +104,21 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4D1 retains all earlier stages and adds exactly five R0 analysis tools:
+`software.inventory`, `software.resolve`, `software.inspect`,
+`software.uninstall_capability`, and `software.uninstall_preview`. This stage may inventory and
+normalize installed-software metadata, resolve one exact source-qualified identity, parse raw
+uninstall strings as untrusted local metadata, classify capability/safety, correlate read-only
+process/startup/service evidence, and display an expiring Preview. It must then stop. Target
+acknowledgement records understanding only and never authorizes execution. Raw uninstall strings,
+registry paths and installer arguments must not enter audit or model payloads.
+
+Stage 4D1 has no uninstall executor, package-removal adapter, generic command runner, elevation,
+program-file deletion or user-data deletion. Never invoke MSI, vendor uninstallers, package
+managers, MSIX removal, Windows Feature/driver removal, shell, PowerShell, CMD or arbitrary process
+creation from software metadata. Ambiguous names are never auto-selected, and stale identity,
+metadata or capability evidence invalidates the Preview.
+
 Stage 4C2 retains earlier stages and adds exactly three narrow startup-configuration tools:
 `system.service.startup.set_automatic`, `system.service.startup.set_manual`, and
 `system.service.startup.restore`. They may change only one exact signed, own-process,

@@ -76,9 +76,21 @@ Delayed Automatic, Disabled, Boot/System, driver/protected/unknown/dependent ser
 generic configuration, account/binary/dependency/recovery/security edits, elevation, shell and automatic
 retry/resume remain absent.
 
-## Stage 4C3+ — other controlled system operations (not started)
+## Stage 4D1 — software identity and uninstall Preview (complete)
 
-Broader service changes, software uninstall, firewall changes, cleanup and other system
+Normalized source-qualified identity, exact conservative resolution, MSI/vendor/package/MSIX/
+portable/feature/driver capability classification, deterministic safety policy, read-only impact
+evidence, five R0 tools, expiring Preview, privacy-minimized audit and target acknowledgement are
+complete. Dedicated zero-execution tests, a 95% boundary coverage gate, a Windows read-only probe and
+a 10,000-record benchmark protect the boundary.
+
+Stage 4D1 intentionally has no uninstaller, package remover, elevation, shell, program-file deletion
+or user-data cleanup. Any future uninstall execution is a new security stage and cannot reuse this
+stage's target acknowledgement.
+
+## Stage 4C3+ / 4D2+ — other controlled system operations (not started)
+
+Broader service changes, software uninstall execution, firewall changes, cleanup and other system
 operations remain design-only. Each capability requires its own threat model, confirmation,
 recovery plan, Windows API experiment, and isolated test/review before implementation.
 

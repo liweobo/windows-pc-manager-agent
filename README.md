@@ -1,5 +1,22 @@
 # Windows PC Manager Agent
 
+## Stage 4D1：软件身份、卸载能力与影响 Preview（零执行）
+
+Stage 4D1 只回答“这个软件是谁、Windows 目前暴露了哪类卸载元数据、可能影响什么”。它注册
+且只注册五个 R0 工具：`software.inventory`、`software.resolve`、`software.inspect`、
+`software.uninstall_capability`、`software.uninstall_preview`。所有结果都必须携带
+`execution_performed=false`；独立守卫会拒绝工具集合扩大、风险升高或出现回滚/即时执行确认。
+
+应用从 HKCU/HKLM 的 32/64 位卸载注册表视图读取元数据，保守区分 MSI、厂商卸载器、包管理器、
+MSIX、Portable、Windows Feature、Driver 与 Unknown。原始卸载字符串仅在本地短暂解析，绝不
+执行、不写日志、不发送给模型。名称相似不会自动选择目标；身份、版本、发布者、范围或架构
+不唯一时，用户必须从候选项重新选择并生成新计划。
+
+最终 Preview 显示安全分类、能力证据、相关进程/启动项/服务的只读影响线索、未知项、风险和
+明确停止原因。按钮“我已理解目标”只记录与 plan/Preview 摘要及有效期绑定的 acknowledgement，
+不会创建卸载授权。当前版本没有 MSI、厂商、winget、MSIX 或其他卸载执行工具，也不请求管理员
+权限，不使用 Shell，并且没有删除程序文件或用户数据的路径。
+
 ## Stage 4C2：Windows 服务启动类型安全管理
 
 Stage 4C2 在 Stage 4C1 的精确 ServiceName、身份复验和保护服务策略之上，增加三个且只有
@@ -121,7 +138,7 @@ restore claim.
 
 ## 当前版本
 
-Stage 4C2 / `0.1.0` 开发版本在此前阶段基础上包含：
+Stage 4D1 / `0.1.0` 开发版本在此前阶段基础上包含：
 
 - PySide6 主窗口和系统托盘；
 - 基础聊天、计划、风险提示与确认界面；
@@ -130,6 +147,8 @@ Stage 4C2 / `0.1.0` 开发版本在此前阶段基础上包含：
 - R0–R4 风险等级、工具注册表和安全审查；
 - 与计划摘要和有效期绑定的确认状态机；
 - SQLite 结构化审计日志及敏感字段脱敏；
+- 软件身份归一化、保守目标解析、卸载能力分析与零执行影响 Preview；
+- 与计划和 Preview 摘要绑定、但绝不授予卸载权限的目标理解确认；
 - 用户管理的授权目录、常用目录与自定义禁止目录；
 - 不跟随符号链接/联接点/重解析点的流式只读目录元数据扫描；
 - 可配置大文件分析、证据化的“疑似长期未使用”分析；

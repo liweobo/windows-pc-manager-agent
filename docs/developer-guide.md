@@ -1,5 +1,30 @@
 # Developer guide
 
+## Stage 4D1 development
+
+实现分布在 `domain/software_uninstall_analysis.py`、`platform_support/*/software_inventory.py`、
+`platform_support/windows/uninstall_metadata.py`、`orchestration/software_*`、
+`safety/software_*`、`confirmation/software_uninstall_analysis.py`、
+`audit/software_uninstall_analysis.py`、`tools/system_tools/software_analysis.py` 和
+`ui/software_*`。保持 raw source 与 normalized domain 分离；新增来源适配器只能返回元数据，
+不得加入卸载调用。
+
+Stage 4D1 专用 `ToolRegistry` 必须精确等于五工具 allow-list；所有 manifest 必须
+R0/read-only/NONE/no-runtime-confirmation；所有结果必须证明 `execution_performed=false`。不要在
+通用写执行器注册 software uninstall 工具，不要把 acknowledgement 映射到
+`ExecutionAuthorization`。GUI worker 只调用编排服务，禁止引入 uninstall worker/button。
+
+专项验证命令见 CI 的 `Stage 4D1 uninstall-analysis zero-execution boundary` 步骤；它使用
+`.coveragerc-stage4d1` 对身份、解析、能力、策略、校验和工具边界执行 95% 门槛。另运行：
+
+```powershell
+uv run pytest tests/integration/test_windows_software_inventory_readonly.py -q
+uv run pytest tests/performance/test_software_inventory_performance.py -q -s
+```
+
+真实 Windows 测试只读卸载注册表视图并断言没有执行；性能测试使用合成记录。未来执行阶段必须
+另建风险模型、工具集、确认和测试，不能扩大本阶段计划或复用 target acknowledgement。
+
 ## Stage 4C2 development
 
 Stage 4C2 is split across `domain/service_startup_actions.py`, `safety/service_startup_*`,

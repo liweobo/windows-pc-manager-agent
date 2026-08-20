@@ -1,5 +1,210 @@
 # API reference
 
+## Stage 4D1 软件身份与卸载 Preview API（零执行）
+
+本节覆盖 Stage 4D1 新增或修改的每个生产函数和方法。这里的“卸载能力”仅表示本地元数据足以
+识别一种机制；它不表示安全、可执行或已授权。全部五个工具都是 R0，结果固定
+`execution_performed=false`，target acknowledgement 后工作流必须停止。
+
+### 领域枚举、原始数据和安全投影 `domain.software_uninstall_analysis`
+
+| 类/函数/方法 | 详细作用、输入、返回与安全约束 |
+|---|---|
+| `canonical_digest(payload)` | 将可 JSON 序列化对象按键排序、紧凑编码为 UTF-8 后计算 SHA-256；用于身份、计划、Preview 和确认绑定。它不读取系统、不授权操作。 |
+| `SoftwareSource` | 有限来源枚举：MSI、Registry、Vendor、Package Manager、MSIX、Portable、Windows Feature、Driver 与 Unknown；未知来源不能被自动提升为已支持机制。 |
+| `RegistryHive` / `RegistryView` | 仅表达 HKCU/HKLM 与 x86/x64 读取来源，使同名条目保持来源可区分；不是通用注册表地址或写权限。 |
+| `SoftwareSafetyClass` / `SoftwareSafetyDecision` | 分别表达保护/高影响/普通/开发者/未知分类和 blocked/high-impact/allowed Preview 决策；没有 execute 决策值。 |
+| `UninstallCapabilityType` / `CapabilitySupport` | 表达观察到的机制类型及元数据是否足够；`METADATA_SUPPORTED` 只允许生成说明，不允许调用卸载器。 |
+| `EvidenceKind` / `ImpactSeverity` | 区分已知路径相关、名称启发式和未知证据，以及影响严重度；避免把弱相关说成确定依赖。 |
+| `TargetAcknowledgementState` | `PENDING`、`ACKNOWLEDGED`、`REJECTED`、`EXPIRED` 状态；任何终态都不携带执行授权。 |
+| `RawInstalledSoftwareEntry` | Windows/包来源的本地原始记录。卸载/静默命令字段被排除于序列化和 repr，只能在短生命周期内部快照使用。 |
+| `RawInstalledSoftwareEntry.source_anchor_digest()` | 摘要来源、scope、architecture、注册表或包的精确锚点；不包含可变显示文本，用于发现来源替换。 |
+| `RawInstalledSoftwareEntry.command_metadata_digest()` | 只对原始命令元数据生成摘要；调用方可比较变化但不能取得或记录原文。 |
+| `SoftwareIdentity` | 归一化稳定身份：版本化 identity schema、来源、scope、architecture 与 source anchor；同名不等于同一身份。 |
+| `SoftwareIdentity.canonical_digest()` | 生成 source-qualified 身份摘要；用于精确 resolve/inspect 和确认失效。 |
+| `NormalizedInstalledSoftware` | 可安全进入 UI/审计判定的投影，包含名称、版本、发布者、大小、位置、来源和 warnings，但不含卸载命令。 |
+| `NormalizedInstalledSoftware.metadata_digest()` | 摘要规范化元数据；版本、发布者、位置等变化会使旧 Preview 失效。 |
+| `SoftwareInventory` | 一次有界采集的不可变 entries、时间、warnings 和 truncated 标记；不会缓存为执行依据。 |
+| `SoftwareTargetQuery` | 精确 identity digest，或 display name 加可选 publisher/version/scope/architecture 过滤器。 |
+| `SoftwareTargetQuery.require_selector()` | Pydantic 后校验；identity 与 name 都缺失时抛 `ValidationError`，防止无目标分析。 |
+| `ResolvedSoftwareTarget` | 精确 selected 或显式 ambiguous candidates；即使候选为零也保持未解析状态。 |
+| `ResolvedSoftwareTarget.validate_resolution()` | 拒绝 selected+ambiguous、无 selected 却未标 ambiguous 等矛盾状态。 |
+| `ParsedUninstallMetadata` | 命令解析的安全结构：摘要、exe 路径/存在性/绝对或 UNC、wrapper、已知 switches、参数数量和 warnings；不含完整参数。 |
+| `UninstallCapability` | 类型、support、证据、限制、可选安全解析投影及 identity/metadata bindings。 |
+| `UninstallCapability.canonical_digest()` | 摘要能力结论；解析、证据或限制变化使旧 Preview 无效。 |
+| `SoftwareSafetyAssessment` | 确定性安全分类、Preview 决策、证据与原因；不是执行权限。 |
+| `SoftwareSafetyAssessment.canonical_digest()` | 摘要完整策略结论，供 Preview/audit 比对。 |
+| `SoftwareImpactFinding` | 一条进程/启动项/服务相关线索，标记证据种类、严重度、说明和是否已知。 |
+| `SoftwareImpactAssessment` | 有界 findings、明确 unknowns、warnings 和采集时间；不声称完整依赖图。 |
+| `SoftwareImpactAssessment.canonical_digest()` | 摘要影响证据，使关联项改变可被发现。 |
+| `SoftwareUninstallAnalysisPlan` | 固定五工具 R0 计划，绑定目标、数量上限、零预计修改、NONE rollback、plan confirmation 和无 runtime confirmation。 |
+| `SoftwareUninstallAnalysisPlan.validate_zero_execution_contract()` | Pydantic 后校验；拒绝非 R0、可写、运行时确认、非 NONE、预计修改大于零或重复工具。 |
+| `SoftwareUninstallAnalysisPlan.canonical_digest()` | 摘要除生成时间外的全部授权字段；目标或工具链变化使确认失效。 |
+| `SoftwareUninstallPreview` | 最终安全投影：target、capability、policy、impact、所有 digests、TTL、`executable_in_current_stage=false`、`execution_performed=false` 和 stop reason。 |
+| `SoftwareUninstallPreview.enforce_zero_execution()` | Pydantic 后校验；拒绝任一执行标记、非 R0/NONE、过期顺序或内部 digest 不一致。 |
+| `SoftwareUninstallPreview.canonical_digest()` | 摘要完整 Preview，用于 acknowledgement 精确绑定。 |
+| `SoftwareTargetAcknowledgement` | 记录用户是否理解当前 target/Preview、绑定摘要和有效期；没有 tool arguments 或 capability token。 |
+| `SoftwareInventoryRequest/Result` | `max_items` 有界输入与安全 inventory 输出；结果固定 zero execution。 |
+| `SoftwareResolveRequest/Result` | 目标 query+上限输入，返回 resolution 和本次采集时间；不能自动选择 fuzzy 候选。 |
+| `SoftwareInspectRequest/Result` | 精确 identity digest 输入，返回当前 normalized 项和 found；缺失不伪造对象。 |
+| `SoftwareCapabilityRequest/Result` | identity+上限输入，返回与该身份绑定的 capability；不返回 raw command。 |
+| `SoftwarePreviewRequest/Result` | 不可变 plan+identity 输入，返回最终 Preview；没有 execute 选项。 |
+| `SoftwareAnalysisOutcome` | 分析终态：ambiguous resolution 或 exact resolution+Preview 二选一。 |
+| `SoftwareAnalysisOutcome.bind_preview_to_resolution()` | 后校验 exact/ambiguous 与 Preview 的组合，并核对 Preview target identity；矛盾时抛 `ValidationError`。 |
+
+### 异常 `domain.software_errors`
+
+| 类/方法 | 作用 |
+|---|---|
+| `SoftwareAnalysisErrorCode` | 稳定错误码，覆盖确认、审计、目标变化、解析、策略、能力、零执行和取消等安全停止原因。 |
+| `SoftwareAnalysisError.__init__(code, message)` | 创建带稳定 code 的 `RuntimeError`；message 可展示但不会触发 Shell、提权或执行退路。 |
+
+### 平台采集与命令元数据解析
+
+| 类/函数/方法 | 详细作用 |
+|---|---|
+| `PackageInventoryProvider.collect(max_items, cancellation)` | 可插拔结构化包来源协议；返回原始记录、warnings、truncated。实现不得通过通用 shell 枚举。 |
+| `SoftwareInventoryPlatform.collect_raw(max_items, cancellation)` | 平台采集协议；只读返回 bounded raw records，不做 normalization 或 execution。 |
+| `UnavailablePackageInventoryProvider.collect(...)` | 默认诚实适配器；返回空记录和“结构化包来源不可用”说明，不调用 winget/PowerShell 猜测。 |
+| `WindowsSoftwareInventoryPlatform.__init__(package_provider=None)` | 注入可选结构化包来源；缺省使用 unavailable provider，构造时不读注册表。 |
+| `WindowsSoftwareInventoryPlatform.collect_raw(max_items, cancellation)` | 顺序读取固定 HKCU/HKLM x64/x86 Uninstall 视图并合并包来源；检查取消/上限，单源失败变 warning，绝不读取 `Win32_Product` 或执行 uninstall string。 |
+| `WindowsSoftwareInventoryPlatform._collect_registry_view(...)` | 打开一个固定 hive/view 的卸载根键并逐子键查询 values；访问拒绝/格式错误安全跳过，原始来源 ID 绑定 hive/view/key。 |
+| `_registry_sources()` | 返回固定四个 hive/view/Win32 flag 组合；没有 caller-supplied registry path。 |
+| `_read_values(key)` | 查询当前卸载子键的允许值集合；只读，缺失值不报成执行错误。 |
+| `_text(value)` | 将 registry value 保守转换/trim 为非空字符串，否则 `None`。 |
+| `_optional_bool(value)` | 仅将明确 0/1 等证据转换为 bool，未知返回 `None`。 |
+| `_estimated_size(value)` | 将注册表 KiB 估算值转换为非负 bytes；非法/负值返回 `None`，避免伪精确。 |
+| `parse_windows_uninstall_metadata(command_line)` | 对不可信字符串进行最大 32,768 字符限制和结构解析；检查绝对/UNC、wrapper、`.exe`、存在性及有限 switches，返回 sanitized model，永不启动程序。 |
+| `_command_line_to_argv(command_line)` | Windows 使用 `CommandLineToArgvW` 获得 argv 并 `LocalFree`；非 Windows 仅为测试使用保守 `shlex` fallback；解析失败抛 `OSError` 供上层转 warning。 |
+
+### 归一化、解析、能力与影响编排
+
+| 类/函数/方法 | 详细作用 |
+|---|---|
+| `SoftwareInventorySnapshot` | 内部 dataclass，将 safe inventory 与 ephemeral `raw_by_identity` 配对；不得越过编排边界。 |
+| `SoftwareInventoryService.__init__(platform)` | 注入只读平台采集器，不进行 I/O。 |
+| `SoftwareInventoryService.collect(max_items, cancellation)` | 采集、Unicode/空白规范化、稳定 identity、保守去重并返回 snapshot；同 identity 不同 metadata 产生 conflict warning，不静默合并命令。 |
+| `SoftwareInventoryService.project_legacy(max_items, cancellation)` | 将新 inventory 映射为 Stage 3 `InstalledSoftware` 显示模型，保留 warning/truncated；不把 raw command 带回旧 API。 |
+| `normalize_raw_entry(raw)` | 将一条 raw record 规范化；缺失 display name 或必要锚点时返回 `None`，MSI ProductCode 仅接受严格 GUID。 |
+| `_clean(value)` | Unicode NFKC、trim 并把空字符串转换为 `None`；不解释内容为指令。 |
+| `SoftwareTargetResolver.__init__(inventory, max_candidates=100)` | 注入 fresh inventory service 并限制候选数量。 |
+| `SoftwareTargetResolver.refresh(max_items, cancellation)` | 每次决策重新采集 authoritative snapshot，不复用旧 UI 清单。 |
+| `SoftwareTargetResolver.resolve(query, max_items, cancellation)` | identity 精确匹配，或 exact name+filters 匹配；不唯一/无精确结果返回 bounded ambiguous candidates，substring 永不自动 selected。 |
+| `SoftwareTargetResolver.inspect(identity_digest, max_items, cancellation)` | fresh re-read 后仅在 digest 恰好唯一时返回 target，否则 `None`。 |
+| `SoftwareTargetResolver._filters(entries, query)` | 仅应用 caller 已给的 publisher/version/scope/architecture 精确过滤，不推断缺失字段。 |
+| `SoftwareTargetResolver._ambiguous(query, candidates, reason)` | 构造显式 ambiguous 结果并截断候选；不把唯一 substring 偷换成 exact。 |
+| `UninstallCapabilityResolver.resolve(software, raw)` | 先核对 raw source anchor，再分类 MSI/vendor/package/MSIX/portable/feature/driver/unknown；MSI 与结构化包必须有一致精确 ID，vendor 只调用安全 parser。 |
+| `UninstallCapabilityResolver._identity_digest_for(software)` | 返回 normalized identity digest，统一绑定 capability。 |
+| `_unsupported(reason)` | 构造 UNKNOWN/UNSUPPORTED capability 和固定原因，不猜测执行方式。 |
+| `SoftwareImpactAnalyzer.__init__(platform, max_items=5000)` | 注入 Stage 3 只读诊断平台和有界采集上限。 |
+| `SoftwareImpactAnalyzer.analyze(software, cancellation)` | 读取进程/启动项/服务并按安装路径做 known correlation、按规范名称做 heuristic correlation；失败变 warning/unknown，不修改对象。 |
+| `software_impact_analyzer._canonical(path)` | resolve(strict=False)+normcase，用于本地比较；不访问目标内容。 |
+| `software_impact_analyzer._is_within(path, root)` | 用 `relative_to` 判断路径包含关系，异常返回 false。 |
+
+### 策略、Preview、独立校验与零执行守卫
+
+| 类/函数/方法 | 详细作用 |
+|---|---|
+| `SoftwareUninstallSafetyPolicy.__init__(agent_root, windows_directory=None)` | 规范化 Agent/Windows 根用于保护判断；缺省 Windows 根来自环境的系统目录。 |
+| `SoftwareUninstallSafetyPolicy.assess(software)` | 固定顺序判定 Windows/driver/Agent/system/security/unknown、high-impact、developer 或 user app；只返回 Preview decision，永不授权卸载。 |
+| `_assessment(class, decision, evidence, reasons)` | 构造不可变策略结论，避免各分支遗漏解释。 |
+| `_contains(value, terms)` | 大小写规范化文本的有限关键词包含判断；仅作为显式策略证据。 |
+| `software_uninstall_policy._canonical(path)` | 对策略根/安装位置规范化用于边界比较。 |
+| `software_uninstall_policy._is_within(path, root)` | 安装位置是否位于保护根；ValueError 时 false。 |
+| `SoftwareUninstallPreviewEngine.__init__(policy, capability, impact, ttl_seconds)` | 注入三类确定性分析器和短时 TTL；不持有执行器。 |
+| `SoftwareUninstallPreviewEngine.build(plan, software, raw, cancellation)` | fresh 计算 capability/policy/impact，绑定所有摘要和 expiry，生成强制 stop 的 zero-execution Preview。 |
+| `SoftwareSafetyIssue` / `SoftwareSafetyReview` | 独立校验问题与 approved 聚合结果；不自动修复计划。 |
+| `SoftwareUninstallSafetyValidator.__init__(registry, guard)` | 注入专用 registry 与零执行 guard。 |
+| `SoftwareUninstallSafetyValidator.review_plan(plan)` | 验证 exact tool set、R0/read-only/NONE/zero changes，并用各 manifest schema 验证结构化参数；异常转为 issue，fail closed。 |
+| `SoftwareUninstallSafetyValidator.review_preview(plan, preview)` | 核对 plan、identity、capability 摘要、R0、zero-execution 与 stop reason；任一问题使 approved=false。 |
+| `SoftwareZeroExecutionGuard.validate_registry(registry)` | 要求 registry names 精确等于五工具集合，且每个 manifest 为 R0/read-only/NONE/no runtime confirmation；多一个或少一个都抛 `SoftwareAnalysisError`。 |
+| `SoftwareZeroExecutionGuard.validate_result(result)` | 要求任何工具结果显式 `execution_performed is False`；缺失或 true 时抛零执行违规。 |
+
+### 五个注册工具 `tools.system_tools.software_analysis`
+
+| 函数/类方法 | 详细作用 |
+|---|---|
+| `_manifest(name, description, input_model, output_model)` | 创建统一 R0/read-only/cancellable/NONE/no-runtime-confirmation manifest，固定 Windows 平台、上限、前后置条件和审计字段。 |
+| `SoftwareInventoryTool.__init__(inventory)` | 注入 inventory service 并创建 `software.inventory` manifest。 |
+| `SoftwareInventoryTool.manifest` | 返回不可变 manifest，无 I/O。 |
+| `SoftwareInventoryTool.execute(request, cancellation)` | 强类型检查 `SoftwareInventoryRequest`，执行 bounded collect 并只返回 safe inventory。 |
+| `SoftwareResolveTool.__init__(resolver)` / `.manifest` | 注入 resolver并暴露 `software.resolve` 的只读 manifest。 |
+| `SoftwareResolveTool.execute(request, cancellation)` | fresh resolve validated query，返回显式 resolution 与采集时间。 |
+| `SoftwareInspectTool.__init__(resolver)` / `.manifest` | 构建 `software.inspect` exact re-read 工具。 |
+| `SoftwareInspectTool.execute(request, cancellation)` | fresh inspect identity；返回 found/None，不把消失目标当成功。 |
+| `SoftwareUninstallCapabilityTool.__init__(resolver, capability)` / `.manifest` | 注入 fresh resolver 与本地 capability analyzer，构建第四个工具。 |
+| `SoftwareUninstallCapabilityTool.execute(request, cancellation)` | fresh inspect，要求 matching raw evidence，随后只分析 metadata；目标/raw 消失抛 `TARGET_CHANGED`。 |
+| `SoftwareUninstallPreviewTool.__init__(resolver, preview_engine)` / `.manifest` | 注入 fresh resolver 与 non-executable Preview engine，构建第五个工具。 |
+| `SoftwareUninstallPreviewTool.execute(request, cancellation)` | 再次读取 exact target/raw，随后生成 Preview；证据变化 fail closed，没有卸载分支。 |
+
+### 计划编排、确认与审计
+
+| 类/函数/方法 | 详细作用 |
+|---|---|
+| `is_software_uninstall_analysis_request(user_goal)` | 本地有限关键词识别“卸载/移除软件影响分析”意图；只负责 UI 路由，不调用模型或工具。 |
+| `extract_software_target_name(user_goal)` | 从受支持的自然语言前缀中提取候选显示名；提取失败返回 `None`，不扩大范围。 |
+| `SoftwareUninstallAnalysisPlanCompiler.__init__(max_items=5000)` | 保存有界 inventory 上限。 |
+| `SoftwareUninstallAnalysisPlanCompiler.compile(user_goal, query)` | 创建固定 exact five-tool R0 plan；不接受 caller 提供任意工具名。 |
+| `SoftwareUninstallAnalysisService.__init__(...)` | 注入 compiler、registry、validator、guard、confirmation 和 audit；构造时不采集软件。 |
+| `SoftwareUninstallAnalysisService.prepare(user_goal, query=None)` | 本地提取或验证 query、编译计划、独立 review 并审计；不 approved 时抛安全错误。 |
+| `.request_plan_confirmation(plan)` | 创建绑定 plan ID/digest/工具参数摘要/expiry 的计划确认并审计。 |
+| `.resolve_plan_confirmation(id, approved, plan)` | 消费一次确认；拒绝、过期、重放或 digest 变化 fail closed 并审计。 |
+| `.analyze(plan, cancellation=None)` | 要求计划已批准，按五工具顺序执行并逐结果过 zero guard；ambiguous 返回候选，exact 时比较 fresh metadata/capability、校验 Preview 并停止。 |
+| `.request_target_acknowledgement(plan, preview)` | 为当前 validated Preview 创建短时 acknowledgement；不创建 `ExecutionAuthorization`。 |
+| `.resolve_target_acknowledgement(id, acknowledged, plan, preview)` | 核对全部绑定并记录 acknowledged/rejected/expired；无论结果都结束流程。 |
+| `._execute_inventory/._execute_resolve/._execute_inspect/._execute_capability/._execute_preview` | 五个内部 typed wrapper：只通过 registry 执行、收窄返回类型并立即验证 zero execution；类型异常 fail closed。 |
+| `SoftwareAnalysisConfirmationService.__init__(ttl_seconds=...)` | 创建进程内的一次性确认/ack 存储；无持久执行权限。 |
+| `.request_plan(plan)` | 生成 plan-bound `ConfirmationRequest`，绑定规范摘要、工具/对象说明与 expiry。 |
+| `.resolve_plan(id, approved, plan)` | 验证 ID、未消费、未过期和 plan digest；返回 resolved confirmation。 |
+| `.require_plan_approved(plan)` | 分析前要求当前 plan 已有匹配 approved 状态，否则抛确认错误。 |
+| `.request_acknowledgement(plan, preview)` | 创建 Preview-bound target acknowledgement，明确用途仅为理解目标。 |
+| `.resolve_acknowledgement(id, acknowledged, plan, preview)` | 检查 plan/Preview/digests/expiry 并一次性终结；不转换为工具授权。 |
+| `SoftwareUninstallAnalysisAuditLogger.__init__(repository, app_version, git_commit)` | 注入 SQLite repository 和版本信息；不保存 raw source。 |
+| `.plan_reviewed(...)` | 记录 goal/plan 摘要、validator decision 和 zero changes。 |
+| `.plan_confirmation(...)` | 记录 confirmation ID、绑定摘要和批准/拒绝，不存用户输入正文以外的敏感 metadata。 |
+| `.inventory_completed(...)` | 仅记录数量、warnings/truncated 和 zero execution。 |
+| `.target_resolved(...)` | 记录 query 摘要、selected identity digest 或候选数量，不记录 registry key/command。 |
+| `.previewed(...)` | 记录 identity/metadata/capability/Preview digests、安全分类、影响计数和 stop。 |
+| `.acknowledgement_resolved(...)` | 记录 acknowledgement 终态及绑定摘要，明确 authority=false。 |
+| `.failed(...)` | 记录稳定 error code、阶段和脱敏消息；仍声明 execution=false。 |
+
+### 运行时与 Qt UI
+
+| 类/函数/方法 | 详细作用 |
+|---|---|
+| `SoftwareAnalysisServices` | runtime dependency bundle：专用 registry、inventory、resolver 和 orchestration service；不包含 uninstaller。 |
+| `ApplicationRuntime.create_software_analysis_services()` | 组装 Windows只读采集、五工具专用 registry、策略/影响/Preview、validator、confirmation 和 audit；立即运行 exact allow-list guard。 |
+| `SoftwareWorkerSignals` | Qt `completed/failed` 信号容器；跨线程只传 object/string。 |
+| `PreparedSoftwareAnalysis` | worker 返回的强类型 plan+review，不表示 confirmed。 |
+| `SoftwarePrepareWorker.__init__(services, goal, query)` | 保存依赖与输入，不在 UI 线程采集。 |
+| `SoftwarePrepareWorker.run()` | 后台调用 `prepare`，成功发 typed prepared，异常只发失败消息。 |
+| `SoftwareAnalyzeWorker.__init__(services, plan)` | 保存 immutable plan 和 cooperative token。 |
+| `SoftwareAnalyzeWorker.run()` | 后台调用 `analyze`；不会创建 execution worker。 |
+| `SoftwareAnalyzeWorker.cancel()` | 设置 cooperative cancellation，阻止后续只读步骤。 |
+| `require_prepared_software_analysis(value)` | 收窄 Qt object signal；错误类型抛 `TypeError`。 |
+| `require_software_analysis_outcome(value)` | 只接受 `SoftwareAnalysisOutcome`，避免 UI 把任意对象当成功。 |
+| `SoftwareAnalysisDialog.__init__(runtime, user_goal, query=None, parent=None)` | 创建非模态分析对话框、状态和 controls，然后开始只读 prepare；没有 execute 控件。 |
+| `._build_ui()` | 构造计划、候选、Preview、确认/取消控件；默认按钮不授权卸载。 |
+| `._start_prepare(query)` | 使旧 plan/ack 失效并在线程池启动 prepare worker。 |
+| `._prepared(value)` / `._show_plan(prepared)` | 强类型接收并显示目标、工具、R0、零修改和 NONE rollback。 |
+| `._primary_clicked()` | 按当前有限 UI state 分派计划确认或 target acknowledgement；无 execute state。 |
+| `._approve_plan_and_analyze()` | 解析一次计划确认后启动 read-only analyze worker。 |
+| `._analyzed(value)` | 显示 ambiguous candidates 或 final Preview；不会自动选择候选。 |
+| `._show_candidates(resolution)` | 将 safe candidate 字段写表格和 UserRole identity；提示需重新计划。 |
+| `._select_candidate()` | 读取单个显式选择的 identity digest 并调用 `_start_prepare`，旧确认失效。 |
+| `._show_preview(preview)` / `_preview_html(preview)` | 显示安全字段、能力/影响/unknowns 和 stop reason；HTML escape 不可信文本，不显示 raw command。 |
+| `._acknowledge_and_stop()` | 解析 target acknowledgement，显示“未执行”，随后关闭或停留终态。 |
+| `._cancel_clicked()` | 取消 worker 或根据 state 记录拒绝；不强杀线程。 |
+| `._reject_plan_and_close()` / `._reject_acknowledgement_and_close()` | 以 rejected 终态消费当前请求并关闭，不留下权限。 |
+| `._failed(message)` | 清理 busy 状态并显示安全停止，不把错误当 Preview。 |
+| `._set_busy(text)` | 仅调整 UI enabled/progress 文本。 |
+| `.shutdown()` / `.closeEvent(event)` | 请求 cooperative cancellation 并从 runtime 集合清理；关闭不启动后台操作。 |
+| `SystemDiagnosticsTab._software_selection_changed()` | 仅在恰好一个可解析软件行被选中时启用分析按钮。 |
+| `SystemDiagnosticsTab._open_selected_software_analysis()` | 从 safe table projection 构建目标并打开 Stage 4D1 dialog，不直接调用工具。 |
+| `SystemDiagnosticsTab.open_software_analysis(user_goal, query=None)` | 创建非模态 dialog、保留生命周期引用并在 finished 后移除。 |
+| `SystemDiagnosticsTab._selected_software_query()` | 从名称/版本/发布者/scope/architecture 五列构造 exact-field query；列缺失或枚举非法返回 `None`。 |
+| `MainWindow._handle_chat()` 的 Stage 4D1 分支 | 在进程/服务/通用诊断路由前识别卸载分析意图并打开 dialog；不会将自然语言变成命令。 |
+
 ## Stage 4C2 Windows 服务启动类型安全管理 API
 
 本节覆盖 Stage 4C2 新增或因稳定身份拆分而修改的每个生产函数和方法。所有写入均为单个

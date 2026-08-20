@@ -42,6 +42,9 @@ from pc_manager_agent.orchestration.service_action_planner import (
     service_action_intent,
     service_target_query,
 )
+from pc_manager_agent.orchestration.software_uninstall_analysis import (
+    is_software_uninstall_analysis_request,
+)
 from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnostic_request
 from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
@@ -68,7 +71,7 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
         self._last_service_reference: tuple[str, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 4C2 服务启动类型安全管理")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 4D1 软件卸载只读分析")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -95,11 +98,12 @@ class MainWindow(QMainWindow):
         self._conversation.setPlainText(
             "Agent：当前支持阶段 1 只读分析、Stage 2A 安全移动/重命名/回滚，"
             "Stage 2B 双确认回收站、Stage 3 只读系统诊断和 Stage 4A 受控进程关闭。\n"
+            "Stage 4D1 可以分析软件卸载身份和影响，但没有任何卸载执行能力。\n"
             "聊天不会直接执行系统操作；所有写操作都要经过真实 Preview 和明确确认。"
         )
         input_row = QHBoxLayout()
         self._chat_input = QLineEdit()
-        self._chat_input.setPlaceholderText("输入文件分析、系统诊断或明确的进程关闭目标")
+        self._chat_input.setPlaceholderText("输入文件分析、系统诊断或一个明确的软件卸载分析目标")
         send_button = QPushButton("发送")
         send_button.clicked.connect(self._handle_chat)
         self._chat_input.returnPressed.connect(self._handle_chat)
@@ -248,6 +252,9 @@ class MainWindow(QMainWindow):
                 "强制终止必须是全新流程。"
             )
         )
+        layout.addWidget(
+            QLabel("Stage 4D1 只分析软件身份、卸载元数据和影响；理解确认后 STOP，不会运行卸载器。")
+        )
         layout.addWidget(QLabel("不覆盖、不跨卷、不永久删除、不修改服务/启动项/注册表。"))
         layout.addStretch(1)
         self._tabs.addTab(page, "设置")
@@ -259,6 +266,14 @@ class MainWindow(QMainWindow):
             return
         self._conversation.append(f"你：{text}")
         self._chat_input.clear()
+        if is_software_uninstall_analysis_request(text):
+            self._tabs.setCurrentWidget(self._system_diagnostics_tab)
+            self._conversation.append(
+                "Agent：已将卸载请求降级为 Stage 4D1 只读分析。将刷新软件身份、"
+                "分析可能的机制和影响，并在你确认理解目标后 STOP；不会运行卸载器。"
+            )
+            self._system_diagnostics_tab.open_software_analysis(text)
+            return
         service_intent_value = service_action_intent(text)
         if service_intent_value is not None:
             self._tabs.setCurrentWidget(self._service_management_tab)
