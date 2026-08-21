@@ -43,7 +43,7 @@ def test_agent_install_location_is_always_blocked() -> None:
         ("Example VPN Client", SoftwareSafetyDecision.PREVIEW_HIGH_IMPACT),
         ("Postgres Database", SoftwareSafetyDecision.PREVIEW_HIGH_IMPACT),
         ("Docker Desktop", SoftwareSafetyDecision.PREVIEW_HIGH_IMPACT),
-        ("Visual C++ Runtime", SoftwareSafetyDecision.PREVIEW_HIGH_IMPACT),
+        ("Visual C++ Runtime", SoftwareSafetyDecision.BLOCKED),
         ("NVIDIA Control Utility", SoftwareSafetyDecision.PREVIEW_HIGH_IMPACT),
         ("Visual Studio IDE", SoftwareSafetyDecision.PREVIEW_ALLOWED),
     ),

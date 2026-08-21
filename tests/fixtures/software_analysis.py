@@ -79,6 +79,7 @@ def msi_entry(
     publisher: str = "Example Publisher",
     product_code: str = "{12345678-1234-1234-1234-1234567890AB}",
     architecture: SoftwareArchitecture = SoftwareArchitecture.X64,
+    install_location: Path = Path("C:/Apps"),
 ) -> RawInstalledSoftwareEntry:
     key = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{product_code}"
     return RawInstalledSoftwareEntry(
@@ -87,7 +88,7 @@ def msi_entry(
         display_name=name,
         display_version=version,
         publisher=publisher,
-        install_location=Path("C:/Apps"),
+        install_location=install_location,
         install_date="20260801",
         estimated_size_bytes=1024,
         scope=SoftwareScope.CURRENT_USER,

@@ -15,13 +15,17 @@ from pc_manager_agent.domain.software_uninstall_analysis import (
 
 _DEVELOPER_RUNTIME = (
     "runtime",
-    "redistributable",
-    "visual c++",
     ".net",
     "jdk",
     "jre",
     "python",
     "node.js",
+)
+_SHARED_RUNTIME = (
+    "redistributable",
+    "visual c++",
+    "visual c plus plus",
+    "shared runtime",
 )
 _DEVELOPER_TOOL = ("visual studio", "jetbrains", "git", "sdk", "compiler", "ide")
 _DATABASE = ("sql server", "postgres", "mysql", "mariadb", "mongodb", "oracle database")
@@ -146,11 +150,18 @@ class SoftwareUninstallSafetyPolicy:
                 ("Background platform or virtualization identity was detected.",),
                 ("Other applications may rely on this platform.",),
             )
+        if _contains(combined, _SHARED_RUNTIME):
+            return _assessment(
+                SoftwareSafetyClass.SHARED_RUNTIME,
+                SoftwareSafetyDecision.BLOCKED,
+                ("Shared or redistributable runtime identity was detected.",),
+                ("Shared runtimes are protected from generic uninstall workflows.",),
+            )
         if _contains(combined, _DEVELOPER_RUNTIME):
             return _assessment(
                 SoftwareSafetyClass.DEVELOPER_RUNTIME,
                 SoftwareSafetyDecision.PREVIEW_HIGH_IMPACT,
-                ("Developer runtime or redistributable identity was detected.",),
+                ("Developer runtime identity was detected.",),
                 ("Multiple tools may share this runtime.",),
             )
         if _contains(combined, _HARDWARE):

@@ -1,0 +1,48 @@
+"""Bounded non-deleting residual observation for Stage 4D2A."""
+
+from __future__ import annotations
+
+import os
+import stat
+from pathlib import Path
+
+from pc_manager_agent.domain.software_uninstall_execution import MsiResidualReport
+
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
+
+
+class SoftwareResidualAnalyzer:
+    """Inspect only the exact pre-known install location and never enumerate or delete it."""
+
+    def analyze(self, install_location: Path | None) -> MsiResidualReport:
+        """Return a one-path existence observation with explicit unknowns."""
+        if install_location is None:
+            return MsiResidualReport(
+                checked_location=False,
+                warnings=("No exact install location was available; residual state is unknown.",),
+            )
+        try:
+            observed = os.lstat(install_location)
+        except FileNotFoundError:
+            return MsiResidualReport(
+                checked_location=True,
+                install_location_present=False,
+                reparse_or_symlink=False,
+            )
+        except OSError as exc:
+            return MsiResidualReport(
+                checked_location=True,
+                warnings=(f"Install-location check failed: {type(exc).__name__}.",),
+            )
+        attributes = getattr(observed, "st_file_attributes", 0)
+        redirected = stat.S_ISLNK(observed.st_mode) or bool(
+            attributes & _FILE_ATTRIBUTE_REPARSE_POINT
+        )
+        return MsiResidualReport(
+            checked_location=True,
+            install_location_present=True,
+            reparse_or_symlink=redirected,
+            warnings=("The known install location is redirected and was not followed.",)
+            if redirected
+            else (),
+        )

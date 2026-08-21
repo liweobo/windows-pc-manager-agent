@@ -48,6 +48,9 @@ class AppSettings(BaseModel):
     startup_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
     service_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
     service_action_timeout_seconds: float = Field(default=30.0, ge=5.0, le=120.0)
+    msi_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
+    msi_monitor_poll_seconds: float = Field(default=0.25, ge=0.05, le=5.0)
+    msi_long_running_seconds: float = Field(default=900.0, ge=30.0, le=7_200.0)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -131,6 +134,11 @@ class AppSettings(BaseModel):
             "service_action_timeout_seconds": os.getenv(
                 "PC_MANAGER_SERVICE_ACTION_TIMEOUT_SECONDS", "30"
             ),
+            "msi_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_MSI_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
+            "msi_monitor_poll_seconds": os.getenv("PC_MANAGER_MSI_MONITOR_POLL_SECONDS", "0.25"),
+            "msi_long_running_seconds": os.getenv("PC_MANAGER_MSI_LONG_RUNNING_SECONDS", "900"),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
         if data_directory:
