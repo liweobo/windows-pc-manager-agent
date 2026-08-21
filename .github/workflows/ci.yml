@@ -60,6 +60,10 @@ jobs:
           tests/unit/test_software_boundary_branches.py
           tests/unit/test_software_confirmation.py
           tests/unit/test_software_policy_and_impact.py
+          tests/unit/test_msi_uninstall_safety_branches.py
+          tests/unit/test_vendor_uninstall_metadata_and_policy.py
+          tests/unit/test_vendor_uninstall_safety_gates.py
+          tests/unit/test_vendor_uninstall_confirmation.py
           tests/integration/test_file_operations_flow.py
           tests/integration/test_operation_transactions.py
           tests/integration/test_trash_flow.py
