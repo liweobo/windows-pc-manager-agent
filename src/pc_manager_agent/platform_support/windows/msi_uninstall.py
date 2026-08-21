@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+
 # This module permits subprocess only for the fixed system MSI executable and argument schema.
 import subprocess  # nosec B404
 import time
