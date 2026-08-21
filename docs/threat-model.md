@@ -1,5 +1,27 @@
 # Threat model
 
+## Stage 4D2B additions
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Malicious `UninstallString` injects CMD, PowerShell, script or chained command | Raw metadata is parse-only; direct local `.exe` and finite argv policy; exact array with `shell=False`; wrappers/loaders/scripts block | A trusted vendor executable can still contain vendor defects or malicious behavior |
+| PATH/working-directory/network hijack substitutes another executable | Literal absolute drive path, no expansion/PATH search/UNC/device path, explicit executable and cwd, fixed-volume/reparse checks | A same-user attacker may still race after the final check; immediate hash/metadata recheck narrows the window |
+| File is replaced after Preview | Volume/File ID, size, times and SHA-256 bind identity; runtime re-inspection and adapter-boundary recheck invalidate approval | Windows lacks an atomic “verify signature/hash then execute this exact open handle” abstraction in this implementation |
+| Signed unrelated executable is accepted | Valid offline Authenticode is necessary but not sufficient; conservative Publisher match and install-location relation are also mandatory | Publisher metadata and certificate organizations may legitimately differ, causing safe false negatives |
+| Quiet flags delete data or hide choices | QuietUninstallString and quiet/passive/restart/data/path/response switches are unsupported; tokens are never rewritten | Vendor UI may still offer destructive choices that the user must evaluate personally |
+| LLM or UI changes arguments | No public argument input exists; exact parsed tuple and fingerprint bind plan/Preview/confirmation/guard | Malicious same-user registry metadata remains untrusted input and therefore often blocks |
+| Protected software has a trusted uninstaller | Stage 4D1 class policy precedes executable trust; driver/security/Windows/shared/enterprise/Agent/unknown classes block | Complete dependency knowledge is unavailable even for allowed developer software, hence R2_HIGH_IMPACT |
+| Uninstall silently kills apps or stops services through Agent capabilities | Vendor preflight graph has read-only diagnostics only; no process/service executor is injected or auto-confirmed | The vendor executable itself may request or perform lifecycle changes under the user's own interaction |
+| Child environment leaks API keys/tokens | Child receives only a small Windows runtime allow-list; secret-like and non-allow-listed variables, including PATH, are dropped | A vendor process can read other data already accessible to the same Windows user |
+| UAC is actively bypassed or requested by the Agent | No runas/ShellExecute elevation; machine-wide scope blocks; CreateProcess elevation-required becomes evidence only | A vendor executable manifest may cause Windows to return an elevation-required failure; current stage does not elevate |
+| Parent exits while bootstrapper child remains | Descendants are observed; final process result waits while a known child is alive | Rapid reparenting or process identity reuse can make best-effort observation incomplete |
+| Stop-monitoring is mistaken for cancellation | UI and transaction say monitoring stopped; no terminate/kill call exists and final verification is deferred | Uninstaller may continue outside Agent observation |
+| Exit code 0 is reported as success | Fresh exact Installed Software inventory is authoritative; present/replacement/partial evidence remains failed or unverified | Registry update can be delayed or unavailable, requiring a later manual refresh |
+| Residual cleanup follows a junction or deletes user data | Exact known-location `lstat` only; no enumeration, follow, registry cleanup or delete API | Report cannot identify every residual and intentionally cannot reclaim space |
+| Crash causes duplicate execution | Active dispatch/monitoring becomes `INTERRUPTED`, approvals expire, and no transition redispatches | Vendor UI/process may still be running and requires manual observation |
+| MSI and Vendor flows overlap | Both durable repositories inspect the other's active table before reservation | External uninstallers outside the Agent are not globally serialized |
+| Audit/persistence failure hides a launch | Durable record and mandatory pre-start audit are required; failure aborts before adapter | Post-launch storage failure may lose final details, so the action is never automatically retried |
+
 ## Stage 4D2A additions
 
 | Threat | Control | Residual risk |

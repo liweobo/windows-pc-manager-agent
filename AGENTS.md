@@ -104,6 +104,31 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4D2B retains Stage 4D2A and adds exactly one independent write tool:
+`software.uninstall.vendor`. It accepts only an internally built `ValidatedVendorUninstallAction`
+for one exact high-confidence current-user Vendor entry. Raw `UninstallString` and
+`QuietUninstallString` are untrusted local metadata and must never be executed, logged, sent to a
+model or stored as an executable command. Parsing uses Windows command-line semantics only; the LLM,
+UI and user cannot supply or modify executable arguments.
+
+Execution requires a literal absolute local `.exe`, no PATH search/expansion/UNC/device/reparse or
+blocked writable location, stable Windows file identity and SHA-256, valid offline Authenticode,
+conservative signer/Publisher match, an exact install-location relationship and the finite
+interactive argument policy. CMD, PowerShell/pwsh, script hosts, Rundll32, loaders, scripts, quiet
+flags, response files, path/data/restart/nested-execution arguments, machine-wide software and every
+protected/unknown software class are blocked. The adapter must use the exact validated argv,
+explicit executable and cwd, sanitized child environment, DEVNULL standard streams and
+`shell=False`; never add `runas`, ShellExecute elevation or a fallback.
+
+The plan and immediate confirmations bind all software, capability, executable, file, hash,
+signature, Publisher, argument, safety, preflight and risk digests; they are durable, expiring and
+single-use. Only one MSI-or-Vendor transaction may be active. Related processes are warnings and
+running related services block, but the Agent never terminates/stops either. Vendor UI remains under
+user control. Stopping monitoring never kills the uninstaller; long-running work remains active,
+restart marks it `INTERRUPTED`, and no path redispatches automatically. Process exit is not success:
+fresh installed-software inventory decides verification. Residual inspection is exact-path `lstat`
+only, with no enumeration or deletion. Rollback is NONE and reinstall guidance is not Undo.
+
 Stage 4D2A retains Stage 4D1 analysis and adds exactly one write tool:
 `software.uninstall.msi`. It accepts only an internally built `ValidatedMsiProduct` for one exact,
 high-confidence, current-user unmanaged MSI. Before execution it must repeat inventory resolution,

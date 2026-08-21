@@ -1,5 +1,48 @@
 # Security model
 
+## Stage 4D2B Vendor uninstaller controls
+
+- Exactly one Vendor write tool exists: `software.uninstall.vendor`, R2 manifest, batch size 1,
+  rollback `NONE`. MSI and Vendor repositories mutually exclude all active uninstall transactions.
+- Raw `UninstallString` and `QuietUninstallString` are untrusted local data. Only the interactive
+  value may be parsed; neither raw value enters a command runner, model payload, Preview, audit or
+  durable transaction. Quiet execution is unsupported.
+- The parser uses `CommandLineToArgvW`, preserves exact tokens and rejects malformed/oversized
+  metadata. Executable resolution accepts only a literal absolute drive path and never searches
+  PATH, expands environment/home variables or accepts UNC/device/traversal forms.
+- Only direct `.exe` files may continue. CMD, PowerShell/pwsh, WScript/CScript, MSHTA, Rundll32,
+  Regsvr32, scripts, reparse paths, non-fixed volumes and temp/download/cache locations are blocked.
+- Trust is cumulative: stable Windows file identity and metadata, bounded SHA-256, exact known
+  install-location containment, valid offline Authenticode and conservative Publisher/signer match
+  must all pass. A signed file or Program Files location alone never grants trust.
+- The finite argument policy allows no arguments or one recognized interactive uninstall verb. It
+  rejects quiet/restart/data/path/response/nested/script/shell-like/unknown forms without deleting or
+  rewriting tokens. The LLM, UI and user have no argument field.
+- Stage 4D1 software safety remains prior to mechanism trust. Current-user ordinary applications are
+  R2; developer tools/runtimes are R2_HIGH_IMPACT. Shared runtimes, databases/background platforms,
+  drivers/hardware, Windows/security/network/Agent/enterprise/package/unknown classes and
+  machine-wide scope are blocked.
+- Plan and runtime confirmations bind all software, capability, source, executable, file/hash,
+  signature, publisher, argument, policy, preflight and risk digests. Both are durable, expiring,
+  parent-linked, single-use and consumed atomically.
+- Preflight is read-only. Related processes produce visible warnings; running related services or
+  incomplete probes block. No Stage 4A/4C executor is injected, so uninstall confirmation cannot
+  terminate a process or stop a service.
+- The Windows adapter uses exact `[absolute_executable, *validated_arguments]`, explicit executable
+  and safe cwd, DEVNULL streams, close-on-exec, a small allow-listed environment and `shell=False`.
+  It has no runas/ShellExecute/PowerShell/CMD/elevation fallback and never retries or reboots.
+- Stopping monitoring or reaching the long-running threshold never terminates the direct process or
+  descendants. The transaction remains active; restart marks it `INTERRUPTED` and expires approval.
+- Process exit is not uninstall success. Fresh normalized inventory decides verification; partial or
+  contradictory evidence remains unverified. Residual analysis performs one `lstat`, never
+  enumerates, follows or deletes the path.
+- Mandatory transaction or pre-start audit failure aborts before launch. Ordinary audit stores only
+  digests/categories/counts and never raw commands, arguments, executable paths, environment values
+  or document content.
+
+Rollback is `NONE`. Reinstall is manual recovery guidance and cannot promise to restore settings,
+licenses, plugins, local databases or user data.
+
 ## Stage 4D2A MSI uninstall controls
 
 - Exactly one write tool exists: `software.uninstall.msi`, R2, batch size 1, rollback `NONE`.

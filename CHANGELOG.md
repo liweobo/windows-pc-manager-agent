@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — Stage 4D2B
+
+### Added
+
+- Strict parsing of untrusted interactive Vendor metadata into a separate executable token and
+  exact argv vector using Windows command-line semantics; raw `UninstallString` remains ephemeral.
+- `VendorUninstallerIdentity` binding absolute local path, Windows file identity, metadata,
+  SHA-256, offline Authenticode evidence, conservative Publisher match, registry source and exact
+  argument-policy fingerprint.
+- Default-deny execution policy, read-only process/service preflight, expiring Preview, durable
+  two-tier confirmations, replay protection and MSI/Vendor cross-mechanism transaction exclusion.
+- Sole `software.uninstall.vendor` tool and shell-free Windows adapter with explicit executable/cwd,
+  minimized secret-free environment, child-process observation and truthful stop-monitoring state.
+- Fresh post-process inventory verification, report-only exact-location residual analysis,
+  privacy-minimized audit, crash interruption handling and deterministic MSI/Vendor UI routing.
+- Synthetic parser, policy, adapter, verification, persistence, security, integration and GUI tests,
+  plus a dedicated Stage 4D2B Windows CI coverage gate. No test launches a real uninstaller.
+
+### Security
+
+- Block CMD/PowerShell/pwsh/script-host/Rundll32 wrappers, scripts, UNC/device/relative/PATH-resolved
+  targets, temporary/download/cache locations, QuietUninstallString and unsafe/unknown arguments.
+- Require current-user scope, complete stable identity, valid offline signature, conservative signer
+  match, approved install-location relation, two fresh confirmations and mandatory pre-start audit.
+- Never auto-elevate, terminate related processes, stop services, control Vendor UI, force-kill,
+  reboot, retry, delete program/user/residual data, or treat process exit as verified removal.
+
 ## Unreleased — Stage 4D2A
 
 ### Added

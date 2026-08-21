@@ -60,6 +60,10 @@ jobs:
           tests/unit/test_software_boundary_branches.py
           tests/unit/test_software_confirmation.py
           tests/unit/test_software_policy_and_impact.py
+          tests/unit/test_msi_uninstall_safety_branches.py
+          tests/unit/test_vendor_uninstall_metadata_and_policy.py
+          tests/unit/test_vendor_uninstall_safety_gates.py
+          tests/unit/test_vendor_uninstall_confirmation.py
           tests/integration/test_file_operations_flow.py
           tests/integration/test_operation_transactions.py
           tests/integration/test_trash_flow.py
@@ -119,6 +123,33 @@ jobs:
           --cov=pc_manager_agent.confirmation.software_uninstall_execution
           --cov=pc_manager_agent.platform_support.windows.msi_uninstall
           --cov=pc_manager_agent.orchestration.software_uninstall_verifier
+          --cov-report=term-missing --cov-fail-under=85 -q
+      - name: Stage 4D2B synthetic Vendor uninstall boundary
+        if: matrix.python-version == '3.13'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          uv run pytest tests/unit/test_vendor_uninstall_metadata_and_policy.py
+          tests/unit/test_vendor_uninstall_safety_gates.py
+          tests/unit/test_vendor_uninstall_confirmation.py
+          tests/unit/test_vendor_uninstall_adapter.py
+          tests/unit/test_vendor_uninstall_verifier.py
+          tests/unit/test_software_uninstall_router.py
+          tests/integration/test_vendor_uninstall_workflow.py
+          tests/security/test_vendor_uninstall_security.py
+          tests/gui/test_vendor_uninstall_dialog.py
+          --cov=pc_manager_agent.domain.vendor_uninstall
+          --cov=pc_manager_agent.orchestration.vendor_uninstall_metadata
+          --cov=pc_manager_agent.safety.vendor_argument_policy
+          --cov=pc_manager_agent.safety.vendor_executable_trust
+          --cov=pc_manager_agent.safety.vendor_uninstall_policy
+          --cov=pc_manager_agent.safety.vendor_uninstall_preview
+          --cov=pc_manager_agent.safety.vendor_uninstall_validator
+          --cov=pc_manager_agent.confirmation.vendor_uninstall
+          --cov=pc_manager_agent.persistence.vendor_uninstall
+          --cov=pc_manager_agent.platform_support.windows.vendor_uninstall
+          --cov=pc_manager_agent.orchestration.vendor_uninstall_execution
+          --cov=pc_manager_agent.orchestration.vendor_uninstall_verifier
           --cov-report=term-missing --cov-fail-under=85 -q
       - name: Real Windows Recycle Bin disposable probe
         if: matrix.python-version == '3.13'

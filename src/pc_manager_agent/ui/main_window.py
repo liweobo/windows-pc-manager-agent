@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
         self._last_service_reference: tuple[str, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 4D2A 受控 MSI 卸载")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 4D2B 受控软件卸载")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -256,8 +256,8 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(
             QLabel(
-                "Stage 4D2A 只允许双确认后的单个 current-user MSI；"
-                "不执行原始 UninstallString，不自动提权或删除残留。"
+                "Stage 4D2B 仅支持双确认后的单个 current-user MSI 或高可信厂商卸载器；"
+                "不直接执行原始 UninstallString，不自动提权或删除残留。"
             )
         )
         layout.addWidget(QLabel("不覆盖、不跨卷、不永久删除、不修改服务/启动项/注册表。"))
@@ -280,10 +280,10 @@ class MainWindow(QMainWindow):
                 )
                 return
             self._conversation.append(
-                "Agent：将进入 Stage 4D2A 受控流程。只有高可信度、策略允许的当前用户 "
-                "MSI 才可能执行；需要计划确认和执行前即时确认。"
+                "Agent：将先用本地只读元数据区分 MSI 与厂商卸载器，再进入各自独立的 "
+                "双确认流程；不会执行原始 UninstallString。"
             )
-            self._system_diagnostics_tab.open_msi_uninstall(
+            self._system_diagnostics_tab.open_routed_uninstall(
                 text,
                 query=SoftwareTargetQuery(display_name=target_name),
             )

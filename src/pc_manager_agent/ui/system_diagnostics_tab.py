@@ -36,11 +36,19 @@ from pc_manager_agent.domain.system_diagnostics import (
     SoftwareArchitecture,
     SoftwareScope,
 )
+from pc_manager_agent.orchestration.software_uninstall_router import (
+    SoftwareUninstallMechanism,
+)
 from pc_manager_agent.orchestration.system_diagnostic_planner import extract_software_search_term
 from pc_manager_agent.ui.process_action_dialog import ProcessActionDialog
 from pc_manager_agent.ui.software_analysis_dialog import SoftwareAnalysisDialog
 from pc_manager_agent.ui.software_uninstall_dialog import SoftwareUninstallDialog
+from pc_manager_agent.ui.software_uninstall_router_worker import (
+    SoftwareUninstallRouteWorker,
+    require_software_uninstall_route,
+)
 from pc_manager_agent.ui.system_workers import DiagnosticWorker, require_diagnostic_report
+from pc_manager_agent.ui.vendor_uninstall_dialog import VendorUninstallDialog
 
 
 def _bytes_text(value: int) -> str:
@@ -70,6 +78,8 @@ class SystemDiagnosticsTab(QWidget):
         self._process_dialogs: set[ProcessActionDialog] = set()
         self._software_dialogs: set[SoftwareAnalysisDialog] = set()
         self._software_uninstall_dialogs: set[SoftwareUninstallDialog] = set()
+        self._vendor_uninstall_dialogs: set[VendorUninstallDialog] = set()
+        self._uninstall_route_workers: set[SoftwareUninstallRouteWorker] = set()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -187,7 +197,7 @@ class SystemDiagnosticsTab(QWidget):
 
         software_action_row = QHBoxLayout()
         self.software_action_label = QLabel(
-            "选择软件后可先分析，或进入仅支持高可信度 current-user MSI 的受控卸载。"
+            "选择软件后可先分析，或分别审查 MSI 与高可信度 current-user 厂商卸载器。"
         )
         self.software_action_button = QPushButton("分析选中软件的卸载影响")
         self.software_action_button.setEnabled(False)
@@ -195,9 +205,13 @@ class SystemDiagnosticsTab(QWidget):
         self.software_uninstall_button = QPushButton("受控卸载选中 MSI")
         self.software_uninstall_button.setEnabled(False)
         self.software_uninstall_button.clicked.connect(self._open_selected_msi_uninstall)
+        self.vendor_uninstall_button = QPushButton("受控审查选中 Vendor")
+        self.vendor_uninstall_button.setEnabled(False)
+        self.vendor_uninstall_button.clicked.connect(self._open_selected_vendor_uninstall)
         software_action_row.addWidget(self.software_action_label, 1)
         software_action_row.addWidget(self.software_action_button)
         software_action_row.addWidget(self.software_uninstall_button)
+        software_action_row.addWidget(self.vendor_uninstall_button)
 
         layout.addLayout(goal_row)
         layout.addLayout(quick_row)
@@ -545,6 +559,10 @@ class SystemDiagnosticsTab(QWidget):
             software_dialog.shutdown()
         for uninstall_dialog in tuple(self._software_uninstall_dialogs):
             uninstall_dialog.shutdown()
+        for vendor_dialog in tuple(self._vendor_uninstall_dialogs):
+            vendor_dialog.shutdown()
+        for route_worker in tuple(self._uninstall_route_workers):
+            route_worker.cancel()
 
     @Slot()
     def _process_selection_changed(self) -> None:
@@ -589,6 +607,7 @@ class SystemDiagnosticsTab(QWidget):
         query = self._selected_software_query()
         self.software_action_button.setEnabled(query is not None)
         self.software_uninstall_button.setEnabled(query is not None)
+        self.vendor_uninstall_button.setEnabled(query is not None)
         if query is not None:
             self.software_action_label.setText(
                 f"已选择 {query.display_name}；点击后会重新刷新身份，表格选择本身不授权操作。"
@@ -609,6 +628,15 @@ class SystemDiagnosticsTab(QWidget):
             self._show_error("请先选择一个具体软件。")
             return
         self.open_msi_uninstall(f"卸载软件 {query.display_name}", query=query)
+
+    @Slot()
+    def _open_selected_vendor_uninstall(self) -> None:
+        """Open Vendor analysis for exactly the selected software row."""
+        query = self._selected_software_query()
+        if query is None:
+            self._show_error("请先选择一个具体软件。")
+            return
+        self.open_vendor_uninstall(f"卸载软件 {query.display_name}", query=query)
 
     def open_software_analysis(
         self,
@@ -637,6 +665,77 @@ class SystemDiagnosticsTab(QWidget):
         )
         dialog.show()
         self.status_message.emit("正在生成 MSI 卸载 Preview；尚未授权或启动卸载")
+
+    def open_vendor_uninstall(
+        self,
+        user_goal: str,
+        *,
+        query: SoftwareTargetQuery,
+    ) -> None:
+        """Open the Stage 4D2B trusted Vendor workflow with cancellation as default."""
+        dialog = VendorUninstallDialog(self._runtime, user_goal, query=query, parent=self)
+        self._vendor_uninstall_dialogs.add(dialog)
+        dialog.finished.connect(
+            lambda _result, value=dialog: self._vendor_uninstall_dialogs.discard(value)
+        )
+        dialog.show()
+        self.status_message.emit("正在验证厂商卸载器可信身份；尚未授权或启动卸载")
+
+    def open_routed_uninstall(
+        self,
+        user_goal: str,
+        *,
+        query: SoftwareTargetQuery,
+    ) -> None:
+        """Resolve MSI versus Vendor off the UI thread, then open only that workflow."""
+        worker = SoftwareUninstallRouteWorker(self._runtime, query)
+        self._uninstall_route_workers.add(worker)
+        worker.signals.completed.connect(
+            lambda value, current=worker, goal=user_goal: self._route_completed(
+                current,
+                goal,
+                value,
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message, current=worker: self._route_failed(current, message)
+        )
+        self.status_message.emit("正在只读识别 MSI 或厂商卸载机制；尚未创建写操作确认")
+        QThreadPool.globalInstance().start(worker)
+
+    def _route_completed(
+        self,
+        worker: SoftwareUninstallRouteWorker,
+        user_goal: str,
+        value: object,
+    ) -> None:
+        """Open exactly the routed workflow or display a fail-closed explanation."""
+        self._uninstall_route_workers.discard(worker)
+        try:
+            route = require_software_uninstall_route(value)
+        except TypeError as exc:
+            self._show_error(str(exc))
+            return
+        target = route.resolution.selected
+        if target is None:
+            self._show_error(route.reason)
+            return
+        query = SoftwareTargetQuery(identity_digest=target.identity.canonical_digest())
+        if route.mechanism is SoftwareUninstallMechanism.MSI:
+            self.open_msi_uninstall(user_goal, query=query)
+        elif route.mechanism is SoftwareUninstallMechanism.VENDOR:
+            self.open_vendor_uninstall(user_goal, query=query)
+        else:
+            self._show_error(route.reason)
+
+    def _route_failed(
+        self,
+        worker: SoftwareUninstallRouteWorker,
+        message: str,
+    ) -> None:
+        """Remove the finished route worker and show its sanitized failure."""
+        self._uninstall_route_workers.discard(worker)
+        self._show_error(message)
 
     def _selected_software_query(self) -> SoftwareTargetQuery | None:
         rows = self.software_table.selectionModel().selectedRows()

@@ -51,6 +51,9 @@ class AppSettings(BaseModel):
     msi_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
     msi_monitor_poll_seconds: float = Field(default=0.25, ge=0.05, le=5.0)
     msi_long_running_seconds: float = Field(default=900.0, ge=30.0, le=7_200.0)
+    vendor_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
+    vendor_monitor_poll_seconds: float = Field(default=0.25, ge=0.05, le=5.0)
+    vendor_long_running_seconds: float = Field(default=900.0, ge=30.0, le=7_200.0)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -139,6 +142,15 @@ class AppSettings(BaseModel):
             ),
             "msi_monitor_poll_seconds": os.getenv("PC_MANAGER_MSI_MONITOR_POLL_SECONDS", "0.25"),
             "msi_long_running_seconds": os.getenv("PC_MANAGER_MSI_LONG_RUNNING_SECONDS", "900"),
+            "vendor_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_VENDOR_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
+            "vendor_monitor_poll_seconds": os.getenv(
+                "PC_MANAGER_VENDOR_MONITOR_POLL_SECONDS", "0.25"
+            ),
+            "vendor_long_running_seconds": os.getenv(
+                "PC_MANAGER_VENDOR_LONG_RUNNING_SECONDS", "900"
+            ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
         if data_directory:
