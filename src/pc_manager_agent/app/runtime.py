@@ -22,6 +22,7 @@ from pc_manager_agent.audit.software_uninstall_execution import MsiUninstallAudi
 from pc_manager_agent.audit.startup_actions import StartupActionAuditLogger
 from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
+from pc_manager_agent.audit.vendor_uninstall import VendorUninstallAuditLogger
 from pc_manager_agent.authorization.models import AuthorizedPath
 from pc_manager_agent.authorization.service import AuthorizedPathService
 from pc_manager_agent.config.settings import AppSettings
@@ -48,6 +49,7 @@ from pc_manager_agent.confirmation.startup_actions import StartupActionConfirmat
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
 from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmationService
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
+from pc_manager_agent.confirmation.vendor_uninstall import VendorUninstallConfirmationService
 from pc_manager_agent.domain.file_analysis import FileAnalysisProgress
 from pc_manager_agent.domain.reports import ScanProgress
 from pc_manager_agent.domain.risk import RiskLevel
@@ -93,6 +95,7 @@ from pc_manager_agent.orchestration.software_uninstall_analysis import (
     SoftwareUninstallAnalysisService,
 )
 from pc_manager_agent.orchestration.software_uninstall_execution import MsiUninstallService
+from pc_manager_agent.orchestration.software_uninstall_router import SoftwareUninstallRouter
 from pc_manager_agent.orchestration.software_uninstall_verifier import MsiUninstallVerifier
 from pc_manager_agent.orchestration.startup_actions import StartupActionService
 from pc_manager_agent.orchestration.startup_target_resolver import StartupTargetResolver
@@ -104,6 +107,11 @@ from pc_manager_agent.orchestration.system_diagnostics import (
 from pc_manager_agent.orchestration.transaction_executor import TransactionExecutor
 from pc_manager_agent.orchestration.trash_planner import TrashPlanCompiler
 from pc_manager_agent.orchestration.trash_service import TrashService
+from pc_manager_agent.orchestration.vendor_execution_preflight import VendorExecutionPreflight
+from pc_manager_agent.orchestration.vendor_residual_analyzer import VendorResidualAnalyzer
+from pc_manager_agent.orchestration.vendor_uninstall_execution import VendorUninstallService
+from pc_manager_agent.orchestration.vendor_uninstall_metadata import VendorUninstallMetadataParser
+from pc_manager_agent.orchestration.vendor_uninstall_verifier import VendorUninstallVerifier
 from pc_manager_agent.persistence.analysis_results import AnalysisResultRepository
 from pc_manager_agent.persistence.authorized_paths import AuthorizedPathRepository
 from pc_manager_agent.persistence.file_operations import (
@@ -131,6 +139,10 @@ from pc_manager_agent.persistence.startup_actions import (
     StartupActionRepository,
     StartupBackupVault,
     StartupExecutionGuard,
+)
+from pc_manager_agent.persistence.vendor_uninstall import (
+    VendorUninstallExecutionGuard,
+    VendorUninstallRepository,
 )
 from pc_manager_agent.platform_support.processes import ProcessManagementPlatform
 from pc_manager_agent.platform_support.service_control import ServiceControlPlatform
@@ -172,6 +184,10 @@ from pc_manager_agent.platform_support.windows.startup_management import (
 from pc_manager_agent.platform_support.windows.system_diagnostics import (
     WindowsSystemDiagnosticsPlatform,
 )
+from pc_manager_agent.platform_support.windows.vendor_uninstall import (
+    WindowsVendorExecutablePlatform,
+    WindowsVendorUninstallPlatform,
+)
 from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
 from pc_manager_agent.reporting.exporter import ReportExporter, ReportExportResult
@@ -212,6 +228,11 @@ from pc_manager_agent.safety.system_diagnostics import DiagnosticSafetyValidator
 from pc_manager_agent.safety.trash_policy import TrashPathPolicy
 from pc_manager_agent.safety.trash_preview import TrashPreviewEngine
 from pc_manager_agent.safety.trash_validator import TrashSafetyValidator
+from pc_manager_agent.safety.vendor_argument_policy import VendorArgumentPolicy
+from pc_manager_agent.safety.vendor_executable_trust import VendorExecutableTrustValidator
+from pc_manager_agent.safety.vendor_uninstall_policy import VendorUninstallExecutionPolicy
+from pc_manager_agent.safety.vendor_uninstall_preview import VendorUninstallPreviewEngine
+from pc_manager_agent.safety.vendor_uninstall_validator import VendorUninstallSafetyValidator
 from pc_manager_agent.tools.file_tools.create_directory import CreateDirectoryTool
 from pc_manager_agent.tools.file_tools.duplicate_analyzer import DuplicateFileAnalyzer
 from pc_manager_agent.tools.file_tools.hashing import SafeFileHasher
@@ -260,6 +281,7 @@ from pc_manager_agent.tools.system_tools.startup_actions import (
     DisableStartupTool,
     RestoreStartupTool,
 )
+from pc_manager_agent.tools.system_tools.vendor_uninstall import VendorUninstallTool
 
 
 class ProviderConfigurationError(RuntimeError):
@@ -326,6 +348,15 @@ class MsiUninstallServices:
     registry: ToolRegistry
     resolver: SoftwareTargetResolver
     service: MsiUninstallService
+
+
+@dataclass(frozen=True, slots=True)
+class VendorUninstallServices:
+    """Dependency bundle for one trusted interactive Stage 4D2B workflow."""
+
+    registry: ToolRegistry
+    resolver: SoftwareTargetResolver
+    service: VendorUninstallService
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,6 +472,8 @@ class ApplicationRuntime:
         self.service_startup_backup_vault.initialize()
         self.msi_uninstall_repository = MsiUninstallRepository(settings.database_path)
         self.interrupted_msi_uninstall_ids = self.msi_uninstall_repository.initialize()
+        self.vendor_uninstall_repository = VendorUninstallRepository(settings.database_path)
+        self.interrupted_vendor_uninstall_ids = self.vendor_uninstall_repository.initialize()
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
         self.process_management_platform = WindowsProcessManagementPlatform()
@@ -905,6 +938,65 @@ class ApplicationRuntime:
         )
         return MsiUninstallServices(registry=registry, resolver=resolver, service=service)
 
+    def create_software_uninstall_router(self) -> SoftwareUninstallRouter:
+        """Build a read-only fresh-metadata router with no execution authority."""
+        inventory = SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
+        return SoftwareUninstallRouter(
+            SoftwareTargetResolver(inventory),
+            UninstallCapabilityResolver(),
+            max_items=self.settings.diagnostic_max_items,
+        )
+
+    def create_vendor_uninstall_services(self) -> VendorUninstallServices:
+        """Build the one-tool trusted interactive Vendor uninstall boundary."""
+        inventory = SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
+        resolver = SoftwareTargetResolver(inventory)
+        capability = UninstallCapabilityResolver()
+        registry = ToolRegistry(
+            write_guard=VendorUninstallExecutionGuard(self.vendor_uninstall_repository)
+        )
+        registry.register(
+            VendorUninstallTool(
+                WindowsVendorUninstallPlatform(
+                    poll_interval_seconds=self.settings.vendor_monitor_poll_seconds,
+                    long_running_seconds=self.settings.vendor_long_running_seconds,
+                )
+            )
+        )
+        audit = VendorUninstallAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        service = VendorUninstallService(
+            resolver,
+            capability,
+            VendorUninstallMetadataParser(),
+            VendorArgumentPolicy(),
+            VendorExecutableTrustValidator(WindowsVendorExecutablePlatform()),
+            SoftwareUninstallSafetyPolicy(agent_root=Path(__file__).resolve().parents[1]),
+            VendorUninstallExecutionPolicy(),
+            VendorExecutionPreflight(
+                WindowsSystemDiagnosticsPlatform(),
+                max_items=self.settings.diagnostic_max_items,
+            ),
+            VendorUninstallPreviewEngine(self.settings.confirmation_ttl_seconds),
+            VendorUninstallSafetyValidator(registry),
+            VendorUninstallConfirmationService(
+                self.vendor_uninstall_repository,
+                plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+                runtime_ttl_seconds=self.settings.vendor_runtime_confirmation_ttl_seconds,
+            ),
+            self.vendor_uninstall_repository,
+            registry,
+            VendorUninstallVerifier(resolver),
+            VendorResidualAnalyzer(),
+            audit,
+            process_is_elevated=current_process_is_elevated,
+            max_items=self.settings.diagnostic_max_items,
+        )
+        return VendorUninstallServices(registry=registry, resolver=resolver, service=service)
+
     def create_process_action_services(self) -> ProcessActionServices:
         """Build the Stage 4A resolver, policy, confirmations, registry, and executor."""
         platform = self.process_management_platform
@@ -1114,6 +1206,7 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.vendor_uninstall_repository.close()
         self.msi_uninstall_repository.close()
         self.service_startup_backup_vault.close()
         self.service_startup_repository.close()

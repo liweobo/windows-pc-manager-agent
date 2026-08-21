@@ -220,7 +220,7 @@ class MsiUninstallRepository:
         return tuple(interrupted)
 
     def create(self, plan: MsiUninstallPlan, preview: MsiUninstallPreview) -> None:
-        """Reserve one globally unique active MSI transaction before confirmation."""
+        """Reserve the sole MSI-or-Vendor uninstall workflow before confirmation."""
         self._require_initialized()
         current = datetime.now(UTC)
         request = _request_for_preview(preview)
@@ -237,6 +237,10 @@ class MsiUninstallRepository:
                         raise MsiUninstallStoreError(
                             "Only one MSI uninstall may be active at a time"
                         )
+                if _active_vendor_transaction(session):
+                    raise MsiUninstallStoreError(
+                        "Only one MSI or Vendor uninstall may be active at a time"
+                    )
                 session.add(
                     MsiUninstallTransactionRow(
                         transaction_id=str(plan.transaction_id),
@@ -600,3 +604,27 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _active_vendor_transaction(session: Session) -> bool:
+    """Read the additive Vendor table when present and identify non-terminal work."""
+    present = session.execute(
+        text(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='vendor_uninstall_transactions'"
+        )
+    ).scalar_one_or_none()
+    if present is None:
+        return False
+    terminal = {
+        "verified_removed",
+        "completed_unverified",
+        "stopped_monitoring",
+        "user_cancelled",
+        "failed",
+        "interrupted",
+        "blocked",
+        "cancelled",
+    }
+    states = session.execute(text("SELECT state FROM vendor_uninstall_transactions")).scalars()
+    return any(str(state) not in terminal for state in states)
