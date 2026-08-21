@@ -1,5 +1,34 @@
 # Security model
 
+## Stage 4D2A MSI uninstall controls
+
+- Exactly one write tool exists: `software.uninstall.msi`, R2, batch size 1, rollback `NONE`.
+- Execution requires MSI/high confidence, an exact braced ProductCode from local inventory, exactly
+  one installed `USER_UNMANAGED` Windows Installer registration, current-user scope, and matching
+  name/version/publisher/source-qualified identity evidence.
+- Machine/user-managed MSI is outside the ordinary-user boundary. The app refuses to run this stage
+  when its own process is elevated and never requests UAC or a `runas` retry.
+- `USER_APPLICATION` is R2. Selected developer tool/runtime classes are R2_HIGH_IMPACT. Shared
+  runtimes, databases/background platforms, drivers/hardware utilities, Windows components/features,
+  security/VPN/network, Agent, enterprise, package-manager and unknown classes are blocked.
+- A known installation location and complete process/service probes are mandatory. Strong path-related
+  running processes or services block; their separate Stage 4A/4C confirmations cannot be reused.
+- Plan and runtime confirmations bind transaction/operation/plan/Preview, all evidence digests, risk,
+  object summary and expiry. They are durable, single-use and consumed atomically.
+- The adapter resolves the system `msiexec.exe` strictly and supplies only `/x`, validated ProductCode,
+  `/norestart` as an argument list with `shell=False` and fixed working directory/stdio policy.
+- Exit code is evidence, not success. Verification refreshes normalized uninstall-registry inventory
+  and Windows Installer registration. Contradictions become explicit `COMPLETED_UNVERIFIED`,
+  `REMOVED_WITH_UNEXPECTED_INSTALLER_RESULT` or replacement states.
+- There is no automatic reboot, installer termination, retry, residual cleanup, registry cleanup,
+  program/user-data deletion, Vendor/winget/MSIX/PowerShell/CMD/WMI fallback or arbitrary process API.
+- Mandatory durable transaction and pre-start audit failure abort before launch. Post-launch audit
+  failure is shown as a warning and never causes redispatch.
+
+Recovery is truthful: uninstall is `NONE`, usually requiring manual reinstall. Reinstall is not Undo
+and cannot promise to restore state. Long-running installers remain `WAITING`; restart changes them to
+`INTERRUPTED`, and the user must inspect fresh state rather than letting the Agent resume automatically.
+
 ## Stage 4D1 software uninstall-analysis controls
 
 Stage 4D1 is strictly R0 and has no rollback because it performs no change. Plan confirmation allows

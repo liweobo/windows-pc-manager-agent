@@ -88,9 +88,23 @@ Stage 4D1 intentionally has no uninstaller, package remover, elevation, shell, p
 or user-data cleanup. Any future uninstall execution is a new security stage and cannot reuse this
 stage's target acknowledgement.
 
-## Stage 4C3+ / 4D2+ — other controlled system operations (not started)
+## Stage 4D2A — controlled current-user MSI uninstall (complete)
 
-Broader service changes, software uninstall execution, firewall changes, cleanup and other system
+One high-confidence current-user unmanaged MSI may pass strict ProductCode/API identity validation,
+default-deny safety classification, complete process/service preflight, a fresh Preview, durable plan
+and runtime confirmations, and the one-tool fixed `msiexec /x ProductCode /norestart` adapter.
+Post-exit verification uses both refreshed inventories; residuals are report-only. There is no
+elevation, reboot, retry, process/service control, raw UninstallString or automatic rollback.
+
+## Stage 4D2B — controlled vendor uninstaller research (planned)
+
+Future work may study executable identity, Authenticode/publisher validation, known installer-family
+argument grammars and interactive monitoring. Raw UninstallString execution, shell/CMD/PowerShell
+wrappers and generic process creation remain prohibited. This stage has not started.
+
+## Stage 4C3+ / other controlled system operations (not started)
+
+Broader service changes, non-MSI uninstall execution, firewall changes, cleanup and other system
 operations remain design-only. Each capability requires its own threat model, confirmation,
 recovery plan, Windows API experiment, and isolated test/review before implementation.
 

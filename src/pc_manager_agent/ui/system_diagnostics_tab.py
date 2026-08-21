@@ -39,6 +39,7 @@ from pc_manager_agent.domain.system_diagnostics import (
 from pc_manager_agent.orchestration.system_diagnostic_planner import extract_software_search_term
 from pc_manager_agent.ui.process_action_dialog import ProcessActionDialog
 from pc_manager_agent.ui.software_analysis_dialog import SoftwareAnalysisDialog
+from pc_manager_agent.ui.software_uninstall_dialog import SoftwareUninstallDialog
 from pc_manager_agent.ui.system_workers import DiagnosticWorker, require_diagnostic_report
 
 
@@ -68,6 +69,7 @@ class SystemDiagnosticsTab(QWidget):
         self._worker: DiagnosticWorker | None = None
         self._process_dialogs: set[ProcessActionDialog] = set()
         self._software_dialogs: set[SoftwareAnalysisDialog] = set()
+        self._software_uninstall_dialogs: set[SoftwareUninstallDialog] = set()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -185,13 +187,17 @@ class SystemDiagnosticsTab(QWidget):
 
         software_action_row = QHBoxLayout()
         self.software_action_label = QLabel(
-            "选择软件后可分析身份、能力和影响；Stage 4D1 没有卸载按钮。"
+            "选择软件后可先分析，或进入仅支持高可信度 current-user MSI 的受控卸载。"
         )
         self.software_action_button = QPushButton("分析选中软件的卸载影响")
         self.software_action_button.setEnabled(False)
         self.software_action_button.clicked.connect(self._open_selected_software_analysis)
+        self.software_uninstall_button = QPushButton("受控卸载选中 MSI")
+        self.software_uninstall_button.setEnabled(False)
+        self.software_uninstall_button.clicked.connect(self._open_selected_msi_uninstall)
         software_action_row.addWidget(self.software_action_label, 1)
         software_action_row.addWidget(self.software_action_button)
+        software_action_row.addWidget(self.software_uninstall_button)
 
         layout.addLayout(goal_row)
         layout.addLayout(quick_row)
@@ -537,6 +543,8 @@ class SystemDiagnosticsTab(QWidget):
             process_dialog.shutdown()
         for software_dialog in tuple(self._software_dialogs):
             software_dialog.shutdown()
+        for uninstall_dialog in tuple(self._software_uninstall_dialogs):
+            uninstall_dialog.shutdown()
 
     @Slot()
     def _process_selection_changed(self) -> None:
@@ -580,6 +588,7 @@ class SystemDiagnosticsTab(QWidget):
     def _software_selection_changed(self) -> None:
         query = self._selected_software_query()
         self.software_action_button.setEnabled(query is not None)
+        self.software_uninstall_button.setEnabled(query is not None)
         if query is not None:
             self.software_action_label.setText(
                 f"已选择 {query.display_name}；点击后会重新刷新身份，表格选择本身不授权操作。"
@@ -593,6 +602,14 @@ class SystemDiagnosticsTab(QWidget):
             return
         self.open_software_analysis(f"分析卸载软件 {query.display_name}", query=query)
 
+    @Slot()
+    def _open_selected_msi_uninstall(self) -> None:
+        query = self._selected_software_query()
+        if query is None:
+            self._show_error("请先选择一个具体软件。")
+            return
+        self.open_msi_uninstall(f"卸载软件 {query.display_name}", query=query)
+
     def open_software_analysis(
         self,
         user_goal: str,
@@ -605,6 +622,21 @@ class SystemDiagnosticsTab(QWidget):
         dialog.finished.connect(lambda _result, value=dialog: self._software_dialogs.discard(value))
         dialog.show()
         self.status_message.emit("正在生成软件卸载分析 Preview；Stage 4D1 不执行卸载")
+
+    def open_msi_uninstall(
+        self,
+        user_goal: str,
+        *,
+        query: SoftwareTargetQuery,
+    ) -> None:
+        """Open the Stage 4D2A one-product MSI workflow with cancellation as default."""
+        dialog = SoftwareUninstallDialog(self._runtime, user_goal, query=query, parent=self)
+        self._software_uninstall_dialogs.add(dialog)
+        dialog.finished.connect(
+            lambda _result, value=dialog: self._software_uninstall_dialogs.discard(value)
+        )
+        dialog.show()
+        self.status_message.emit("正在生成 MSI 卸载 Preview；尚未授权或启动卸载")
 
     def _selected_software_query(self) -> SoftwareTargetQuery | None:
         rows = self.software_table.selectionModel().selectedRows()

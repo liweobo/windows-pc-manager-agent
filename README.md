@@ -1,5 +1,32 @@
 # Windows PC Manager Agent
 
+## Stage 4D2A：受控 MSI 软件卸载
+
+Stage 4D2A 第一次开放真实软件卸载，但执行面只有一个工具：
+`software.uninstall.msi`。它只接受由本机清单和 Windows Installer API 共同验证的
+`ValidatedMsiProduct`，只处理 `current_user`、`USER_UNMANAGED`、高可信度 MSI。任何
+Vendor UninstallString、winget、MSIX、Portable、PowerShell、CMD、WMI `Win32_Product`
+或任意参数均不能进入执行器。
+
+每次请求都会刷新软件清单，精确解析目标，再校验 ProductCode、名称、版本、发布者、范围、
+架构和注册来源。安全策略只允许普通用户应用（R2）以及明确的开发工具/运行时
+（R2_HIGH_IMPACT）；Visual C++ 等共享运行库、驱动、Windows/安全/网络/企业/Agent 组件和
+未知类型全部阻止。名称有歧义时必须由用户明确选择，模型不能选择 ProductCode。
+
+执行前先以只读方式检查安装目录内的相关进程和服务；发现运行对象或检查不完整就停止，绝不
+自动关闭进程或停止服务。计划确认之后还会完整重新验证，并生成有效期很短的对象级即时确认。
+两次确认都绑定 plan、transaction、Preview、软件身份、ProductCode、能力、安全决定、
+preflight 和风险，且只能消费一次。
+
+Windows 适配器只生成固定参数数组：系统目录中的 `msiexec.exe`、`/x`、严格 ProductCode、
+`/norestart`，并始终使用 `shell=False`。它不自动提权、不自动重启、不强杀长时间运行的 MSI。
+监控窗口耗尽时事务保持 `WAITING`，不做过早验证；应用重启后标记 `INTERRUPTED` 且绝不重试。
+正常退出后同时刷新卸载注册表清单和 Windows Installer 注册；成功返回码不等于最终成功。
+残留分析只检查已知安装目录是否仍存在，不枚举或删除任何文件。
+
+软件卸载的回滚等级为 `NONE`。通常只能重新安装，而重新安装不等于 Undo，也不保证恢复设置或
+用户数据。许多 machine-wide MSI 会因权限边界被阻止；本阶段不会请求 UAC。
+
 ## Stage 4D1：软件身份、卸载能力与影响 Preview（零执行）
 
 Stage 4D1 只回答“这个软件是谁、Windows 目前暴露了哪类卸载元数据、可能影响什么”。它注册
@@ -14,8 +41,8 @@ MSIX、Portable、Windows Feature、Driver 与 Unknown。原始卸载字符串�
 
 最终 Preview 显示安全分类、能力证据、相关进程/启动项/服务的只读影响线索、未知项、风险和
 明确停止原因。按钮“我已理解目标”只记录与 plan/Preview 摘要及有效期绑定的 acknowledgement，
-不会创建卸载授权。当前版本没有 MSI、厂商、winget、MSIX 或其他卸载执行工具，也不请求管理员
-权限，不使用 Shell，并且没有删除程序文件或用户数据的路径。
+不会创建卸载授权。只有全新的 Stage 4D2A 流程能在更窄边界内调用单个 MSI 工具；Stage 4D1
+acknowledgement 不能复用。厂商、winget、MSIX 和其他卸载机制仍不存在。
 
 ## Stage 4C2：Windows 服务启动类型安全管理
 
@@ -138,7 +165,7 @@ restore claim.
 
 ## 当前版本
 
-Stage 4D1 / `0.1.0` 开发版本在此前阶段基础上包含：
+Stage 4D2A / `0.1.0` 开发版本在此前阶段基础上包含：
 
 - PySide6 主窗口和系统托盘；
 - 基础聊天、计划、风险提示与确认界面；
@@ -149,6 +176,9 @@ Stage 4D1 / `0.1.0` 开发版本在此前阶段基础上包含：
 - SQLite 结构化审计日志及敏感字段脱敏；
 - 软件身份归一化、保守目标解析、卸载能力分析与零执行影响 Preview；
 - 与计划和 Preview 摘要绑定、但绝不授予卸载权限的目标理解确认；
+- 单个 current-user 高可信度 MSI 的 ProductCode/API 交叉验证和默认拒绝执行策略；
+- 双重一次性确认、SQLite 卸载事务、固定 `msiexec` 参数适配器和退出码分类；
+- 无进程终止/服务停止/提权/重启/残留删除的 preflight、监控和后置验证；
 - 用户管理的授权目录、常用目录与自定义禁止目录；
 - 不跟随符号链接/联接点/重解析点的流式只读目录元数据扫描；
 - 可配置大文件分析、证据化的“疑似长期未使用”分析；
@@ -163,9 +193,10 @@ Stage 4D1 / `0.1.0` 开发版本在此前阶段基础上包含：
 - SQLite `OperationTransaction`、逐项状态、写前 Undo、失败即停止和异常中断检测；
 - 从持久化 Undo 逆序生成的回滚 Preview、独立确认、冲突检查和结果验证。
 
-它不会覆盖或永久删除，不会执行跨卷移动、管理员提权、Shell 或软件修改。Stage 2A 只允许
+它不会覆盖或永久删除，不会执行跨卷移动、管理员提权或 Shell。Stage 2A 只允许
 已授权本地目录内的 R1 可逆操作，Stage 2B 仅支持回收站，Stage 4A 仅支持上述受控进程生命
-周期操作，Stage 4B/4C1/4C2 也只开放各节列出的窄工具；不存在通用注册表、服务或命令接口。
+周期操作，Stage 4B/4C1/4C2 也只开放各节列出的窄工具；Stage 4D2A 只有上述单个 MSI 工具，
+不存在通用软件、注册表、服务或命令接口。
 
 ## 安装
 

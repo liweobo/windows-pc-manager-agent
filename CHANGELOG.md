@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — Stage 4D2A
+
+### Added
+
+- Strict `ValidatedMsiProduct` identity, Windows Installer registration validation, execution-only
+  safety policy, process/service preflight, fresh execution Preview and one-product R2 transaction.
+- Durable plan and runtime confirmations bound to plan/Preview/identity/ProductCode/capability/
+  safety/preflight/risk digests, with expiry, atomic consumption and replay protection.
+- Sole `software.uninstall.msi` tool using fixed system `msiexec.exe` arguments, `shell=False`,
+  `/norestart`, deterministic exit mapping and no raw UninstallString input.
+- Post-installer inventory/MSI verification, non-deleting residual report, interrupted/waiting crash
+  recovery, privacy-minimized audit and a modeless PySide6 two-confirmation workflow.
+- Synthetic unit, integration, security and GUI tests; no test invokes a real system uninstaller.
+
+### Changed
+
+- Classify Visual C++/redistributable/shared runtimes before developer runtimes and block their
+  Stage 4D2A execution.
+- Restore UTC awareness when SQLite returns confirmation timestamps without timezone metadata.
+
+### Security
+
+- Current-user unmanaged MSI only; machine/managed MSI, protected classes, ambiguous identities,
+  related running processes/services and incomplete evidence fail closed.
+- No automatic process termination, service stop, elevation, reboot, retry, residual deletion,
+  Vendor/winget/MSIX fallback, shell wrapper or arbitrary installer argument.
+
 All notable changes are documented here. The project follows semantic versioning
 once release tags are introduced.
 

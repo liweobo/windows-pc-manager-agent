@@ -1,5 +1,236 @@
 # API reference
 
+## Stage 4D2A 受控 MSI 卸载 API
+
+本节逐一说明 Stage 4D2A 新增的生产函数、方法和公开数据对象。所有 ProductCode 示例都必须是
+合成值；API 不接受原始 UninstallString、任意 executable 或任意 installer arguments。
+
+### 领域模型 `domain.software_uninstall_execution`
+
+| 对象 / 函数 | 作用、输入输出和安全约束 |
+|---|---|
+| `MsiInstallContext` | 表示 Windows Installer 注册上下文：user-managed、user-unmanaged、machine、unknown。执行策略只接受 current-user 的 user-unmanaged。 |
+| `MsiExecutionDecision` | Stage 4D2A 最终确定性决定，只含 `ALLOW`/`BLOCK`；用户确认不能把 BLOCK 改成 ALLOW。 |
+| `MsiPreflightState` | preflight 的 READY/BLOCKED/UNKNOWN；只有 READY 能生成 executable Preview。 |
+| `MsiInstallerResultCategory` | 将原始 exit code 分类为成功、需重启、用户取消、安装器忙、产品不存在、权限/策略拒绝、失败、意外重启、监控脱离、启动失败或未知；它不是最终卸载结论。 |
+| `MsiVerificationState` | fresh inventory 的最终观察：verified removed、unverified、异常返回但已移除、被升级/替换、failed、interrupted。 |
+| `MsiUninstallTransactionState` | 描述 Preview、两级确认、验证、dispatch、执行、等待和终态。`WAITING`/`INTERRUPTED` 不会自动恢复或重试。 |
+| `MsiProductRegistration` | msi.dll 返回的一个 ProductCode/context 安装实例以及安全的 name/version/publisher/location/state 投影；不含卸载命令。 |
+| `MsiProductRegistration.canonical_digest()` | 对注册上下文和安全属性生成稳定 SHA-256 摘要，供身份和确认绑定。 |
+| `ValidatedMsiProduct` | 唯一可进入适配器的强类型对象；绑定严格 ProductCode 及摘要、Stage 4D1 identity/metadata/capability、MSI registration、scope、architecture、source anchor 和验证时间。 |
+| `ValidatedMsiProduct.require_matching_product_code_digest()` | Pydantic 后置校验：重新计算 ProductCode 摘要，拒绝构造后替换 ProductCode。 |
+| `ValidatedMsiProduct.canonical_digest()` | 包含验证时间的完整对象摘要，用于追踪某次观察。 |
+| `ValidatedMsiProduct.evidence_digest()` | 排除 `validated_at` 的稳定执行证据摘要；允许运行时重新观察时间变化，但不允许身份事实变化。 |
+| `MsiExecutionAssessment` | execution-only policy 结果，包含 class、ALLOW/BLOCK、R2/R2_HIGH/R3、理由和证据。 |
+| `MsiExecutionAssessment.validate_risk_decision()` | 只允许 ALLOW 与 R2/R2_HIGH 配对，拒绝 R4 和矛盾 risk/decision。 |
+| `MsiExecutionAssessment.canonical_digest()` | 绑定执行分类、风险、理由和证据。 |
+| `RelatedProcessEvidence` | 只保存强路径相关进程的 PID、名称和 executable path digest；不保存命令行或控制权限。 |
+| `RelatedServiceEvidence` | 只保存强路径相关服务的名称、显示名、状态和 binary path digest；不提供 stop 权限。 |
+| `SoftwareExecutionPreflightResult` | 保存进程/服务证据完整性、相关对象、installer busy/reboot pending 的已知或 unknown、预期权限、blocker/warning。 |
+| `SoftwareExecutionPreflightResult.canonical_digest()` | 将全部 preflight 观察绑定到计划和确认。 |
+| `MsiUninstallPlan` | 单对象、单工具、双确认、rollback NONE 的不可变计划；持有所有证据摘要而不是 raw metadata。 |
+| `MsiUninstallPlan.validate_execution_contract()` | 强制唯一工具名、R2/R2_HIGH、两级确认和 NONE rollback，防止模型或 UI 扩大执行面。 |
+| `MsiUninstallPlan.canonical_digest()` | 对全部授权相关字段生成计划摘要。 |
+| `MsiUninstallPreview` | 本地对象级、会过期的执行 Preview；包含安全投影、强 MSI 身份、风险、preflight、恢复说明和 executable 标记。 |
+| `MsiUninstallPreview.bind_all_execution_evidence()` | 校验 target/product/identity、ALLOW/READY/executable 和 rollback NONE 的内部一致性。 |
+| `MsiUninstallPreview.invariant_digest()` | 对运行时必须重现的稳定证据生成摘要；不绑定新 Preview ID/生成时间。 |
+| `MsiUninstallPreview.canonical_digest()` | 对该次具体 Preview 的所有字段生成摘要。 |
+| `MsiUninstallRequest` | 内部工具请求，只含 transaction/operation/plan/Preview ID 和 `ValidatedMsiProduct`；故意没有 command/args 字段。 |
+| `MsiInstallerExecutionResult` | 固定 MSI client 的启动、exit/category、取消时机、长时运行、开始/结束/耗时和安全错误类型证据。 |
+| `MsiUninstallResult` | 工具输出，关联 transaction/operation/identity/ProductCode digest 和 installer result；不声称最终成功。 |
+| `MsiResidualReport` | 对原已知 install location 的单路径 `lstat` 结果，显式记录是否检查、是否存在、是否链接/重解析点及 `deletion_performed=false`。 |
+| `MsiUninstallVerification` | fresh registry/MSI 双清单后的最终状态、原 identity/ProductCode 是否仍在、替代候选数、刷新完整性、证据和警告。 |
+| `MsiUninstallExecutionReport` | GUI/审计最终报告，保留 installer 和 verification 两种事实、残留报告、风险、rollback NONE 与恢复指导。 |
+
+### MSI 身份 `orchestration.software_msi_validation`
+
+| 函数 / 方法 | 作用、输入输出和失败语义 |
+|---|---|
+| `MsiProductValidationError.__init__(code, message)` | 创建带确定性枚举码的安全错误；message 不包含 raw uninstall command。 |
+| `normalize_product_code(value)` | 只接受完整带花括号的 GUID，使用 `UUID` 解析并返回大写规范形式；缺括号、参数、shell 字符、Unicode 仿冒或垃圾全部抛 `MsiProductValidationError`。 |
+| `MsiProductValidator.__init__(platform)` | 注入只读 Windows Installer registration 协议，避免业务层直接依赖 msi.dll。 |
+| `MsiProductValidator.validate(software, capability)` | 要求 MSI/high、identity/capability ProductCode 相同、恰好一个 installed registration、user-unmanaged/current-user、name/version/publisher 一致；返回 `ValidatedMsiProduct`，否则按具体 code fail closed。 |
+| `_same_optional(left, right)` | 规范空白并大小写无关比较可选 metadata；一边缺失时不猜测相等。 |
+
+### 执行策略、Preview 与审查
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `SoftwareUninstallExecutionPolicy.assess(product, analysis)` | 把 Stage 4D1 分类收窄为执行许可：user application 为 R2，developer tool/runtime 为 R2_HIGH，其他/保护/非 current-user 为 R3 BLOCK。 |
+| `_blocked(safety_class, risk_level, reason)` | 构造统一的 BLOCK assessment，并明确“MSI capability 不等于安全”。 |
+| `MsiUninstallPreviewEngine.__init__(ttl_seconds, now)` | 配置正数 Preview TTL 和可注入时钟，便于过期测试。 |
+| `MsiUninstallPreviewEngine.build(plan, target, product, capability, assessment, preflight)` | 逐项比较计划证据，只在 ALLOW+READY 时生成 executable、到期的 `MsiUninstallPreview`。 |
+| `MsiUninstallSafetyValidator.__init__(registry)` | 注入专用 registry 作为独立安全审查边界。 |
+| `MsiUninstallSafetyValidator.review(plan, preview)` | 要求 registry 只有一个正确 manifest，核对全部 digest、风险、transaction、ALLOW、READY、executable；返回 `MsiUninstallSafetyReview`，任何问题都不批准。 |
+| `MsiUninstallSafetyReview` | `approved` 与非敏感 `issues` 的不可变审查结果。 |
+
+### Process / Service preflight `orchestration.software_execution_preflight`
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `SoftwareExecutionPreflight.__init__(platform, max_items)` | 注入 Stage 3 只读诊断协议并限定枚举数量；没有进程或服务写适配器。 |
+| `SoftwareExecutionPreflight.inspect(software, product, cancellation)` | 要求 identity 一致及已知 install location；只把 executable/binary path 位于该位置内的对象当强相关。相关进程、running service、取消、warning/truncation/异常都阻止；从不 kill/stop。 |
+| `_canonical(path)` | 用 `abspath/normcase` 规范化路径文本，不 `resolve()` 链接/联接目标，避免扩大范围。 |
+| `_is_within(path, root)` | 用 `relative_to` 判断强路径包含关系；越界返回 false。 |
+
+### 平台协议和 Windows 实现
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `MsiProductInventoryPlatform.registrations(product_code)` | 只读协议：为严格 ProductCode 返回所有 MSI context registration。 |
+| `MsiUninstallPlatform.uninstall(product, cancellation)` | 狭窄执行协议：输入只能是 `ValidatedMsiProduct`，输出结构化 installer result。 |
+| `_PolledProcess.poll()` | Windows adapter 的最小子进程监控协议；不暴露 terminate/kill。 |
+| `WindowsMsiProductInventory.__init__(msi_dll)` | 生产时加载 msi.dll；测试可注入 fake。非 Windows 且无 fake 时拒绝构造。 |
+| `WindowsMsiProductInventory.registrations(product_code)` | 调用 `MsiEnumProductsExW` 和 `MsiGetProductInfoExW`，枚举 current-user/machine context 并返回安全属性；不调用 `Win32_Product` 或 mutation API。 |
+| `WindowsMsiProductInventory._get_info(product_code, sid, context, property_name)` | 两次缓冲区查询一个 allow-listed MSI property；unknown product 返回 None，其他 API 错误抛 `OSError`。 |
+| `WindowsMsiProductInventory._configure_signatures()` | 为使用的两个 msi.dll Unicode 函数配置 ctypes arg/restype，避免隐式参数转换。 |
+| `WindowsMsiUninstallPlatform.__init__(...)` | 注入系统目录、Popen 工厂、轮询/长时阈值、时钟和 sleeper；正数校验支持无真实进程测试。 |
+| `WindowsMsiUninstallPlatform.uninstall(product, cancellation)` | 启动前取消则不 spawn；否则严格解析系统 `msiexec.exe`，以 `[exe, /x, ProductCode, /norestart]`、`shell=False`、固定 cwd 和 DEVNULL stdio启动。轮询 exit；达到阈值则不 kill、返回 MONITORING_DETACHED。 |
+| `_context_from_raw(value)` | 把 MSI context flag 映射到领域枚举；未知值保守为 UNKNOWN。 |
+| `_optional_path(value)` | 非空 MSI property 转为 Path，空值保持 None。 |
+| `_get_system_directory()` | 调用 `GetSystemDirectoryW` 获取可信系统目录；失败抛 Windows error，不从 PATH 查找 executable。 |
+| `current_process_is_elevated()` | 只读查询当前 token elevation；不请求权限。非 Windows 返回 false。Stage 4D2A 对 true fail closed。 |
+
+### Exit code、验证与残留
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `map_msi_exit_code(exit_code)` | 映射 0/5/1602/1605/1614/1618/1625/1641/3010 等 documented code；1641 单独标记意外已发起重启。 |
+| `_fallback(exit_code)` | 1601–1654 未专门映射的 code 归为 installer failure，其他归为 unknown。 |
+| `MsiUninstallVerifier.__init__(resolver, msi_inventory)` | 注入 fresh normalized registry resolver 和 Windows Installer API inventory。 |
+| `MsiUninstallVerifier.verify(product, installer, max_items, cancellation)` | 独立刷新两种证据；仅在完整、无 warning/truncation 的 registry inventory 中原 identity 消失、ProductCode 也消失且 installer 合理成功时 VERIFIED_REMOVED。partial inventory、失败返回但消失、仍存在、替换升级或 probe 失败均保留独立状态。 |
+| `_replacement_count(snapshot, product)` | 在 fresh inventory 中按规范 name/publisher 搜索不同 identity 的替代版本候选，不把它自动选为目标。 |
+| `_same(left, right)` | 对必需文本做空白规范化/大小写无关比较。 |
+| `SoftwareResidualAnalyzer.analyze(install_location)` | 只对已知 exact path 调用 `os.lstat`；报告缺失/存在/链接/错误，不枚举、不跟随、不删除。 |
+
+### 双重确认 `confirmation.software_uninstall_execution`
+
+| 函数 / 方法 | 作用、输入输出和失败语义 |
+|---|---|
+| `MsiUninstallConfirmationTier` | 区分 PLAN 与 RUNTIME 两个不可互换的 gate。 |
+| `MsiUninstallConfirmationState` | pending/approved/rejected/expired/consumed；terminal 或 consumed 不能重放。 |
+| `MsiUninstallConfirmation` | 绑定两级 parent、transaction/operation/plan/Preview、全部 evidence digest、风险、对象摘要、时间和状态。 |
+| `MsiConfirmationStore.save_plan_confirmation(...)` | 持久化第一 gate 并原子推进 transaction。 |
+| `MsiConfirmationStore.save_runtime_confirmation(...)` | 保存 fresh Preview/tool arguments 与第二 gate。 |
+| `MsiConfirmationStore.get_confirmation(...)` | 按 UUID 读取 durable capability；不存在必须失败。 |
+| `MsiConfirmationStore.resolve_confirmation(...)` | 持久化批准/拒绝/过期及对应 transaction 状态。 |
+| `MsiConfirmationStore.consume_confirmation_pair(...)` | 原子验证和消费 parent/child 两个批准，防止 replay/double-click。 |
+| `MsiUninstallConfirmationService.__init__(store, plan_ttl_seconds, runtime_ttl_seconds, now)` | 校验 TTL、注入 store/时钟；runtime 默认更短。 |
+| `request_plan(plan, preview)` | 要求 executable 当前 Preview，创建并持久化第一确认。 |
+| `resolve_plan(id, approved, plan, preview)` | 重新核对绑定/expiry/current state，持久化用户决定。 |
+| `request_runtime(parent_id, plan, preview)` | 要求已批准 parent 和相同 invariant 的 fresh Preview，创建短时第二确认。 |
+| `resolve_runtime(id, approved, plan, preview)` | 重新核对 parent、证据、risk、Preview 和 expiry 后保存即时决定。 |
+| `consume_runtime(id, plan, preview)` | 要求 runtime approved 和 parent plan approved，随后由 store 原子标记二者 consumed/transaction dispatching。 |
+| `_resolve(...)` | 两级 resolve 的共享校验/状态转换实现。 |
+| `_create(tier, plan, preview, ...)` | 从 plan/Preview 创建完整 digest-bound capability 和明确对象摘要。 |
+| `_require_not_expired(confirmation)` | 发现过期会先 durable 保存 EXPIRED，再抛确认错误。 |
+| `_require_executable(plan, preview)` | 校验 plan/Preview IDs/digests/invariant、风险和 executable，阻止旧/改写对象。 |
+| `_require_current(confirmation, plan, preview, tier)` | 比较存储 capability 与当前全部字段，阻止 risk/capability/ProductCode/identity 替换。 |
+
+### 持久化和执行 guard `persistence.software_uninstall_execution`
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `MsiUninstallRepository.__init__(database_path)` | 创建独立 SQLite engine/session factory；尚未初始化时所有操作 fail closed。 |
+| `initialize()` | 建表和探测数据库；把 dispatching/executing/waiting等 active 状态标为 INTERRUPTED，把未消费确认标为 EXPIRED/CANCELLED；返回中断 transaction IDs，绝不重试。 |
+| `create(plan, preview)` | 在任何 confirmation 前持久化 exact transaction/tool argument digest；全局或同 identity 已有 active transaction 时拒绝。 |
+| `transition(transaction_id, state, ...)` | 只允许显式状态图中的单步转换，并写入最小 installer/verification/error 数据。 |
+| `state(transaction_id)` | 读取当前 durable 枚举状态；未知 ID 或数据库错误抛 store error。 |
+| `save_plan_confirmation(confirmation)` | 原子插入 PLAN row 并从 PREVIEWED 进入 AWAITING_PLAN_CONFIRMATION。 |
+| `save_runtime_confirmation(confirmation, preview)` | 原子更新 fresh Preview/argument digests，插入 RUNTIME row并进入 AWAITING_RUNTIME_CONFIRMATION。 |
+| `get_confirmation(id)` | 从 row 恢复 Pydantic capability；SQLite naive timestamp 会恢复为 UTC。 |
+| `resolve_confirmation(confirmation)` | 只允许 pending/approved 的合法下一状态，并同步 transaction 的 confirmed/cancelled 状态。 |
+| `consume_confirmation_pair(plan_confirmation, runtime_confirmation)` | 在单事务中检查 parent、approved、所有 row/transaction binding 后同时 consumed 并进入 DISPATCHING。 |
+| `close()` | dispose SQLite engine 并清除 initialized 标志。 |
+| `_save_confirmation(...)` | plan/runtime 共用的原子插入和 transaction exact-state比较实现。 |
+| `_transaction(session, id)` | 获取 exact transaction row；不存在抛 store error。 |
+| `_require_initialized()` | 防止数据库未验证时执行任何高风险状态操作。 |
+| `MsiUninstallExecutionGuard.__init__(repository)` | 注入唯一 durable authorization source。 |
+| `MsiUninstallExecutionGuard.require(authorization, tool_name, arguments)` | 紧邻工具调用核对 consumed IDs、tool、argument digest、ProductCode/identity/operation/plan/Preview，然后 durable 进入 EXECUTING；失败转为 `WriteAuthorizationError`。 |
+| `_request_for_preview(preview)` | 只从 validated Preview 构造唯一允许的 typed tool request。 |
+| `_confirmation_to_row(value)` | Pydantic capability 映射为 privacy-minimized SQL row。 |
+| `_confirmation_from_row(row)` | SQL row 恢复强类型 capability 与枚举/UUID/UTC 时间。 |
+| `_as_utc(value)` | 给 SQLite 丢失 timezone 的 timestamp 附加 UTC，已有 timezone 则转换 UTC。 |
+
+### 工具、审计和编排
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `MsiUninstallTool.__init__(platform)` | 创建固定 manifest：唯一工具名、R2、write、irreversible、NONE rollback、runtime confirmation、Preview、batch 1。 |
+| `MsiUninstallTool.manifest` | 返回不可变 manifest 供 registry/independent reviewer 检查。 |
+| `MsiUninstallTool.execute(request, cancellation)` | 要求 `MsiUninstallRequest`，把其中 typed product交给狭窄平台，返回结构化结果；错误类型或 raw 字符串不能通过。 |
+| `MsiUninstallAuditLogger.__init__(repository, app_version, git_commit)` | 注入 append-only audit 和版本追踪，不持有 raw installer metadata。 |
+| `previewed(plan, preview)` | 记录 plan/Preview/identity/ProductCode/capability/safety/preflight digest、counts、风险和 NONE rollback。 |
+| `confirmation_resolved(plan, confirmation)` | 记录 tier、状态、ID 和 digest，不记录 raw ProductCode/command。 |
+| `started(plan, preview, runtime_confirmation_id)` | mandatory write-ahead event；失败会阻止 adapter launch。 |
+| `completed(plan, report)` | 分别记录 installer category/exit code、verification、residual flags 和 recovery level。 |
+| `failed(plan, phase, error_code, mutation_may_have_started)` | 记录安全错误类别和 mutation 可能性，不写异常中的本地 raw 内容。 |
+| `MsiUninstallService.__init__(...)` | 依赖注入完整 identity/policy/preflight/confirmation/repository/registry/verifier/audit 边界及 elevation probe。 |
+| `prepare(user_goal, query, cancellation)` | fresh resolve；若唯一目标则完成 capability/ProductCode/policy/preflight/Preview/review/audit/transaction 并请求 PLAN confirmation；歧义只返回 candidates。 |
+| `resolve_plan_confirmation(id, approved, plan, preview)` | 委托 confirmation service 并记录第一 gate 用户决定。 |
+| `prepare_runtime_confirmation(parent_id, plan, cancellation)` | 进入 VALIDATING，重新运行 elevation、identity、capability、ProductCode、policy、preflight、Preview 和 review；只有完全重现 invariant 才请求 runtime gate。 |
+| `resolve_runtime_confirmation(id, approved, plan, preview)` | 保存和审计第二 gate 决定。 |
+| `execute(runtime_id, plan, preview, cancellation)` | 原子消费确认、写前审计、构造 exact authorization、经 registry/guard dispatch 一次；long-running 保持 WAITING，否则刷新验证、残留报告、终态和审计。任何 post-launch错误不触发 retry。 |
+| `_fresh_target(identity_digest, cancellation)` | fresh inspect exact identity 并取只在内存存在的 raw entry；warning/truncation、identity/raw 缺失即 TARGET_CHANGED/RAW_EVIDENCE_MISSING。 |
+| `_terminal_state(installer, verification)` | 将 installer/verification 二维结果映射为 truthful transaction 终态，优先保留 reboot/user-cancel/privilege 和 unverified。 |
+
+### 运行时和 GUI
+
+| 函数 / 方法 | 作用、输入输出和线程/安全约束 |
+|---|---|
+| `MsiUninstallServices` | 将专用 registry、resolver 和 orchestration service 打包给 GUI/测试。 |
+| `ApplicationRuntime.__init__(settings)` 的 Stage 4D2A 部分 | 初始化 `MsiUninstallRepository`，立即执行 crash recovery，并公开只读 `interrupted_msi_uninstall_ids`；数据库不可验证时应用初始化失败。 |
+| `ApplicationRuntime.create_msi_uninstall_services()` | 组装生产 Windows inventory/MSI adapter、专用 store/guard/registry、policies、preflight、confirmations、verifier、residual 和 audit；不复用通用命令执行器。 |
+| `ApplicationRuntime.close()` 的 Stage 4D2A 部分 | 在共享 audit 关闭前 dispose MSI transaction store，避免 GUI 退出后遗留连接。 |
+| `AppSettings.from_env()` 的 Stage 4D2A 部分 | 读取 runtime confirmation TTL、monitor poll 和 long-running threshold；Pydantic 限制安全范围，未提供任意 executable/args 配置。 |
+| `PreparedMsiUninstallWithServices` | Qt worker payload，确保后续确认/执行继续使用产生该 Preview 的同一服务图。 |
+| `MsiUninstallPrepareWorker.__init__(runtime, user_goal, query)` | 保存输入并创建 cancellation token，不在 GUI 线程访问 Windows inventory。 |
+| `MsiUninstallPrepareWorker.run()` | 后台创建服务并调用 `prepare`；异常转为可见 failed signal，成功发 candidates/Preview。 |
+| `MsiUninstallPrepareWorker.cancel()` | 协作取消剩余只读准备步骤。 |
+| `MsiRuntimePrepareWorker.__init__(services, plan_confirmation_id, plan)` | 保存第一 confirmation 和 immutable plan 供后台 fresh revalidation。 |
+| `MsiRuntimePrepareWorker.run()` | 校验 UUID并后台请求 runtime Preview/confirmation；不执行 adapter。 |
+| `MsiRuntimePrepareWorker.cancel()` | 只取消未完成的运行时重新验证。 |
+| `MsiUninstallExecuteWorker.__init__(services, runtime_confirmation_id, plan, preview)` | 保存 single-use capability 和 exact对象，创建 cancellation token。 |
+| `MsiUninstallExecuteWorker.run()` | 后台消费确认、执行和监控/验证；异常转 failed signal，避免冻结 Qt。 |
+| `MsiUninstallExecuteWorker.cancel()` | 启动前可阻止 spawn；启动后只记录请求，不 kill MSI。 |
+| `require_prepared_msi_uninstall(value)` | Qt object signal 的 runtime type narrowing；错误 payload 抛 TypeError。 |
+| `require_runtime_msi_confirmation(value)` | 确保 payload 是 fresh runtime Preview/confirmation。 |
+| `require_msi_uninstall_report(value)` | 确保 payload 是 verified final execution report。 |
+| `SoftwareUninstallDialog.__init__(runtime, user_goal, query, parent)` | 创建 modeless 两级确认窗口，默认焦点/按钮为取消，并立即启动后台准备。 |
+| `_build_ui()` | 创建风险说明、详情、单选 candidates、indeterminate progress 和取消优先按钮；没有通用参数输入。 |
+| `_start_prepare(query)` | 启动 prepare worker 并把 UI 置为尚未授权状态。 |
+| `_prepared(value)` | 接收 candidates 或 reviewed Preview；缺 plan/confirmation/review fail closed。 |
+| `_show_candidates(candidates, reason)` | 显示明确单选表，identity digest 存在本地 item data；不会按第一候选自动执行。 |
+| `_primary_clicked()` | 只按明确 state machine 分派选择/计划确认/runtime确认/关闭，其他状态无动作。 |
+| `_select_candidate()` | 从已选择行取 identity digest，废弃旧状态并生成全新计划。 |
+| `_approve_plan()` | 保存第一次批准，然后在后台完整重新验证；不直接调用工具。 |
+| `_runtime_prepared(value)` | 显示 fresh 即时确认；R2_HIGH 按钮加强警告但默认仍是取消。 |
+| `_approve_runtime_and_execute()` | 保存第二次批准并启动 execute worker；UI 自身不调用 registry/platform。 |
+| `_completed(value)` | 显示 installer、verification、residual 和 recovery 的分离结果。 |
+| `_show_preview(preview, immediate)` | 生成 plan 或 runtime 阶段对象级说明并设置取消优先。 |
+| `_cancel_clicked()` | pending gate 时持久化拒绝；worker 时发协作取消；已启动 MSI 不强杀。 |
+| `_reject_plan_and_close()` | durable 拒绝 PLAN confirmation 后关闭，finally 确保窗口结束。 |
+| `_reject_runtime_and_close()` | durable 拒绝 RUNTIME confirmation 后关闭。 |
+| `_failed(message)` | 显示 fail-closed 状态并明确无自动 retry/elevation/process/service/residual action。 |
+| `_set_busy(text)` | 设置不确定进度并禁用批准按钮。 |
+| `shutdown()` | 受控退出时请求协作取消；不终止已启动 installer。 |
+| `closeEvent(event)` | worker 活跃时忽略直接关闭并先取消；pending confirmation 视为拒绝。 |
+| `_preview_html(preview, immediate)` | HTML 转义所有本地字符串，显示精确对象、ProductCode、风险、preflight、NONE rollback 和不会自动做的动作。 |
+| `_report_html(report)` | HTML 转义并分开显示 installer/verification/residual/recovery；不把 exit 0 单独写成成功。 |
+| `SystemDiagnosticsTab.open_msi_uninstall(user_goal, query)` | 从安全软件表或聊天打开 modeless dialog，登记生命周期并提示“尚未授权”。 |
+| `SystemDiagnosticsTab._open_selected_msi_uninstall()` | 将单选表的 name/version/publisher/scope/architecture 转为 query，未选目标时拒绝。 |
+| `SystemDiagnosticsTab._software_selection_changed()` 的 Stage 4D2A 部分 | 只在恰好选择一个可投影软件行时启用 MSI 审查按钮；选择本身不授权。 |
+| `SystemDiagnosticsTab.shutdown()` 的 Stage 4D2A 部分 | 对所有存活卸载 dialog 调用安全 shutdown，防止主窗口退出时丢失 worker 所有权。 |
+| `MainWindow._handle_chat()` 的 Stage 4D2A 分支 | 本地提取明确显示名称并创建 `SoftwareTargetQuery`；不解析 ProductCode/命令/参数。 |
+
+补充错误/记录类型：`MsiProductValidationError`、`MsiUninstallExecutionError` 和
+`MsiUninstallStoreError` 分别标识身份、编排和持久化 fail-closed 边界；其构造函数只接收安全
+code/message。`PreparedMsiUninstall` 与 `PreparedMsiRuntimeConfirmation` 是编排阶段返回值，
+不会自行执行。`MsiUninstallTransactionRow`/`MsiUninstallConfirmationRow` 是内部 SQL 映射，
+禁止进入模型 payload。`SoftwareUninstallSafetyPolicy.assess()` 现在优先把 Visual C++、
+redistributable 和 shared-runtime 关键词分类为 `SHARED_RUNTIME`，避免落入 developer-runtime
+可执行规则。
+
 ## Stage 4D1 软件身份与卸载 Preview API（零执行）
 
 本节覆盖 Stage 4D1 新增或修改的每个生产函数和方法。这里的“卸载能力”仅表示本地元数据足以

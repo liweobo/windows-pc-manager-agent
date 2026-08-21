@@ -1,5 +1,44 @@
 # Architecture
 
+## Stage 4D2A controlled MSI execution boundary
+
+Stage 4D2A adds a new one-tool write slice without granting Stage 4D1 any execution authority:
+
+```text
+chat/table selection (untrusted display query)
+  -> fresh SoftwareInventoryService + exact SoftwareTargetResolver
+  -> UninstallCapabilityResolver (MSI + high confidence only)
+  -> MsiProductValidator (strict ProductCode + msi.dll registration + metadata/context match)
+  -> SoftwareUninstallSafetyPolicy -> SoftwareUninstallExecutionPolicy
+  -> SoftwareExecutionPreflight (read-only process/service path evidence)
+  -> MsiUninstallPlan + MsiUninstallPreview + independent safety review
+  -> durable plan confirmation
+  -> repeat every identity/capability/policy/preflight check
+  -> fresh short-lived runtime confirmation
+  -> atomic confirmation consumption + mandatory write-ahead audit
+  -> ToolRegistry[software.uninstall.msi] + MsiUninstallExecutionGuard
+  -> WindowsMsiUninstallPlatform(fixed msiexec argument array, shell=False)
+  -> exit-code evidence + fresh registry/MSI inventory verification
+  -> bounded lstat residual report + final transaction/audit
+```
+
+`ValidatedMsiProduct` is the only adapter input. It binds ProductCode, normalized Stage 4D1 identity,
+metadata, capability, Windows Installer registration, scope, architecture and source anchor. There is
+no executable path, raw command or arbitrary argument field. `MsiUninstallRepository` separately
+persists the transaction and both confirmation capabilities; the audit store receives only digests,
+decisions, counts, installer category/exit code and verification state.
+
+At most one MSI transaction may be active. The write guard changes `DISPATCHING` to `EXECUTING` in
+the same durable authorization check immediately before the platform call. A completed process is
+verified rather than trusted. If the fixed monitor window elapses, the child is not killed: the
+transaction remains `WAITING`, verification/residual inspection are deferred, and restart recovery
+marks it `INTERRUPTED` without redispatch.
+
+The PySide6 dialog uses three workers: preparation, immediate revalidation, and execution/monitoring.
+The UI only resolves explicit confirmation choices through the orchestration service and never calls
+the registry or Windows adapter directly. Cancellation before launch prevents process creation;
+cancellation after launch is recorded but cannot terminate Windows Installer.
+
 ## Stage 4D1 zero-execution uninstall-analysis boundary
 
 Stage 4D1 adds a read-only slice; it does not extend the write executor. Raw source records and

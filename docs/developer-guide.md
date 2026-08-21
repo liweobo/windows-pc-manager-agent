@@ -1,5 +1,46 @@
 # Developer guide
 
+## Stage 4D2A development
+
+执行链分布在 `domain/software_uninstall_execution.py`、
+`orchestration/software_msi_validation.py`、`orchestration/software_execution_preflight.py`、
+`safety/software_uninstall_execution_*`、`confirmation/software_uninstall_execution.py`、
+`persistence/software_uninstall_execution.py`、`platform_support/*/msi_uninstall.py`、
+`tools/system_tools/software_uninstall.py`、`orchestration/software_uninstall_execution.py`、
+`audit/software_uninstall_execution.py` 和 `ui/software_uninstall_*`。
+
+开发时必须保持这些不变量：
+
+- Stage 4D2A registry 精确等于 `software.uninstall.msi`；输入只能是
+  `MsiUninstallRequest(product=ValidatedMsiProduct)`，禁止加入字符串命令或额外参数。
+- ProductCode 必须来自 fresh 本地 inventory，并与 msi.dll 当前注册、Stage 4D1 capability、
+  source-qualified identity 和 metadata 全部一致；LLM 只能给 `SoftwareTargetQuery`。
+- safety class 在 mechanism 之前决定。新类型没有显式 ALLOW 规则就保持 R3/BLOCK。
+- 计划确认、runtime 确认和 write guard 是三个独立门；测试必须覆盖 expiry、binding、replay、
+  double-click、数据库失败和身份变化。
+- `WindowsMsiUninstallPlatform` 的 executable 和参数模板是产品策略，不允许传入 raw metadata。
+  不得添加 silent flags、Vendor/package fallback、shell、elevation、kill/reboot/retry。
+- Windows Installer 未退出时不能刷新清单并宣称 final success。有限监控后保持 `WAITING`；
+  restart 只标 `INTERRUPTED`。
+- verifier 必须保留 installer result 与 observed state 两部分；residual analyzer 只能 exact-path
+  `lstat`，不能枚举、跟随链接或删除。
+- 所有测试使用 fake adapter 和 synthetic ProductCode。普通 CI 绝不卸载 runner 软件。
+
+专项命令：
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_msi_uninstall_*.py `
+  tests/integration/test_msi_uninstall_workflow.py `
+  tests/security/test_msi_uninstall_execution_security.py `
+  tests/gui/test_software_uninstall_dialog.py -q
+uv run ruff check .
+uv run mypy src
+```
+
+新增或修改任何生产函数时，必须同步下面的 `api-reference.md`；文档不得包含真实软件清单、
+真实 ProductCode、原始 UninstallString 或本机残留路径。
+
 ## Stage 4D1 development
 
 实现分布在 `domain/software_uninstall_analysis.py`、`platform_support/*/software_inventory.py`、

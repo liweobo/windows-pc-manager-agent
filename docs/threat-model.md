@@ -1,5 +1,23 @@
 # Threat model
 
+## Stage 4D2A additions
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Malicious/quoted UninstallString starts shell, PowerShell or another executable | Execution model has no command field; strict local ProductCode is revalidated and fixed `msiexec` arguments are code-generated with `shell=False` | MSI custom actions are installer-controlled and may themselves have defects |
+| Display name resolves to the wrong application | Source-qualified identity plus exact version/publisher/scope/architecture and Windows Installer registration; ambiguity requires explicit selection | Registry/MSI metadata can be inaccurate or maliciously altered by same-user malware |
+| Software upgrades between Preview and execution | Full identity/capability/ProductCode/policy/preflight revalidation; changed invariant invalidates confirmation | Change can occur after final revalidation; durable exact guard narrows but cannot eliminate OS-level races |
+| User/model supplies ProductCode or extra flags | Schema accepts only target query; ProductCode comes from local raw inventory and API; adapter accepts typed product only | Compromised local inventory/API boundary remains trusted Windows evidence |
+| Confirmation is replayed or double-clicked | Durable expiry, plan/runtime parent binding and atomic single-use consumption | Database corruption stops write actions rather than recovering availability |
+| Protected MSI is treated as safe because it is MSI | Safety class precedes mechanism; shared runtime/driver/security/Windows/Agent/unknown classes block | Complete software dependency knowledge is unavailable |
+| Related application/service is silently stopped | Preflight is read-only and blocks; no process/service-control dependency exists in this service graph | MSI custom actions may request their own application/service handling |
+| Machine MSI triggers elevation or UAC | Machine/managed context blocks; elevated Agent process blocks; no runas/ShellExecute broker | Some current-user MSI custom actions may still return privilege-required |
+| Installer hangs | Finite monitor window returns `MONITORING_DETACHED`, keeps process alive and transaction `WAITING`; no early verification | User may need to inspect/close installer UI manually |
+| Success exit is false success | Fresh registry and Windows Installer API verification determines final state | Inventory can be temporarily unavailable; outcome then remains unverified |
+| Residual cleanup deletes user data or follows a junction | Analyzer performs only exact-path `lstat`, no recursion/follow/delete | It cannot quantify all residuals |
+| Crash causes duplicate uninstall | Startup marks active work `INTERRUPTED`; confirmations expire; no automatic retry | Installer may have continued outside the crashed Agent |
+| Audit failure hides a mutation | Pre-start failure aborts; post-start failure warns and suppresses retry | A post-start local disk failure can still lose some final evidence |
+
 ## Stage 4D1 additions
 
 | Threat | Control | Residual risk / truthful limitation |

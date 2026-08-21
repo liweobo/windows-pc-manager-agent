@@ -104,6 +104,28 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4D2A retains Stage 4D1 analysis and adds exactly one write tool:
+`software.uninstall.msi`. It accepts only an internally built `ValidatedMsiProduct` for one exact,
+high-confidence, current-user unmanaged MSI. Before execution it must repeat inventory resolution,
+ProductCode/API registration validation, metadata comparison, deterministic safety classification,
+process/service preflight, Preview validation, plan confirmation and short-lived immediate
+confirmation. Both confirmations are digest-bound, durable, expiring and single-use. The write guard
+must atomically consume them and record `EXECUTING` immediately before the adapter call.
+
+The fixed Windows adapter may invoke only system `msiexec.exe` with the argument array
+`/x`, validated ProductCode, `/norestart`, and `shell=False`. Never accept raw UninstallString,
+LLM/user executable or arguments, Vendor/MSIX/package-manager fallback, WMI `Win32_Product`, shell,
+PowerShell, CMD, elevation, automatic reboot, automatic retry, process termination, service stop,
+program/user-data/residual deletion or more than one active MSI transaction. Machine or managed MSI,
+shared runtimes, drivers, Windows/security/network/enterprise/Agent components and unknown classes
+are blocked. Rollback is NONE; reinstall guidance is not Undo.
+
+Installer exit is not final success. Refresh both normalized software inventory and Windows
+Installer registration, report contradictions, and inspect only the exact known install path with
+`lstat`. A long-running installer is left alive as `WAITING`; restart changes active transactions to
+`INTERRUPTED` and never redispatches them. No durable transaction or mandatory pre-start audit means
+no launch.
+
 Stage 4D1 retains all earlier stages and adds exactly five R0 analysis tools:
 `software.inventory`, `software.resolve`, `software.inspect`,
 `software.uninstall_capability`, and `software.uninstall_preview`. This stage may inventory and
@@ -113,11 +135,10 @@ process/startup/service evidence, and display an expiring Preview. It must then 
 acknowledgement records understanding only and never authorizes execution. Raw uninstall strings,
 registry paths and installer arguments must not enter audit or model payloads.
 
-Stage 4D1 has no uninstall executor, package-removal adapter, generic command runner, elevation,
-program-file deletion or user-data deletion. Never invoke MSI, vendor uninstallers, package
-managers, MSIX removal, Windows Feature/driver removal, shell, PowerShell, CMD or arbitrary process
-creation from software metadata. Ambiguous names are never auto-selected, and stale identity,
-metadata or capability evidence invalidates the Preview.
+Stage 4D1 has no execution authority; its acknowledgement cannot authorize Stage 4D2A. It still has
+no package-removal adapter, generic runner, elevation, program-file deletion or user-data deletion.
+Ambiguous names are never auto-selected, and stale identity, metadata or capability evidence
+invalidates every Preview.
 
 Stage 4C2 retains earlier stages and adds exactly three narrow startup-configuration tools:
 `system.service.startup.set_automatic`, `system.service.startup.set_manual`, and
