@@ -96,15 +96,25 @@ and runtime confirmations, and the one-tool fixed `msiexec /x ProductCode /nores
 Post-exit verification uses both refreshed inventories; residuals are report-only. There is no
 elevation, reboot, retry, process/service control, raw UninstallString or automatic rollback.
 
-## Stage 4D2B — controlled vendor uninstaller research (planned)
+## Stage 4D2B — controlled interactive Vendor uninstall (complete)
 
-Future work may study executable identity, Authenticode/publisher validation, known installer-family
-argument grammars and interactive monitoring. Raw UninstallString execution, shell/CMD/PowerShell
-wrappers and generic process creation remain prohibited. This stage has not started.
+One high-confidence current-user direct local Vendor `.exe` may pass Windows command-line parsing,
+strict path/File ID/SHA-256/offline Authenticode/Publisher/install-location trust, the finite
+interactive argument policy, Stage 4D1 class policy, read-only preflight, fresh Preview, two durable
+confirmations and the sole shell-free adapter. Process/descendant observation remains non-controlling;
+fresh inventory determines removal and residuals are report-only. Raw/Quiet UninstallString,
+wrappers, scripts, network/relative/PATH targets, elevation, retry, reboot, process/service control,
+vendor-UI automation and cleanup remain prohibited.
+
+## Stage 4D2C — Package Manager / MSIX controlled uninstall (planned)
+
+Future work may research winget package identity, trusted package sources, structured package-manager
+arguments, Store/AppX/MSIX identity, framework protection, risk/confirmation policy and fresh
+verification. Stage 4D2B contains no winget, `Remove-AppxPackage`, package manager or MSIX execution.
 
 ## Stage 4C3+ / other controlled system operations (not started)
 
-Broader service changes, non-MSI uninstall execution, firewall changes, cleanup and other system
+Broader service changes, unsupported uninstall mechanisms, firewall changes, cleanup and other system
 operations remain design-only. Each capability requires its own threat model, confirmation,
 recovery plan, Windows API experiment, and isolated test/review before implementation.
 

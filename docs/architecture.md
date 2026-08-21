@@ -1,5 +1,54 @@
 # Architecture
 
+## Stage 4D2B controlled Vendor execution boundary
+
+Stage 4D2B is a second, separate one-tool write slice. It does not turn registry command text into a
+generic process runner:
+
+```text
+chat/table selection (display query only)
+  -> fresh SoftwareUninstallRouter (MSI / Vendor / ambiguous / unsupported)
+  -> fresh SoftwareTargetResolver + Stage 4D1 capability and software policy
+  -> VendorUninstallMetadataParser (parse only; raw string remains ephemeral)
+  -> literal absolute-local VendorExecutableResolver
+  -> Windows file identity + bounded SHA-256 + offline Authenticode + Publisher relation
+  -> VendorArgumentPolicy + VendorUninstallerIdentity
+  -> read-only process/service preflight
+  -> immutable VendorUninstallPlan + expiring Preview + independent safety review
+  -> durable plan confirmation
+  -> rebuild every software/executable/argument/policy/preflight fact
+  -> short-lived object-specific runtime confirmation
+  -> atomic pair consumption + mandatory pre-start audit
+  -> ToolRegistry[software.uninstall.vendor] + VendorUninstallExecutionGuard
+  -> WindowsVendorUninstallPlatform(exact argv, explicit executable/cwd, sanitized env, shell=False)
+  -> direct/descendant process observation (no signal, kill, UI automation or retry)
+  -> fresh Installed Software inventory verification
+  -> exact known-location lstat report + terminal transaction/audit
+```
+
+`VendorUninstallerIdentity` is the stable security boundary. It binds the source-qualified software
+identity and registry-source digest to one exact executable observation (absolute path, volume/File
+ID, size, creation/modification times, SHA-256, location relationship, signature and signer match),
+the exact parsed argv tuple and the argument decision. Preview and runtime confirmation compare the
+stable invariant digest, so replacing the file or changing metadata/arguments after Preview stops
+before dispatch.
+
+There are deliberately separate registries and repositories for MSI and Vendor execution, while
+both repositories check the other's table to enforce one active uninstall globally. The Vendor
+write guard changes `DISPATCHING` to `EXECUTING` in the same durable authorization check immediately
+before the adapter call. No durable transaction or mandatory pre-start audit means no launch.
+
+The process adapter observes the direct process and descendants. A normal process exit advances to
+fresh inventory verification; it does not prove success. Cancellation after launch and the bounded
+long-running threshold return an unknown state without terminating anything, keep the transaction
+active as `MONITORING`, and defer final verification. On application restart, active dispatched work
+becomes `INTERRUPTED`; confirmations expire and the executable is never redispatched.
+
+Raw command text, raw arguments and full executable paths are excluded from durable confirmation and
+ordinary audit payloads. Only digests, evidence categories, counts, process facts and verification
+facts cross those boundaries. The GUI receives a safe Preview and leaves the vendor's native UI
+entirely under user control.
+
 ## Stage 4D2A controlled MSI execution boundary
 
 Stage 4D2A adds a new one-tool write slice without granting Stage 4D1 any execution authority:

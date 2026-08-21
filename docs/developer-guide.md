@@ -1,5 +1,56 @@
 # Developer guide
 
+## Stage 4D2B development
+
+实现分布在 `domain/vendor_uninstall.py`、`orchestration/vendor_*`、
+`safety/vendor_*`、`confirmation/vendor_uninstall.py`、`persistence/vendor_uninstall.py`、
+`platform_support/vendor_uninstall.py`、`platform_support/windows/authenticode.py`、
+`platform_support/windows/vendor_uninstall.py`、`tools/system_tools/vendor_uninstall.py`、
+`audit/vendor_uninstall.py` 和 `ui/vendor_uninstall_*`。`software_uninstall_router.py` 只读选择
+MSI/Vendor 机制，不能执行。完整函数级说明见 `docs/api-reference.md` 的 Stage 4D2B 章节。
+
+维护时必须保持以下不变量：
+
+- 专用 registry 精确等于 `software.uninstall.vendor`；tool 输入只能是内部
+  `VendorUninstallRequest(action=ValidatedVendorUninstallAction)`，禁止加入字符串命令、路径、
+  参数或通用 process API。
+- Raw/Quiet UninstallString 只存在于 fresh ephemeral inventory。解析使用
+  `CommandLineToArgvW`；不要用 POSIX `shlex` 代替，不要把 raw 值持久化或传给模型。
+- Resolver 不做 PATH 搜索或环境展开。只有 direct local absolute `.exe` 能进入 trust；
+  wrapper/loader/script/UNC/device/reparse/temp/download/cache 全部 fail closed。
+- 文件身份、SHA-256、离线 Authenticode、Publisher 匹配、安装目录关系和 exact argv 都是执行
+  不变量。不要把“signed”或“在 Program Files”单独变成 ALLOW 条件。
+- 参数策略是 finite allow-list。策略失败就停止；禁止删掉可疑参数后继续、添加 silent/restart
+  参数，或让 LLM/用户编辑参数。
+- Stage 4D1 class policy 先于 mechanism。任何新 class 没有明确 ALLOW 规则都保持 R3/BLOCK。
+- Plan、runtime confirmation 和 write guard 是三个独立门，全部绑定稳定摘要、过期且单次消费。
+  MSI 与 Vendor repository 必须互相阻止第二个 active uninstall。
+- Preflight 只有读权限；不要注入 Stage 4A/4C 写服务。相关进程不自动 kill，服务不自动 stop。
+- Adapter 只能使用 exact array、absolute executable、explicit cwd、sanitized env、DEVNULL、
+  `shell=False`。禁止 shell/CMD/PowerShell/runas/ShellExecute/重试/重启/terminate/kill/UI automation。
+- 停止监控和 long-running 结果不代表停止卸载，事务保持 `MONITORING`；重启变
+  `INTERRUPTED`，绝不 redispatch。只有正常结束后才运行 fresh verifier。
+- Verifier 必须保留 process result 与 observed software state；residual analyzer 只能 exact-path
+  `lstat`，不能枚举、跟随或删除。Rollback 永远为 NONE。
+- Audit/confirmation/transaction 不保存 raw command、full args/path、child environment 或 secret。
+  Pre-start audit/persistence 失败必须阻止 launch。
+
+本阶段定向验证命令：
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_vendor_uninstall_*.py `
+  tests/unit/test_software_uninstall_router.py `
+  tests/integration/test_vendor_uninstall_workflow.py `
+  tests/security/test_vendor_uninstall_security.py `
+  tests/gui/test_vendor_uninstall_dialog.py -q
+uv run ruff check .
+uv run mypy src
+```
+
+所有 fixture 必须是合成数据和 fake adapter。不得提交本机软件清单、真实 UninstallString、
+真实可执行路径、注册表 dump、审计数据库或残留报告；CI 不得卸载 runner 软件。
+
 ## Stage 4D2A development
 
 执行链分布在 `domain/software_uninstall_execution.py`、

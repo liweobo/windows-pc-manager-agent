@@ -1,5 +1,27 @@
 # Windows PC Manager Agent
 
+## Stage 4D2B：受控交互式 Vendor Uninstaller
+
+Stage 4D2B 新增且只新增一个厂商卸载写工具：`software.uninstall.vendor`。它不接受原始
+`UninstallString`，而是先用 Windows `CommandLineToArgvW` 只做解析，再要求一个明确的本地
+绝对 `.exe`、current-user 软件身份、安装目录关系、稳定 File ID/大小/时间/SHA-256、有效的
+离线 Authenticode 签名、保守的 Publisher 匹配，以及有限的交互式参数策略全部通过。
+
+支持边界刻意很窄：普通 current-user 应用为 R2，明确的开发工具/运行时为
+R2_HIGH_IMPACT。CMD、PowerShell、pwsh、WScript、CScript、MSHTA、Rundll32、脚本、UNC、
+相对路径、PATH 搜索、临时/下载/缓存目录、QuietUninstallString、machine-wide 安装和受保护
+软件全部阻止。参数只来自本机当前注册元数据，模型和用户都不能增加、删除或“修复”参数。
+
+执行前有计划确认和短时即时确认；两者绑定软件、能力、卸载器文件、哈希、参数、策略、
+preflight、风险与 Preview 摘要，并且只能消费一次。Windows 适配器使用绝对 executable 与参数
+数组、固定安全 cwd、最小脱敏环境、`shell=False` 和 DEVNULL 标准流；不调用 runas，不自动
+关闭进程、停止服务、点击厂商界面、重启、重试或删除残留。厂商界面由用户亲自操作。
+
+进程退出码只是一条证据。退出后必须刷新 Installed Software 清单；只有原精确身份消失且清单
+完整时才报告已验证移除。长时间运行或用户停止监控不会强杀卸载器，事务保持活动；应用重启会
+标记 `INTERRUPTED` 并禁止自动重启卸载器。残留只做单路径 `lstat` 报告，Rollback 为 `NONE`；
+重新安装是人工恢复建议，不是 Undo。
+
 ## Stage 4D2A：受控 MSI 软件卸载
 
 Stage 4D2A 第一次开放真实软件卸载，但执行面只有一个工具：
@@ -41,8 +63,8 @@ MSIX、Portable、Windows Feature、Driver 与 Unknown。原始卸载字符串�
 
 最终 Preview 显示安全分类、能力证据、相关进程/启动项/服务的只读影响线索、未知项、风险和
 明确停止原因。按钮“我已理解目标”只记录与 plan/Preview 摘要及有效期绑定的 acknowledgement，
-不会创建卸载授权。只有全新的 Stage 4D2A 流程能在更窄边界内调用单个 MSI 工具；Stage 4D1
-acknowledgement 不能复用。厂商、winget、MSIX 和其他卸载机制仍不存在。
+不会创建卸载授权。只有全新的 Stage 4D2A MSI 或 Stage 4D2B Vendor 流程能在各自更窄边界内
+调用单个工具；Stage 4D1 acknowledgement 不能复用。winget、MSIX 和其他机制仍不存在。
 
 ## Stage 4C2：Windows 服务启动类型安全管理
 
@@ -165,7 +187,7 @@ restore claim.
 
 ## 当前版本
 
-Stage 4D2A / `0.1.0` 开发版本在此前阶段基础上包含：
+Stage 4D2B / `0.1.0` 开发版本在此前阶段基础上包含：
 
 - PySide6 主窗口和系统托盘；
 - 基础聊天、计划、风险提示与确认界面；
@@ -178,6 +200,8 @@ Stage 4D2A / `0.1.0` 开发版本在此前阶段基础上包含：
 - 与计划和 Preview 摘要绑定、但绝不授予卸载权限的目标理解确认；
 - 单个 current-user 高可信度 MSI 的 ProductCode/API 交叉验证和默认拒绝执行策略；
 - 双重一次性确认、SQLite 卸载事务、固定 `msiexec` 参数适配器和退出码分类；
+- 对高可信 current-user Vendor `.exe` 的严格解析、身份/签名/参数验证和 shell-free 启动；
+- MSI/Vendor 互斥事务、机制路由、厂商 UI 监控、fresh inventory 验证和只报告残留；
 - 无进程终止/服务停止/提权/重启/残留删除的 preflight、监控和后置验证；
 - 用户管理的授权目录、常用目录与自定义禁止目录；
 - 不跟随符号链接/联接点/重解析点的流式只读目录元数据扫描；
@@ -195,8 +219,8 @@ Stage 4D2A / `0.1.0` 开发版本在此前阶段基础上包含：
 
 它不会覆盖或永久删除，不会执行跨卷移动、管理员提权或 Shell。Stage 2A 只允许
 已授权本地目录内的 R1 可逆操作，Stage 2B 仅支持回收站，Stage 4A 仅支持上述受控进程生命
-周期操作，Stage 4B/4C1/4C2 也只开放各节列出的窄工具；Stage 4D2A 只有上述单个 MSI 工具，
-不存在通用软件、注册表、服务或命令接口。
+周期操作，Stage 4B/4C1/4C2 也只开放各节列出的窄工具；Stage 4D2A 与 4D2B 各自只有一个
+专用卸载工具，不存在通用软件、注册表、服务、包管理器或命令接口。
 
 ## 安装
 

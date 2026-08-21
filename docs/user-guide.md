@@ -1,5 +1,34 @@
 # User guide
 
+## 使用 Stage 4D2B 受控 Vendor 卸载
+
+1. 在“系统诊断”刷新软件清单并选中一行，点击“受控审查选中 Vendor”；也可以在聊天输入
+   “卸载软件 Example App”。聊天会先只读判断应进入 MSI 还是 Vendor 流程。名称有歧义时，
+   必须自己选择一个精确候选。
+2. 应用重新读取本机软件条目，但不会直接运行注册表里的 UninstallString。它会依次检查：
+   current-user 范围、本地绝对 `.exe`、安装目录关系、文件身份与 SHA-256、离线数字签名、
+   Publisher 匹配、有限参数策略，以及相关进程和服务。
+3. CMD/PowerShell/pwsh、脚本宿主、Rundll32、`.bat/.cmd/.ps1/.vbs/.js/.wsf`、UNC/网络路径、
+   相对路径、临时/下载/缓存目录、QuietUninstallString、machine-wide 软件或证据不足都会直接
+   显示“不支持/已阻止”，没有“强制执行”按钮。
+4. 阅读第一次计划确认：核对软件名称、版本、Publisher、范围、卸载器身份状态、签名、参数
+   策略、R2/R2_HIGH_IMPACT、相关进程/服务、Rollback NONE 和“不自动进行”的操作。默认是取消。
+5. 确认计划后，应用会完整重读所有信息。文件、哈希、参数、软件身份、风险或运行状态变化会
+   使旧确认失效。第二次即时确认只授权这一份当前对象一次。
+6. 启动后由厂商自己的窗口显示选项。请自己阅读并操作；Agent 不会自动点击“下一步”、选择
+   “删除数据”、关闭其他程序、停止服务、请求管理员权限或重启电脑。
+7. “停止监控”只表示 Agent 不再观察，不会终止厂商卸载器。长时间运行时可以继续使用厂商
+   窗口；不要重复提交同一卸载。应用重启后旧任务会标记 `INTERRUPTED`，不会自动重启。
+8. 结束后查看两种独立事实：“厂商进程结果”和“刷新后的软件清单验证”。只有原精确软件身份
+   在完整 fresh inventory 中消失，才是 `VERIFIED_REMOVED`。退出码 0 但软件仍存在不算成功。
+9. 残留报告只说明原已知安装目录是否存在；应用不会打开遍历、删除 AppData/ProgramData、
+   用户文档、配置、数据库、注册表或任何残留。
+
+Vendor 卸载的 Rollback 为 `NONE`。需要恢复时通常只能从可信来源人工重新安装，但重新安装不是
+Undo，也不保证恢复原设置、许可证、插件或数据。第一版不支持 QuietUninstallString、复杂
+bootstrapper family、脚本/Rundll32、machine-wide 提权、vendor-specific exit code、winget 或
+MSIX。
+
 ## 使用 Stage 4D2A 受控 MSI 卸载
 
 1. 在“系统诊断”先获取软件清单，选中一行后点击“受控卸载选中 MSI”；也可以在聊天输入
@@ -22,8 +51,8 @@
 9. 残留报告只说明原已知安装目录是否仍存在。应用不会删除目录、AppData、Documents、
    ProgramData、设置、注册表残留或用户数据。
 
-目前不能执行 Vendor Uninstaller、winget、MSIX、Portable App、驱动、Windows 组件、安全
-软件、共享运行库或未知软件的卸载。很多 MSI 需要管理员权限；当前版本会返回
+此 MSI 流程不能执行 Vendor Uninstaller、winget、MSIX、Portable App、驱动、Windows 组件、
+安全软件、共享运行库或未知软件的卸载；合格 Vendor 目标必须进入独立 Stage 4D2B 流程。很多 MSI 需要管理员权限；当前版本会返回
 `PRIVILEGE_REQUIRED` 或在计划阶段阻止，不会弹出 UAC。卸载没有自动 Undo，恢复通常需要从
 可信来源重新安装，而重新安装不保证恢复原设置和数据。
 

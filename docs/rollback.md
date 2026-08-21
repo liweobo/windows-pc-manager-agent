@@ -1,5 +1,29 @@
 # Rollback design
 
+## Stage 4D2B Vendor uninstall
+
+`software.uninstall.vendor` has `RollbackLevel.NONE`. A vendor's interactive uninstaller may remove
+program files, registrations, integrations, settings or data according to vendor-specific behavior
+that the Agent cannot predict or invert. The Agent therefore creates no Undo command, never labels
+reinstall as rollback and never attempts to restore deleted software state automatically.
+
+Before confirmation, cancellation needs no rollback because no process has started. After launch:
+
+1. complete or cancel choices in the vendor's own visible UI yourself;
+2. “停止监控” only detaches Agent observation—it does not cancel or terminate the uninstaller;
+3. for `MONITORING`/`INTERRUPTED`, check whether the vendor window/process is still active, then run a
+   fresh software inventory; never replay the old confirmation or automatically start it again;
+4. compare the independent process category and fresh verification state; exit code 0 alone is not
+   proof of removal;
+5. if the exact target remains, review the vendor UI/result before creating any new plan;
+6. if `VERIFIED_REMOVED`, reinstall only from a trusted source if you actually want the app back;
+7. treat every known installation location as report-only; never manually delete an unexplained
+   directory without first determining whether it contains shared or user data.
+
+Reinstall may not restore preferences, licenses, plug-ins, databases, profiles or user files. The
+code update itself is recoverable with `git revert <stage-4d2b-commit>`; this reverts application code
+but cannot reinstall software already removed by a previous run.
+
 ## Stage 4D2A MSI uninstall
 
 `software.uninstall.msi` has `RollbackLevel.NONE`. Windows Installer removal may delete program

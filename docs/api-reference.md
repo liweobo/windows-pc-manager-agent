@@ -1,5 +1,304 @@
 # API reference
 
+## Stage 4D2B 受控 Vendor Uninstaller API
+
+本节逐一说明 Stage 4D2B 新增的生产函数、方法、协议和公开数据对象。最重要的不变量是：
+`UninstallString` 只是不可信本地元数据，任何 API 都不能把它直接当命令执行；真正的写适配器
+只接受经过所有确定性门验证的 `ValidatedVendorUninstallAction`。
+
+### 领域模型 `domain.vendor_uninstall`
+
+| 对象 / 函数 | 作用、输入输出和安全约束 |
+|---|---|
+| `VendorMetadataSourceKind` | 标识 Stage 4D2B 唯一可分析的来源种类 `INTERACTIVE_UNINSTALL_STRING`；Quiet 元数据没有可执行枚举值。 |
+| `VendorParseConfidence` | 表示 Windows argv 解析置信度；当前执行链只生成/接受 `HIGH`，不把低置信度猜测升级成授权。 |
+| `VendorArgumentDecision` | exact argv 的 `ALLOW`/`BLOCK` 结果；BLOCK 不能被确认界面覆盖。 |
+| `VendorAuthenticodeStatus` | 离线 WinVerifyTrust 的 valid/invalid/unknown 事实；它只是信任证据之一。 |
+| `VendorPublisherMatch` | installed-software Publisher 与签名组织名的保守 matched/mismatched/unknown 关系。 |
+| `VendorInstallLocationRelation` | executable 位于 exact install location 内、外或未知；只有“内”可执行。 |
+| `VendorTrustDecision` | executable trust 的 trusted/insufficient/blocked 决定；只有 `TRUSTED_FOR_EXECUTION` 能继续。 |
+| `VendorExecutionDecision` | 软件分类与 executable trust 合并后的 ALLOW/BLOCK。 |
+| `VendorPreflightState` | read-only process/service preflight 的 READY/BLOCKED/UNKNOWN；只有 READY 可执行。 |
+| `VendorProcessResultCategory` | 描述直接进程退出 0/非 0、启动失败、vendor 请求提权、启动前取消、停止监控或长时脱离；不等于软件卸载结论。 |
+| `VendorVerificationState` | fresh inventory 的最终观察：verified removed、unverified、异常进程结果但已移除、目标实例变化、failed 或 interrupted。 |
+| `VendorUninstallTransactionState` | durable Preview→两级确认→dispatch→monitor→verify 状态；没有从 `INTERRUPTED` 返回执行的自动重试边。 |
+| `ParsedVendorUninstallMetadata` | parse-only 输出：source digest、一个 executable token、exact argv tuple、来源、置信度和警告；参数在 repr 中隐藏。 |
+| `ParsedVendorUninstallMetadata.argument_fingerprint()` | 对 argv 的值、顺序和边界生成 SHA-256 摘要，不输出参数正文。 |
+| `VendorArgumentAssessment` | 保存 argv 的决定、fingerprint、数量与确定性理由。 |
+| `VendorArgumentAssessment.canonical_digest()` | 将完整参数策略结果绑定到计划、Preview 和确认。 |
+| `VendorExecutableFileIdentity` | 保存 absolute path、volume serial、File ID、大小、创建/修改时间、attributes 与 SHA-256，用于发现同路径替换。 |
+| `VendorExecutableFileIdentity.canonical_digest()` | 哈希完整文件身份；path、metadata 或内容任一改变都会产生不同摘要。 |
+| `VendorAuthenticodeEvidence` | 保存离线验证状态、证书 subject/organization 与安全错误码；不保存证书或 binary。 |
+| `VendorAuthenticodeEvidence.canonical_digest()` | 对签名证据安全投影生成稳定摘要。 |
+| `VendorExecutableObservation` | 汇总 file identity、本地 fixed volume、reparse、blocked location、install relation、signature、Publisher match 和观察时间。 |
+| `VendorExecutableObservation.evidence_digest()` | 排除观察时间后哈希稳定信任证据，允许 runtime 刷新时间但不允许事实变化。 |
+| `VendorExecutableTrustAssessment` | 保存 trust 决定、未通过理由和已建立证据。 |
+| `VendorExecutableTrustAssessment.canonical_digest()` | 绑定 exact trust 结论，避免后续层只看一个布尔值。 |
+| `VendorUninstallerIdentity` | 将 software/source/command digests、executable observation、exact argv、argument assessment 与 trust 组成不可变执行身份。 |
+| `VendorUninstallerIdentity.validate_argument_binding()` | Pydantic 后置校验：fingerprint 和 argument count 必须与 exact tuple 一致，阻止策略评估后替换参数。 |
+| `VendorUninstallerIdentity.canonical_digest()` | 包含当前观察时间的完整身份摘要，适合追踪某次构建。 |
+| `VendorUninstallerIdentity.invariant_digest()` | 排除可刷新时间、保留全部执行事实的稳定摘要，用于 runtime 重现与确认绑定。 |
+| `VendorExecutionAssessment` | 保存最终 execution decision、software class、R2/R2_HIGH/R3 风险、理由和证据。 |
+| `VendorExecutionAssessment.validate_allowed_risk()` | ALLOW 只允许 R2/R2_HIGH_IMPACT；任何 R4 或 ALLOW+R3 矛盾对象构造失败。 |
+| `VendorExecutionAssessment.canonical_digest()` | 绑定 class、decision、risk、reason 和 evidence。 |
+| `VendorRelatedProcess` | 只读相关进程安全投影：PID、名称和 executable path digest；没有 terminate 能力。 |
+| `VendorRelatedService` | 只读相关服务投影：ServiceName、显示名、状态和 binary path digest；没有 stop 能力。 |
+| `VendorExecutionPreflightResult` | 汇总 process/service evidence、probe 完整性、active uninstall、blocker 与 warning。 |
+| `VendorExecutionPreflightResult.canonical_digest()` | 将所有 preflight 事实和 unknown 绑定到确认。 |
+| `VendorUninstallPlan` | 单目标、单工具、双确认、rollback NONE 的不可变计划；持有 evidence digests 而非 raw command。 |
+| `VendorUninstallPlan.validate_execution_contract()` | 强制唯一 tool name、R2/R2_HIGH、两级确认和 NONE rollback。 |
+| `VendorUninstallPlan.canonical_digest()` | 哈希全部授权相关字段，计划变化使确认失效。 |
+| `VendorUninstallPreview` | 本地、会过期的对象级 Preview，包含 safe target、capability、Vendor identity、policy、preflight、executable flag 和人工恢复说明。 |
+| `VendorUninstallPreview.bind_all_execution_evidence()` | 校验 expiry、software/executable binding、ALLOW/TRUSTED/READY/executable 一致性和 rollback NONE。 |
+| `VendorUninstallPreview.invariant_digest()` | 哈希 runtime 必须精确重现的 plan/transaction/operation 与全部 evidence。 |
+| `VendorUninstallPreview.canonical_digest()` | 哈希该次具体 Preview，包括 ID 和有效期，供 confirmation capability 使用。 |
+| `ValidatedVendorUninstallAction` | 唯一允许传给 Windows 写适配器的强类型对象；包含 software digest、Vendor identity、transaction 和验证时间。 |
+| `ValidatedVendorUninstallAction.require_execution_ready_identity()` | 构造时再次要求 trust=trusted、arguments=allow、software digest 一致，拒绝伪造 validated 名称。 |
+| `ValidatedVendorUninstallAction.canonical_digest()` | 对完整 typed action 生成摘要。 |
+| `VendorUninstallRequest` | ToolRegistry 的唯一输入：transaction/operation/plan/Preview ID 与 validated action；没有 raw command 字段。 |
+| `VendorProcessExecutionResult` | 保存进程类别、exit code/PID、是否启动、取消/长时/监控状态、子进程数、时间和安全错误类别。 |
+| `VendorUninstallResult` | 工具输出：关联 IDs、software/vendor digests 与 process evidence；不声称卸载成功。 |
+| `VendorResidualReport` | exact known install location 的 `lstat` 结果；字段明确 `deletion_performed=false`。 |
+| `VendorUninstallVerification` | fresh inventory 结果：原 identity 是否存在、replacement 数、刷新完整性、evidence 与 warning。 |
+| `VendorUninstallExecutionReport` | GUI/audit 报告；并列 process、verification、residual、risk、rollback NONE 与 recovery guidance。 |
+
+### Metadata parser 与 executable trust
+
+| 函数 / 方法 | 作用、输入输出和失败语义 |
+|---|---|
+| `VendorMetadataError` | 表示 raw registry metadata 无法安全进入 Vendor pipeline；不携带 raw command。 |
+| `VendorUninstallMetadataParser.__init__(argv_parser)` | 默认注入 Windows `CommandLineToArgvW` wrapper；测试可注入纯解析 fake，类本身没有执行依赖。 |
+| `VendorUninstallMetadataParser.parse(raw)` | 只接受 HKCU/current-user registry/vendor source 和存在的 interactive UninstallString；校验长度/NUL/quote/argv 数量与 token 后返回结构化 parse。Quiet 值不进入输出。 |
+| `windows_command_line_to_argv(command_line)` | 调用 Shell32 `CommandLineToArgvW` 并用 `LocalFree` 释放缓冲区；只分词、不启动 shell 或进程；非 Windows/Win32 失败抛 `OSError`。 |
+| `_quotes_are_structurally_balanced(command_line)` | 在调用 Windows parser 前检测明显未闭合引号，同时考虑反斜杠转义奇偶；false 会 fail closed。 |
+| `VendorExecutableTrustError` | 表示 path/type/trust 前置条件超出支持边界。 |
+| `VendorExecutableTrustValidator.__init__(platform)` | 注入只读 executable observation 协议，使信任策略可用 fake 测试。 |
+| `VendorExecutableTrustValidator.build_identity(software, raw, parsed, arguments)` | 解析 literal path，阻止 interpreter/non-EXE，要求 install location/Publisher，获取平台证据并累积 fixed/reparse/location/signature/publisher/argument gate；全部通过才返回 trusted identity。 |
+| `resolve_vendor_executable(token)` | 只接受不含 NUL/变量/home/traversal、带 drive 的 absolute local Windows path；拒绝 relative、UNC/device，且永不查 PATH。 |
+| `conservative_publisher_match(publisher, signer)` | 去除有限公司法律形式噪声后要求显著 token tuple 精确相等；缺失/全噪声为 UNKNOWN，不做模糊放行。 |
+| `_publisher_words(value)` | 大小写折叠并提取 ASCII 字母数字 token，再移除有限法律后缀；仅供保守匹配。 |
+| `VendorArgumentPolicy.assess(arguments)` | 对 exact tuple 做 finite allow-list：允许零参数或一个已知交互卸载 verb；quiet/restart/data/path/response/script/nested/shell-like/unknown/多参数全部 BLOCK，且不修改原参数。 |
+
+### 软件策略、Preflight、Preview 与独立审查
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `VendorUninstallExecutionPolicy.assess(scope, analysis, identity)` | 依次要求 current-user、trusted executable 和 Stage 4D1 非保护决定；普通应用返回 R2 ALLOW，developer tool/runtime 返回 R2_HIGH_IMPACT，其他全部 R3 BLOCK。 |
+| `_blocked(safety_class, reason)` | 构造统一 R3/BLOCK assessment，并明确 Vendor capability 不代表软件可安全删除。 |
+| `VendorExecutionPreflight.__init__(platform, max_items)` | 注入 Stage 3 read-only diagnostics 并设置有限枚举上限；不持有 process/service 写适配器。 |
+| `VendorExecutionPreflight.inspect(software, identity, cancellation, active_uninstall_present)` | 要求 known install location；只关联 executable/binary path 位于该 root 内的对象。相关进程生成 warning、不自动 kill；running service、active uninstall、取消、warning/truncation/异常或 probe 不完整产生 blocker/unknown。 |
+| `_canonical(path)` | 用 `abspath`/`normcase` 规范 path 文本，不跟随 reparse target。 |
+| `_is_within(path, root)` | 用 `relative_to` 做组件级 containment，避免字符串前缀绕过；越界返回 false。 |
+| `VendorUninstallPreviewEngine.__init__(ttl_seconds, now)` | 配置正数 Preview TTL 与可注入时钟；非正数立即拒绝。 |
+| `VendorUninstallPreviewEngine.build(plan, target, capability, identity, assessment, preflight)` | 逐一比较 plan 中的 identity/capability/vendor/policy/preflight/risk 摘要；只在 trusted+arguments allow+policy allow+ready 时设置 executable，并生成 expiring Preview。 |
+| `VendorUninstallSafetyReview` | 独立审查的 immutable `approved` 与非敏感 `issues`。 |
+| `VendorUninstallSafetyValidator.__init__(registry)` | 注入 Stage 4D2B 专用 registry，使 manifest/plan 审查独立于 orchestrator。 |
+| `VendorUninstallSafetyValidator.review(plan, preview)` | 要求 registry 精确只有 Vendor tool，manifest 为 irreversible R2/NONE/batch1/preview/runtime-confirmation；校验所有 ID/digest、trust、policy、preflight、risk 与 executable。任一 issue 都返回不批准。 |
+
+### 两级确认 `confirmation.vendor_uninstall`
+
+| 对象 / 函数 | 作用、输入输出和失败语义 |
+|---|---|
+| `VendorUninstallConfirmationTier` | 区分 PLAN 与 RUNTIME 两个不可替代的 gate。 |
+| `VendorUninstallConfirmationState` | pending/approved/rejected/expired/consumed 状态；terminal/consumed 不能重放。 |
+| `VendorUninstallConfirmation` | 绑定 confirmation parent、transaction/operation/plan/Preview、plan/preview/invariant/software/vendor/file/argument/capability/policy/preflight digests、risk、对象摘要、时间与状态。 |
+| `VendorConfirmationStore.save_plan_confirmation(confirmation)` | Protocol：durable 保存第一 gate 并推进 transaction。 |
+| `VendorConfirmationStore.save_runtime_confirmation(confirmation, preview)` | Protocol：保存 fresh Preview 绑定的短时 gate 和 exact tool reservation。 |
+| `VendorConfirmationStore.get_confirmation(confirmation_id)` | Protocol：读取 durable capability；未知 ID 必须失败。 |
+| `VendorConfirmationStore.resolve_confirmation(confirmation)` | Protocol：持久化 approve/reject/expire 和 transaction 对应状态。 |
+| `VendorConfirmationStore.consume_confirmation_pair(plan, runtime)` | Protocol：原子验证/消费 parent-child pair，防 double-click/replay。 |
+| `VendorUninstallConfirmationError` | 确认过期、状态错误、binding 变化或 replay 的 fail-closed 错误。 |
+| `VendorUninstallConfirmationService.__init__(store, plan_ttl_seconds, runtime_ttl_seconds, now)` | 注入 durable store/clock 并校验两个正 TTL；runtime 默认更短。 |
+| `VendorUninstallConfirmationService.request_plan(plan, preview)` | 要求 current executable Preview，创建 PLAN capability，绑定全证据并 durable 保存。 |
+| `VendorUninstallConfirmationService.resolve_plan(id, approved, plan, preview)` | 读取 PLAN gate，核对类型、当前状态、有效期与全部 binding，再持久化用户决定。 |
+| `VendorUninstallConfirmationService.request_runtime(parent_id, plan, preview)` | 要求 parent 已批准、fresh Preview current/executable，创建短时 RUNTIME child capability。 |
+| `VendorUninstallConfirmationService.resolve_runtime(id, approved, plan, preview)` | 核对 runtime type/parent/current evidence/expiry 后持久化即时决定。 |
+| `VendorUninstallConfirmationService.consume_runtime(id, plan, preview)` | 要求 runtime 已批准且未过期，重新验证全部 binding，读取已批准 parent，并通过 store 原子消费 pair；成功后返回 authorization facts。 |
+| `VendorUninstallConfirmationService._resolve(...)` | PLAN/RUNTIME 共用状态解析：只允许 pending、检查 tier/expiry/current binding，并创建 approved/rejected copy。 |
+| `VendorUninstallConfirmationService._create(...)` | 从 plan/Preview 生成 privacy-minimized exact confirmation；不复制 raw command、full args 或 path。 |
+| `VendorUninstallConfirmationService._require_not_expired(confirmation)` | 将 naive SQLite 时间恢复为 UTC 语义并拒绝过期能力。 |
+| `VendorUninstallConfirmationService._require_executable(plan, preview)` | 要求 Preview executable、风险合法、rollback NONE 和 safety binding 仍一致。 |
+| `VendorUninstallConfirmationService._require_current(confirmation, plan, preview)` | 逐项比较 IDs、digests、risk、对象摘要和有效 Preview；任何变更都使旧确认无效。 |
+
+### 持久化、原子授权与跨机制互斥
+
+| 对象 / 函数 | 作用、输入输出和失败语义 |
+|---|---|
+| `VendorUninstallStoreError` | SQLite state 无法被信任、transition/binding/uniqueness 失败时的错误；写操作随后停止。 |
+| `VendorUninstallBase` | Stage 4D2B 独立 SQLAlchemy metadata base，避免隐式耦合旧表定义。 |
+| `VendorUninstallTransactionRow` | durable transaction/reservation row；只保存 IDs、digests、risk、state、最小 process/verification facts 和安全错误。 |
+| `VendorUninstallConfirmationRow` | durable confirmation row；payload 是脱敏模型，不含 raw command/path/argv。 |
+| `VendorUninstallRepository.__init__(database_path)` | 建立 SQLite engine/session factory，但在 `initialize()` 成功前保持不可用。 |
+| `VendorUninstallRepository.initialize()` | 创建 additive tables；terminal 保持不变，dispatch/executing/waiting/monitor/process-exited/verifying 标 `INTERRUPTED`，其他 pending work 标 `CANCELLED`，pending/approved confirmations 过期；返回 interrupted IDs，绝不 redispatch。 |
+| `VendorUninstallRepository.create(plan, preview)` | 在确认前 reserve transaction；先同时检查 Vendor 与 MSI active rows，只允许全局一个 uninstall，并保存 exact request digest。 |
+| `VendorUninstallRepository.has_active_uninstall(exclude_vendor_transaction)` | 查询任一非 terminal Vendor 或 MSI transaction；runtime revalidation 可排除自己的 Vendor ID。 |
+| `VendorUninstallRepository.transition(transaction_id, state, ...)` | 按固定 state graph 原子推进，保存脱敏 error/process/verification；非法跳转失败。 |
+| `VendorUninstallRepository.state(transaction_id)` | 返回当前 durable Vendor state；未知 transaction 失败。 |
+| `VendorUninstallRepository.save_plan_confirmation(confirmation)` | 实现 confirmation store：要求 PREVIEWED，保存 gate 并推进 AWAITING_PLAN_CONFIRMATION。 |
+| `VendorUninstallRepository.save_runtime_confirmation(confirmation, preview)` | 刷新 reservation digests，保存 runtime gate 并推进 AWAITING_RUNTIME_CONFIRMATION。 |
+| `VendorUninstallRepository.get_confirmation(confirmation_id)` | 从 row state 覆盖 payload state 后 Pydantic 验证，防陈旧 JSON 状态。 |
+| `VendorUninstallRepository.resolve_confirmation(confirmation)` | 只解析 pending/approved gate；PLAN 决定推进 PLAN_CONFIRMED/CANCELLED，runtime reject/expire 取消。 |
+| `VendorUninstallRepository.consume_confirmation_pair(plan, runtime)` | 同一 transaction 内要求两个 approved、正确 parent、state/Preview/invariant/vendor/argument/file binding，随后把两者标 CONSUMED 并推进 DISPATCHING。 |
+| `VendorUninstallRepository.close()` | 释放 SQLite engine 并把 repository 标为未初始化；之后调用会 fail closed。 |
+| `VendorUninstallRepository._save_confirmation(...)` | PLAN/RUNTIME 共用 durable 保存，检查 expected state；runtime 时重写所有 fresh reservation digests。 |
+| `VendorUninstallRepository._transaction(session, transaction_id)` | 精确按 UUID 取 row；不存在抛 store error。 |
+| `VendorUninstallRepository._require_initialized()` | 阻止在 table/init 不可信时进行任何 workflow 操作。 |
+| `VendorUninstallExecutionGuard.__init__(repository)` | 注入唯一 durable authorization source。 |
+| `VendorUninstallExecutionGuard.require(authorization, tool_name, arguments)` | 在 adapter 前核对 state、operation/plan/Preview/tool、reserved/actual args digest、runtime confirmation ID 与 consumed 状态；成功时同一 session 将 DISPATCHING 改 EXECUTING。 |
+| `_request_for_preview(preview)` | 用 Preview evidence 和相同 `validated_at` 构建唯一 typed request，用于 reservation digest；没有 raw command。 |
+| `_active_vendor_transaction(session, exclude_transaction)` | 判断 Vendor row 是否非 terminal，可排除当前 transaction。 |
+| `_active_msi_transaction(session)` | additive 地检查 MSI table 是否存在并判断非 terminal state，实现 Vendor→MSI 互斥。 |
+| `persistence.software_uninstall_execution._active_vendor_transaction(session)` | 反向供 MSI repository 检查 Vendor table，建立 MSI→Vendor 互斥；table 不存在时安全返回 false。 |
+
+### 平台协议、Authenticode 与 Windows 适配器
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `VendorExecutablePlatform.inspect(executable, install_location, publisher)` | 只读协议：返回完整 executable observation，不提供 execute。 |
+| `VendorUninstallPlatform.uninstall(action, cancellation)` | 窄写协议：输入只能是 `ValidatedVendorUninstallAction`，返回 process facts；无 raw string/argv setter。 |
+| `WindowsAuthenticodeVerifier.verify(path)` | 对 exact file 调用离线 `WinVerifyTrust` cache-only policy，再读取 embedded PKCS#7 signer subject/organization；错误转 invalid/unknown evidence 而非放行。 |
+| `_verify_trust(path)` | 构造 `WINTRUST_FILE_INFO/DATA`，使用 `WTD_CACHE_ONLY_URL_RETRIEVAL`、无 UI、generic verify action，完成后调用 state close；返回 Win32 trust status。 |
+| `_read_signer(path)` | 用 `CryptQueryObject`/`CryptMsgGetParam` 读取 embedded signed-message signer info，在 certificate store 按 issuer/serial 查找证书，并返回安全名称；所有 Win32 handles 在 finally 释放。 |
+| `_certificate_name(cert_get_name, certificate, name_type)` | 两次调用 `CertGetNameStringW` 获取 subject display/simple name；失败或空值返回 None。 |
+| `_Guid` / `_WinTrustFileInfo` / `_WinTrustData` / `_Blob` / `_AlgorithmIdentifier` / `_CryptAttributes` / `_SignerInfo` / `_CertInfo` | ctypes layout，仅封装调用所需 Windows ABI 字段；不承载业务授权。 |
+| `_PolledProcess.poll()` | adapter 的最小进程协议，只暴露 PID 和 poll；故意没有 terminate/kill。 |
+| `WindowsVendorExecutablePlatform.__init__(authenticode, file_platform, environ, max_hash_bytes)` | 注入 signature/File ID adapters 和环境证据；限制正数 hash 大小。非 Windows 且无 fake 时拒绝。 |
+| `WindowsVendorExecutablePlatform.inspect(executable, install_location, publisher)` | strict resolve 两个已存在路径，要求 regular `.exe`；检查全组件 reparse、本地 fixed volume、blocked location、containment，读取 before File ID、bounded SHA-256、signature、after File ID，before/after 不同即拒绝。 |
+| `WindowsVendorUninstallPlatform.__init__(popen_factory, environ, poll_interval_seconds, long_running_seconds, monotonic, sleeper)` | 注入可测试 Popen/clock；校验正数间隔，并在构造时建立最小 child environment。 |
+| `WindowsVendorUninstallPlatform.uninstall(action, cancellation)` | 启动前取消则不 spawn；再次检查 absolute local `.exe` 与 file metadata/hash；调用 `[absolute_exe, *exact_args]`、explicit executable/cwd、sanitized env、DEVNULL、close_fds、`shell=False`。轮询 direct/children；取消或 long-running 只停止监控，不 kill；WinError 740 记录 vendor-requested-elevation、不 runas。 |
+| `sanitized_vendor_environment(environment)` | 只保留有限 Windows runtime/profile/temp/program dirs，丢弃 PATH、所有非 allow-list 和 token/secret/password/cookie/API-key/credential 名；NUL key/value 也丢弃。 |
+| `_matches_identity(path, expected)` | adapter 边界重新比较 size/ctime/mtime 与 SHA-256；文件消失/读取失败返回 false。 |
+| `_sha256(path)` | 以 1 MiB block 流式计算 exact executable SHA-256，不把 binary 读入日志或模型。 |
+| `_child_processes(pid)` | 使用 psutil 只读收集 recursive child PID；异常返回空集合，从不发信号。 |
+| `_is_local_fixed_volume(path)` | 调用 `GetDriveTypeW`，只有 `DRIVE_FIXED` 为 true；非 Windows/无 anchor false。 |
+| `_reparse_free(path)` | 从 drive root 到文件逐组件调用 `GetFileAttributesW`；unknown 或任一 reparse bit 均 false。 |
+| `_is_blocked_location(path, environment)` | 构造 TEMP/TMP/Downloads/INetCache roots，并用组件级比较阻止常见高风险可写位置。 |
+| `_is_within(path, root)` | normcase 后用 `relative_to` 判断 Windows containment，防 `C:\App2` 冒充 `C:\App`。 |
+
+### 编排、监控、验证与残留
+
+| 对象 / 函数 | 作用、输入输出和失败语义 |
+|---|---|
+| `VendorUninstallExecutionErrorCode` | capability/policy/target/safety/elevation/execution 等确定性错误码；便于 UI 和 audit 不泄漏 raw 输入。 |
+| `VendorUninstallExecutionError.__init__(code, message)` | 保存枚举 code 和友好安全 message；不包装 raw command。 |
+| `PreparedVendorUninstall` | prepare 输出：resolution、可选 plan/Preview/review/plan confirmation；歧义/阻止时不会伪造后续对象。 |
+| `PreparedVendorRuntimeConfirmation` | fresh runtime Preview 与短时 confirmation 的组合。 |
+| `VendorUninstallService.__init__(...)` | 显式注入 resolver、capability/parser/argument/trust/two policies/preflight/Preview/reviewer/confirmation/repository/registry/verifier/residual/audit/elevation probe；避免全局写能力。 |
+| `VendorUninstallService.prepare(user_goal, query, cancellation)` | 拒绝 elevated Agent，fresh resolve exact target/raw，构建全部 evidence、plan/Preview/review/audit；只在批准后 reserve transaction 并 durable 请求 PLAN gate。确认存储失败会标 BLOCKED。 |
+| `VendorUninstallService.resolve_plan_confirmation(id, approved, plan, preview)` | 委托 confirmation service 核对/持久化第一决定，并写脱敏 audit。 |
+| `VendorUninstallService.prepare_runtime_confirmation(parent_id, plan, cancellation)` | 先推进 VALIDATING，再重读 software/raw/capability/executable/hash/signature/args/policy/preflight，重建 Preview/review；任何不一致标 BLOCKED 并拒绝，否则签发 runtime gate。 |
+| `VendorUninstallService.resolve_runtime_confirmation(id, approved, plan, preview)` | 核对并持久化即时决定，同时审计。 |
+| `VendorUninstallService.execute(runtime_id, plan, preview, cancellation)` | 原子消费 pair；mandatory pre-start audit；构造 typed request/authorization 并经 registry 调用一次。普通退出后推进 PROCESS_EXITED→VERIFYING→terminal；adapter/guard 失败标 FAILED 且不重试。 |
+| `VendorUninstallService._build_evidence(...)` | 清除 Quiet 值后要求 Stage 4D1 Vendor metadata support；parse exact interactive raw、评估 args、构建 trust identity、执行 class policy 和 read-only preflight。 |
+| `VendorUninstallService._fresh_target(identity_digest, cancellation)` | 调用 resolver.inspect，要求 inventory complete、exact target/raw 存在且 interactive metadata 仍在；partial/disappear/missing raw 全部失败。 |
+| `VendorUninstallService._monitoring_stopped_report(plan, preview, result)` | 对 STOPPED/MONITORING_DETACHED 持久化 `MONITORING` process facts，生成 `INTERRUPTED`/未验证报告并延迟 residual；明确不 kill、不早验。 |
+| `VendorUninstallService._report(...)` | 将 IDs、safe target summary、risk、process、verification、residual 与 recovery guidance 合成用户报告。 |
+| `_terminal_state(verification_state)` | VERIFIED_REMOVED→terminal verified；unverified/unexpected/replacement→COMPLETED_UNVERIFIED；其余→FAILED，不提供 retry edge。 |
+| `VendorUninstallVerifier.__init__(resolver)` | 注入 fresh normalized inventory resolver。 |
+| `VendorUninstallVerifier.verify(target, process, max_items, cancellation)` | 刷新 exact identity，记录 inventory complete/partial/failure 与 same-name replacement；结合而不覆盖 process fact，返回 verified/failed/replacement/unverified。 |
+| `_replacement_count(snapshot, target)` | 统计同规范 name/publisher/scope 但不同 source-qualified identity 的候选；不自动选或声明升级成功。 |
+| `_same(left, right)` | 非空文本做 whitespace normalization 与 casefold 精确比较；缺失返回 false。 |
+| `VendorResidualAnalyzer.analyze(install_location)` | 对 original known location 仅调用 `os.lstat`，报告 missing/existing/link/error；不 enumerate/follow/delete。 |
+
+### 隐私最小化 Audit
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `VendorUninstallAuditLogger.__init__(repository, app_version, git_commit)` | 注入结构化 audit store 和版本元数据；git commit 可未知。 |
+| `VendorUninstallAuditLogger.previewed(plan, preview)` | 记录 request/plan/transaction、software/capability/vendor/file/argument/policy/preflight digests、risk、counts 与签名类别；不记录 executable path/raw argv。 |
+| `VendorUninstallAuditLogger.confirmation_resolved(plan, confirmation)` | 记录 confirmation tier/state/expiry 和关联 IDs/digests，不记录对象正文。 |
+| `VendorUninstallAuditLogger.started(plan, preview, runtime_confirmation_id)` | mandatory write-ahead event，记录 exact reservation digests 和 `EXECUTING` 意图；失败会阻止 platform launch。 |
+| `VendorUninstallAuditLogger.completed(plan, report)` | 记录 process category/exit/PID/children、fresh verification、residual flags、terminal interpretation、rollback NONE 与耗时。 |
+| `VendorUninstallAuditLogger.failed(plan, phase, error_code, mutation_may_have_started)` | 记录失败阶段与是否可能已启动；错误 payload 不含 exception raw command/path。 |
+
+### 只读 MSI/Vendor 路由
+
+| 对象 / 函数 | 作用、输入输出和失败语义 |
+|---|---|
+| `SoftwareUninstallMechanism` | `MSI`、`VENDOR`、`AMBIGUOUS`、`UNSUPPORTED` 四种 GUI 路由结果。 |
+| `SoftwareUninstallRoute` | 保存 read-only resolution、mechanism、capability 与用户可读 reason；本身无 authorization。 |
+| `SoftwareUninstallRouter.__init__(resolver, capability, max_items)` | 注入 fresh target resolver 与 Stage 4D1 capability resolver。 |
+| `SoftwareUninstallRouter.route(query, cancellation)` | fresh resolve；非精确/歧义保持 AMBIGUOUS/UNSUPPORTED；exact target 按 current capability 只选 MSI 或 Vendor，其他机制不 fallback。 |
+
+### Tool、Runtime 与配置
+
+| 对象 / 函数 | 作用、输入输出和安全约束 |
+|---|---|
+| `VendorUninstallTool.__init__(platform)` | 创建固定 manifest：`software.uninstall.vendor`、R2、write、non-idempotent、runtime confirmation、Preview、batch 1、rollback NONE、irreversible。 |
+| `VendorUninstallTool.manifest` | 返回固定 manifest；调用方不能注册通用 executable/argument 字段。 |
+| `VendorUninstallTool.execute(request, cancellation)` | 只接受 `VendorUninstallRequest`，否则 TypeError；把 validated action 交给窄 platform，并返回带 identity digests 的 result。 |
+| `VendorUninstallServices` | Runtime dependency bundle：专用 ToolRegistry、fresh resolver 与 Vendor service。 |
+| `ApplicationRuntime.create_software_uninstall_router()` | 构建 fresh Windows inventory/resolver/capability 的 read-only router；无 write guard 或 adapter。 |
+| `ApplicationRuntime.create_vendor_uninstall_services()` | 组装专用 registry/guard/tool、Windows trust/execute adapters、policies、preflight、Preview、confirmations、repository、verifier、residual 与 audit；所有配置通过依赖注入。 |
+| `ApplicationRuntime.close()`（Stage 4D2B 增量） | 在其他 store 之前关闭 Vendor repository，阻止 shutdown 后继续写。 |
+| `AppSettings.vendor_runtime_confirmation_ttl_seconds` | `PC_MANAGER_VENDOR_RUNTIME_CONFIRMATION_TTL_SECONDS`，15–300 秒，默认 60。 |
+| `AppSettings.vendor_monitor_poll_seconds` | `PC_MANAGER_VENDOR_MONITOR_POLL_SECONDS`，0.05–5 秒，默认 0.25。 |
+| `AppSettings.vendor_long_running_seconds` | `PC_MANAGER_VENDOR_LONG_RUNNING_SECONDS`，30–7200 秒，默认 900；达到后只停止同步监控，不 kill。 |
+
+### PySide6 worker 与 GUI
+
+| 函数 / 方法 | 作用、输入输出和安全约束 |
+|---|---|
+| `SoftwareUninstallRouteSignals` | route worker 的 completed/failed Qt signals；只传 safe route 或友好错误。 |
+| `SoftwareUninstallRouteWorker.__init__(runtime, query)` | 保存 runtime/query 和 cancellation token，不在 UI thread 做 inventory。 |
+| `SoftwareUninstallRouteWorker.run()` | 后台创建 read-only router 并 emit route；异常只发类型化安全消息。 |
+| `SoftwareUninstallRouteWorker.cancel()` | 设置 cancellation token；不取消或控制任何 uninstaller，因为 route 阶段尚未执行。 |
+| `require_software_uninstall_route(value)` | UI 边界 runtime type check；非 `SoftwareUninstallRoute` 抛 TypeError。 |
+| `VendorUninstallWorkerSignals` | Vendor prepare/runtime/execute worker 的 completed/failed signal 集合。 |
+| `PreparedVendorUninstallWithServices` | 把 prepare 结果与其专用 services 绑定，确保后续步骤复用同一 graph/repository。 |
+| `VendorUninstallPrepareWorker.__init__(runtime, user_goal, query)` | 创建 prepare worker 所需参数和 cancellation token。 |
+| `VendorUninstallPrepareWorker.run()` | 后台调用 `create_vendor_uninstall_services().service.prepare()`；不直接调用 tool。 |
+| `VendorUninstallPrepareWorker.cancel()` | 只请求取消当前 read-only prepare。 |
+| `VendorRuntimePrepareWorker.__init__(services, plan_confirmation_id, plan)` | 保存已批准 parent 与 immutable plan，准备 fresh runtime revalidation。 |
+| `VendorRuntimePrepareWorker.run()` | 后台调用 `prepare_runtime_confirmation`，只产生 fresh Preview/gate；尚不执行。 |
+| `VendorRuntimePrepareWorker.cancel()` | 请求取消 runtime validation；不会把取消变成卸载授权。 |
+| `VendorUninstallExecuteWorker.__init__(services, runtime_confirmation_id, plan, preview)` | 保存 exact runtime capability 与其绑定对象。 |
+| `VendorUninstallExecuteWorker.run()` | 后台 resolve runtime approval 并调用 orchestrator execute；UI 仍不碰 registry/platform。 |
+| `VendorUninstallExecuteWorker.cancel()` | 请求停止观察；adapter 启动后不 terminate/kill，语义由 structured result 说明。 |
+| `require_prepared_vendor_uninstall(value)` | 强制 worker result 为 `PreparedVendorUninstallWithServices`。 |
+| `require_runtime_vendor_confirmation(value)` | 强制 runtime worker result 类型，避免 QObject payload 混淆。 |
+| `require_vendor_uninstall_report(value)` | 强制 execute worker result 为 final report。 |
+| `VendorUninstallDialog.__init__(runtime, user_goal, query, parent)` | 创建 modeless 两级确认对话框；默认动作是取消，并立即从后台 prepare 开始。 |
+| `VendorUninstallDialog._build_ui()` | 建立 safe summary、候选列表、状态、明确取消/确认按钮；不显示 raw command/full path+args。 |
+| `VendorUninstallDialog._start_prepare(query)` | 启动 prepare worker、追踪 worker 并禁用重复提交。 |
+| `VendorUninstallDialog._prepared(value)` | type-check 结果；处理 ambiguity、blocked review 或显示 PLAN Preview。 |
+| `VendorUninstallDialog._show_candidates(candidates)` | 显示安全软件候选投影，要求用户选择；不自动选相似名称。 |
+| `VendorUninstallDialog._primary_clicked()` | 按当前明确 UI 阶段分派 select/plan approve/runtime approve；未知状态不执行。 |
+| `VendorUninstallDialog._select_candidate()` | 用所选 exact identity digest 重新 prepare，旧候选/Preview 不授权。 |
+| `VendorUninstallDialog._approve_plan()` | 只解析第一确认并启动 fresh runtime prepare；不会执行 tool。 |
+| `VendorUninstallDialog._runtime_prepared(value)` | 显示第二次即时确认及 fresh Preview。 |
+| `VendorUninstallDialog._approve_runtime_and_execute()` | 明确 approve runtime 后创建 execute worker；每个 confirmation 只使用一次。 |
+| `VendorUninstallDialog._completed(value)` | 显示 process/verification/residual 分离报告；不把 exit 0 文案写成成功。 |
+| `VendorUninstallDialog._show_preview(preview, immediate)` | 生成 plan 或 runtime 的安全 HTML，显示 trust/risk/preflight/rollback/不自动行为。 |
+| `VendorUninstallDialog._cancel_clicked()` | 未 dispatch 时 reject 当前 confirmation；worker active 时请求取消；dispatch 后只停止监控。 |
+| `VendorUninstallDialog._reject_plan_and_close()` | durable 拒绝 PLAN gate 后关闭。 |
+| `VendorUninstallDialog._reject_runtime_and_close()` | durable 拒绝 runtime gate 后关闭。 |
+| `VendorUninstallDialog._failed(message)` | 恢复 UI 可操作状态并显示脱敏错误；不猜测执行结果。 |
+| `VendorUninstallDialog._set_busy(text)` | 统一更新忙碌状态和按钮禁用，防 double-click。 |
+| `VendorUninstallDialog.shutdown()` | 请求所有 active workers 取消/停止监控并断开 UI 所有权；不杀子进程。 |
+| `VendorUninstallDialog.closeEvent(event)` | 关闭时调用 `shutdown()`，避免遗留未管理 Qt worker。 |
+| `_preview_html(preview, immediate)` | 把 safe target、trust categories、risk、process/service counts、manual UI 与 rollback NONE 转义成 HTML；不渲染 raw UninstallString。 |
+| `_report_html(report)` | 把 process fact、fresh verification、residual、recovery guidance 转义成最终 HTML。 |
+| `SystemDiagnosticsTab._open_selected_vendor_uninstall()` | 从表格要求恰好一个目标并进入 Vendor dialog；表格选择本身不授权。 |
+| `SystemDiagnosticsTab.open_vendor_uninstall(user_goal, query)` | 创建/追踪 modeless Vendor dialog，并明确状态仍在身份验证、尚未授权。 |
+| `SystemDiagnosticsTab.open_routed_uninstall(user_goal, query)` | 启动只读 mechanism worker，不在 UI thread 刷 inventory。 |
+| `SystemDiagnosticsTab._route_completed(worker, user_goal, value)` | type-check route；exact MSI/Vendor 分别进入独立 dialog，ambiguous/unsupported fail closed。 |
+| `SystemDiagnosticsTab._route_failed(worker, message)` | 移除 finished worker 并显示安全错误。 |
+| `SystemDiagnosticsTab.shutdown()`（Stage 4D2B 增量） | 关闭所有 Vendor dialogs 并 cancel route workers，避免窗口退出后 UI 继续调度。 |
+| `SystemDiagnosticsTab._software_selection_changed()`（Stage 4D2B 增量） | 仅根据是否 exact 单选启用 Vendor 按钮；不会预先确认。 |
+| `MainWindow` Stage 4D2B chat route | “卸载软件 X”先创建 `SoftwareTargetQuery`，交给只读 router；模型/聊天文本不能选择 executable 或 argv。 |
+
+### 测试替身 API（仅测试代码）
+
+| 函数 / 方法 | 作用 |
+|---|---|
+| `tests.fixtures.vendor_uninstall.vendor_entry(...)` | 构建合成 HKCU/current-user Vendor registry record；绝不使用本机真实 UninstallString。 |
+| `FakeVendorExecutablePlatform.inspect(...)` | 从临时 fixture 文件生成完整可信 observation，用于 deterministic trust 测试。 |
+| `FakeVendorUninstallPlatform.uninstall(...)` | 只记录 typed action，并可改变 fake inventory；不启动真实进程。 |
+| `SyntheticVendorEnvironment.close()` | 释放测试 repository/audit SQLite engines。 |
+| `build_vendor_environment(...)` | 组装与生产相同边界、但完全由 synthetic inventory/executable/fake adapter 驱动的测试 graph。 |
+| `_synthetic_argv(command, executable)` | 仅解析受控 fixture tail；生产代码仍使用 Windows parser。 |
+
 ## Stage 4D2A 受控 MSI 卸载 API
 
 本节逐一说明 Stage 4D2A 新增的生产函数、方法和公开数据对象。所有 ProductCode 示例都必须是
