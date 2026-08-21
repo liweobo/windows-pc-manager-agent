@@ -33,6 +33,7 @@ from pc_manager_agent.domain.process_actions import (
     ProcessTargetQueryType,
 )
 from pc_manager_agent.domain.reports import ScanReport
+from pc_manager_agent.domain.software_uninstall_analysis import SoftwareTargetQuery
 from pc_manager_agent.orchestration.process_action_planner import (
     is_process_action_request,
     process_target_query,
@@ -43,6 +44,7 @@ from pc_manager_agent.orchestration.service_action_planner import (
     service_target_query,
 )
 from pc_manager_agent.orchestration.software_uninstall_analysis import (
+    extract_software_target_name,
     is_software_uninstall_analysis_request,
 )
 from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnostic_request
@@ -71,7 +73,7 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
         self._last_service_reference: tuple[str, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 4D1 软件卸载只读分析")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 4D2A 受控 MSI 卸载")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -253,7 +255,10 @@ class MainWindow(QMainWindow):
             )
         )
         layout.addWidget(
-            QLabel("Stage 4D1 只分析软件身份、卸载元数据和影响；理解确认后 STOP，不会运行卸载器。")
+            QLabel(
+                "Stage 4D2A 只允许双确认后的单个 current-user MSI；"
+                "不执行原始 UninstallString，不自动提权或删除残留。"
+            )
         )
         layout.addWidget(QLabel("不覆盖、不跨卷、不永久删除、不修改服务/启动项/注册表。"))
         layout.addStretch(1)
@@ -268,11 +273,20 @@ class MainWindow(QMainWindow):
         self._chat_input.clear()
         if is_software_uninstall_analysis_request(text):
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
+            target_name = extract_software_target_name(text)
+            if target_name is None:
+                self._conversation.append(
+                    "Agent：未执行。请明确写出要卸载的软件名称，系统不会按模糊目标自动选择。"
+                )
+                return
             self._conversation.append(
-                "Agent：已将卸载请求降级为 Stage 4D1 只读分析。将刷新软件身份、"
-                "分析可能的机制和影响，并在你确认理解目标后 STOP；不会运行卸载器。"
+                "Agent：将进入 Stage 4D2A 受控流程。只有高可信度、策略允许的当前用户 "
+                "MSI 才可能执行；需要计划确认和执行前即时确认。"
             )
-            self._system_diagnostics_tab.open_software_analysis(text)
+            self._system_diagnostics_tab.open_msi_uninstall(
+                text,
+                query=SoftwareTargetQuery(display_name=target_name),
+            )
             return
         service_intent_value = service_action_intent(text)
         if service_intent_value is not None:
