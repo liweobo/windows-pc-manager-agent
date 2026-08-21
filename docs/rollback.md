@@ -1,5 +1,25 @@
 # Rollback design
 
+## Stage 4D2A MSI uninstall
+
+`software.uninstall.msi` has `RollbackLevel.NONE`. Windows Installer removal may delete program
+state, invoke package-defined custom actions and alter registrations in ways the Agent cannot invert.
+The application therefore does not create an Undo button, does not call MSI repair/reinstall as a
+rollback, and does not claim that saved settings or user state can be restored.
+
+Recovery guidance is manual:
+
+1. read the installer category and the separate post-uninstall verification state;
+2. if `VERIFIED_REMOVED`, reinstall from a trusted original source only if the user wants the app;
+3. if `COMPLETED_UNVERIFIED`, refresh installed-software state before taking another action;
+4. if `REBOOT_REQUIRED`, the user chooses when to reboot—the Agent never does it;
+5. if `WAITING`/`INTERRUPTED`, inspect the visible Windows Installer and fresh inventory; never retry
+   the old transaction or confirmation;
+6. treat any known install directory as a report-only residual; Stage 4D2A never deletes it.
+
+Reinstall is not Undo and may not restore preferences, licenses, plugins, databases or user files.
+The code update itself remains recoverable with `git revert <stage-4d2a-commit>`.
+
 ## Stage 4D1 software analysis
 
 All five Stage 4D1 tools are R0 and declare `RollbackLevel.NONE` because they do not change software,

@@ -1,5 +1,32 @@
 # User guide
 
+## 使用 Stage 4D2A 受控 MSI 卸载
+
+1. 在“系统诊断”先获取软件清单，选中一行后点击“受控卸载选中 MSI”；也可以在聊天输入
+   “卸载软件 Example App”。请写清软件名称。名称有多个匹配时必须自己选择一行。
+2. 应用在后台刷新本机清单和 Windows Installer 注册，并只读检查相关进程和服务。此时没有
+   执行授权。非 MSI、低可信度、machine-wide、受保护类型或证据不完整会直接停止。
+3. 阅读第一次“计划确认”：核对名称、版本、Publisher、current-user 范围、架构、ProductCode、
+   软件分类、R2/R2_HIGH_IMPACT、相关进程/服务、Rollback NONE 和恢复说明。默认按钮是取消。
+4. 确认计划后，应用会再次读取所有证据。任何升级、版本/ProductCode/Publisher/范围/风险
+   变化都会使旧确认失效。
+5. 阅读第二次“执行前即时确认”。只有这个短时确认才授权一次固定 MSI 调用。点击取消不会
+   卸载。不要把开发运行时的 R2_HIGH_IMPACT 当成普通清理建议。
+6. 确认后可能出现 Windows Installer 自己的窗口。请按其提示操作。Agent 不会替你关闭程序、
+   停止服务、请求管理员权限或重启电脑。
+7. 查看两个独立结果：“安装器返回类别”和“刷新后的最终验证”。只有
+   `VERIFIED_REMOVED` 才表示两个本地清单都已确认原目标消失。`COMPLETED_UNVERIFIED` 表示
+   不能确认，不能简单重复卸载。
+8. `REBOOT_REQUIRED` 只是一条提醒，由你决定何时重启。`WAITING`/`INTERRUPTED` 表示安装器
+   可能仍在运行或应用曾中断；先检查可见安装器和刷新后的软件清单，旧确认不能重用。
+9. 残留报告只说明原已知安装目录是否仍存在。应用不会删除目录、AppData、Documents、
+   ProgramData、设置、注册表残留或用户数据。
+
+目前不能执行 Vendor Uninstaller、winget、MSIX、Portable App、驱动、Windows 组件、安全
+软件、共享运行库或未知软件的卸载。很多 MSI 需要管理员权限；当前版本会返回
+`PRIVILEGE_REQUIRED` 或在计划阶段阻止，不会弹出 UAC。卸载没有自动 Undo，恢复通常需要从
+可信来源重新安装，而重新安装不保证恢复原设置和数据。
+
 ## 使用 Stage 4D1 软件卸载分析
 
 1. 先在“系统诊断”获取软件清单，选择一行并点击“分析选中软件的卸载影响”；也可以在聊天输入
