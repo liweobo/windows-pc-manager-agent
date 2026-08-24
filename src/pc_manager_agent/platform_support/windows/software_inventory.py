@@ -15,6 +15,9 @@ from pc_manager_agent.domain.software_uninstall_analysis import (
 from pc_manager_agent.domain.system_diagnostics import SoftwareArchitecture, SoftwareScope
 from pc_manager_agent.platform_support.base import CancellationSignal
 from pc_manager_agent.platform_support.software_inventory import PackageInventoryProvider
+from pc_manager_agent.platform_support.windows.msix_packages import (
+    WindowsMsixSoftwarePackageProvider,
+)
 
 _UNINSTALL_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
 _PRODUCT_CODE = re.compile(
@@ -40,7 +43,7 @@ class WindowsSoftwareInventoryPlatform:
     """Enumerate bounded registry and injected structured package metadata read-only."""
 
     def __init__(self, package_provider: PackageInventoryProvider | None = None) -> None:
-        self._package_provider = package_provider or UnavailablePackageInventoryProvider()
+        self._package_provider = package_provider or WindowsMsixSoftwarePackageProvider()
 
     def collect_raw(
         self,

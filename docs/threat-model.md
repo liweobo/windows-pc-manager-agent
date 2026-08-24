@@ -226,3 +226,17 @@ Installed-software inventory is not yet implemented. Stage 2A file mutation is l
 the documented R1 tools. Recycle-bin/permanent deletion, overwrite, cross-volume move,
 system changes, arbitrary commands, browser automation, and privilege elevation remain
 outside this stage and cannot be triggered through placeholder interfaces.
+## Stage 4D2C2 threats and mitigations
+
+| Threat | Mitigation |
+|---|---|
+| Display-name confusion or LLM-selected PFN | Display text only returns candidates; fresh local WinRT evidence selects exact identity. |
+| Store auto-update between Preview and execution | Full Name/version/architecture and all digests are re-read; any change invalidates both approvals. |
+| Framework/resource/system removal | Strong WinRT flags, signature kind, protected family policy and default-deny type matrix. |
+| All-users or Provisioned scope expansion | Adapter contains only current-user methods; no option/API/model field can request broader scope. |
+| Dependency collateral damage | Direct and reverse relationships must be complete; known dependents and possible orphan removal block. |
+| Prompt/file-name injection | Package metadata stays untrusted local data and is never interpreted as instructions or arguments. |
+| Hidden process/service control | Preflight is read-only; uninstall approval grants neither Stage 4A nor Stage 4C authority. |
+| False success from WinRT return | Fresh current-user inventory distinguishes present, removed, and same-family replacement. |
+| Crash/replay/double click | Durable single-use confirmations and transaction restart recovery mark active work interrupted, never retry. |
+| User-data overreach | No recursive enumeration/deletion; fixed roaming-preservation option and explicit LocalState warning. |

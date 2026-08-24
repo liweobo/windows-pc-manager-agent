@@ -259,3 +259,13 @@ the normal recovery procedure. Reverting code does not restart terminated applic
 recover unsaved data, move user files back, or automatically remove additive SQLite tables.
 Inspect transaction history and verify any desired file rollback first, then test the code
 revert before merging.
+## MSIX / Store App uninstall
+
+Stage 4D2C2 reports rollback level `NONE`. Windows does not provide this application with a reliable
+API to restore the exact removed registration, version, licenses, Package-managed LocalState or
+dependency state. Reinstalling from Microsoft Store is manual recovery and is not Undo.
+
+The fixed removal option requests preservation of Roamable application data, but Windows may remove
+LocalState and dependencies that become unused. The Agent never claims those effects are reversible
+and never performs extra AppData cleanup. To recover, open Microsoft Store, reinstall the exact app,
+then verify settings and data manually.

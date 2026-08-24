@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, SystemDiagnosticServices
 from pc_manager_agent.confirmation.models import ConfirmationRequest
+from pc_manager_agent.domain.msix_uninstall import MsixTargetQuery
 from pc_manager_agent.domain.process_actions import (
     ProcessTargetQuery,
     ProcessTargetQueryType,
@@ -40,6 +41,7 @@ from pc_manager_agent.orchestration.software_uninstall_router import (
     SoftwareUninstallMechanism,
 )
 from pc_manager_agent.orchestration.system_diagnostic_planner import extract_software_search_term
+from pc_manager_agent.ui.msix_uninstall_dialog import MsixUninstallDialog
 from pc_manager_agent.ui.process_action_dialog import ProcessActionDialog
 from pc_manager_agent.ui.software_analysis_dialog import SoftwareAnalysisDialog
 from pc_manager_agent.ui.software_uninstall_dialog import SoftwareUninstallDialog
@@ -81,6 +83,7 @@ class SystemDiagnosticsTab(QWidget):
         self._software_uninstall_dialogs: set[SoftwareUninstallDialog] = set()
         self._vendor_uninstall_dialogs: set[VendorUninstallDialog] = set()
         self._winget_uninstall_dialogs: set[WingetUninstallDialog] = set()
+        self._msix_uninstall_dialogs: set[MsixUninstallDialog] = set()
         self._uninstall_route_workers: set[SoftwareUninstallRouteWorker] = set()
         self._build_ui()
 
@@ -561,6 +564,8 @@ class SystemDiagnosticsTab(QWidget):
             software_dialog.shutdown()
         for uninstall_dialog in tuple(self._software_uninstall_dialogs):
             uninstall_dialog.shutdown()
+        for msix_dialog in tuple(self._msix_uninstall_dialogs):
+            msix_dialog.close()
         for vendor_dialog in tuple(self._vendor_uninstall_dialogs):
             vendor_dialog.shutdown()
         for route_worker in tuple(self._uninstall_route_workers):
@@ -698,6 +703,26 @@ class SystemDiagnosticsTab(QWidget):
         dialog.show()
         self.status_message.emit("正在验证 winget Package 与软件身份；尚未授权或启动卸载")
 
+    def open_msix_uninstall(
+        self,
+        user_goal: str,
+        *,
+        package_full_name: str,
+    ) -> None:
+        """Open the current-user Stage 4D2C2 WinRT workflow for one exact package instance."""
+        dialog = MsixUninstallDialog(
+            self._runtime,
+            user_goal,
+            query=MsixTargetQuery(full_name=package_full_name),
+            parent=self,
+        )
+        self._msix_uninstall_dialogs.add(dialog)
+        dialog.finished.connect(
+            lambda _result, value=dialog: self._msix_uninstall_dialogs.discard(value)
+        )
+        dialog.show()
+        self.status_message.emit("正在验证 MSIX Package 类型、依赖与当前用户范围；尚未卸载")
+
     def open_routed_uninstall(
         self,
         user_goal: str,
@@ -744,6 +769,12 @@ class SystemDiagnosticsTab(QWidget):
             self.open_vendor_uninstall(user_goal, query=query)
         elif route.mechanism is SoftwareUninstallMechanism.WINGET:
             self.open_winget_uninstall(user_goal, query=query)
+        elif route.mechanism is SoftwareUninstallMechanism.MSIX:
+            package_full_name = target.identity.package_full_name
+            if package_full_name is None:
+                self._show_error("MSIX Package Full Name 缺失，操作已停止。")
+                return
+            self.open_msix_uninstall(user_goal, package_full_name=package_full_name)
         else:
             self._show_error(route.reason)
 

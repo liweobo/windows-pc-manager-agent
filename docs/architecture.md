@@ -556,3 +556,19 @@ validation, audit, and tests. A future write tool additionally needs `OperationC
 a truthful `UndoRecord`, conflict rules, verification, and the correct confirmation tier.
 R2/R3 tools remain unregistered in Stage 2A. Stage 2B recycle-bin work requires a
 separate R2 design and is not implied by the rollback-only empty-directory primitive.
+## Stage 4D2C2 MSIX boundary
+
+`WindowsMsixPackagePlatform` is the only WinRT boundary. Inventory uses PackageManager for the empty
+user SID (current user) and retains Raw records before normalization. Stable `MsixFamilyIdentity` is
+separate from version-sensitive `MsixInstanceIdentity`; display names never authorize a write.
+
+The execution chain is `inventory → exact resolution → type classifier → dependency snapshot →
+software safety/scope policy → read-only preflight → Preview → plan confirmation → fresh revalidation
+→ immediate confirmation → durable one-shot guard → software.uninstall.msix → fresh inventory →
+verification → exact-path-only residual report → audit`. UI work runs in Qt workers and reaches the
+adapter only through the registered tool. MSI, Vendor, winget and MSIX repositories share one global
+active-uninstall exclusion.
+
+The adapter exposes neither arbitrary PackageManager operations nor command execution. Its sole write
+is current-user `remove_package_with_options_async` with the fixed WinRT equivalent of
+`PreserveRoamableApplicationData`. All-users and Provisioned APIs have no production call path.

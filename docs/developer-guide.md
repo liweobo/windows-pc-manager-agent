@@ -426,3 +426,15 @@ behavior, errors, side effects, and safety notes there.
 Work from `codex/*`, `fix/*`, or `docs/*`. Inspect status/diff, preserve user changes, run
 all checks, scan staged content for credentials/user data, create logical commits, and push
 without force. Prefer `git revert <sha>` on a new branch for code rollback.
+## Stage 4D2C2 development boundary
+
+Install all locked Windows-only PyWinRT projections with `uv sync --all-groups`. Do not replace the
+adapter with PowerShell. Unit/integration/security/GUI tests use synthetic package records and a fake
+removal adapter; ordinary CI must never uninstall a runner's real Store applications. The only real
+Windows test is `uv run pytest tests/integration/test_msix_windows_inventory.py -q`, which is bounded
+and read-only and never prints package identities.
+
+When adding fields, update the identity, Preview invariant, both confirmation bindings, reserved tool
+argument digest, audit redaction tests and API reference together. Any incomplete WinRT property,
+relationship, process/service or inventory result must block execution. Never add an all-users,
+Provisioned, arbitrary removal-option, generic PackageManager, PowerShell, retry or cleanup surface.

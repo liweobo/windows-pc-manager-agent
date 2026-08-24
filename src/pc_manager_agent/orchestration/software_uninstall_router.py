@@ -1,4 +1,4 @@
-"""Read-only deterministic routing among MSI, Vendor, and winget mechanisms."""
+"""Read-only deterministic routing among MSI, Vendor, winget, and MSIX mechanisms."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ class SoftwareUninstallMechanism(StrEnum):
     MSI = "msi"
     VENDOR = "vendor"
     WINGET = "winget"
+    MSIX = "msix"
     AMBIGUOUS = "ambiguous"
     UNSUPPORTED = "unsupported"
 
@@ -73,6 +74,17 @@ class SoftwareUninstallRouter:
             )
         if (
             target.scope.value == "current_user"
+            and target.identity.source.value == "msix"
+            and target.identity.package_family_name
+            and target.identity.package_full_name
+        ):
+            return SoftwareUninstallRoute(
+                SoftwareUninstallMechanism.MSIX,
+                resolution,
+                "已识别为当前用户 MSIX 身份；将重新通过 WinRT 清单解析精确 Package。",
+            )
+        if (
+            target.scope.value == "current_user"
             and target.identity.package_manager_id is not None
             and target.identity.package_manager_id.casefold() in {"winget", "microsoft.winget"}
             and target.identity.package_id is not None
@@ -114,5 +126,5 @@ class SoftwareUninstallRouter:
         return SoftwareUninstallRoute(
             SoftwareUninstallMechanism.UNSUPPORTED,
             resolution,
-            "当前元数据不符合 MSI、Stage 4D2B 厂商卸载器或 winget 的狭窄安全边界。",
+            "当前元数据不符合 MSI、Vendor、winget 或 MSIX 的狭窄安全边界。",
         )
