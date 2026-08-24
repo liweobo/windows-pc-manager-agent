@@ -104,6 +104,26 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4D2C2 retains Stage 4D2C1 and adds exactly one independent write tool:
+`software.uninstall.msix`. It accepts only an internally built `ValidatedMsixRemovalAction` for one
+exact healthy ordinary current-user `USER_MSIX_APP`. Stable Package Family and version-sensitive
+Package Full Name/version/architecture identities, current-user scope, structural type, existing
+software safety class, complete relationship evidence, process/service preflight and non-elevated
+execution are mandatory. Display names only discover candidates.
+
+Framework, Resource, Bundle, Optional, Dependency, System, Security, Provisioned, other-user,
+all-users and Unknown packages are blocked. Any direct dependency that Windows might remove as
+orphaned, reverse dependent, incomplete evidence, running related service or active MSI/Vendor/
+winget/MSIX transaction blocks. The sole adapter uses structured WinRT PackageManager with the fixed
+`PreserveRoamableApplicationData` option. It never uses PowerShell/CMD/shell, elevation, process
+termination, service stop, retry, all-users/provisioned APIs or extra data deletion.
+
+Plan and immediate confirmations bind exact identity, dependency, safety, preflight, data-impact and
+risk digests and are durable, expiring and single-use. Windows may remove Package-managed LocalState
+and unused dependencies; the UI must say so. The Agent requests Roamable preservation and performs
+no additional deletion. Fresh current-user inventory distinguishes removal, persistence and
+same-family replacement. Rollback is NONE; reinstall is manual recovery, not Undo.
+
 Stage 4D2C1 retains Stage 4D2B and adds exactly one independent write tool:
 `software.uninstall.winget`. It accepts only an internally built
 `ValidatedWingetUninstallAction` for one exact, high-confidence, current-user Package-to-Software

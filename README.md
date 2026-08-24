@@ -326,6 +326,19 @@ uv run python -m pc_manager_agent --smoke-test
 跨磁盘移动会阻止；目标存在会标为冲突且不覆盖；回滚时原位置出现新对象或结果已修改会
 停止相应恢复。事务创建的目录只有仍为同一目录且在逆序回滚后为空时才会移除。
 
+## 使用 Stage 4D2C2 MSIX / Store App 安全卸载
+
+从“系统状态”软件清单选择一个带精确 MSIX Package 身份的当前用户应用，进入受控卸载。
+界面先重新读取当前用户 Package 清单，区分 Package Family 与具体版本实例，再检查类型、
+依赖、进程、服务、并发事务和权限。Framework、Resource、Bundle、Optional、System、
+Security、Provisioned、Dependency 和 Unknown Package 均不执行。
+
+计划确认后会再次检查全部证据；只有 Package Full Name、版本、架构、范围、类型、依赖快照
+和风险完全不变，才显示即时确认。确认会明确说明：Windows 可能移除 Package-managed
+LocalState，也可能移除无人依赖的依赖包；本版只在没有已知依赖风险时允许继续，并固定请求
+保留 Roamable 数据。Agent 不额外删除 AppData 或用户文件，不运行 PowerShell，不提权，
+不结束进程，不停止服务。MSIX 卸载回滚等级为 `NONE`。
+
 ## 开发与测试
 
 ```powershell
@@ -337,6 +350,7 @@ uv run pytest -m "not performance" --cov=pc_manager_agent --cov-report=term-miss
 uv run pytest tests/performance/test_large_scan.py -q -s
 uv run pytest tests/integration/test_windows_process_management_real.py -q
 uv run pytest tests/integration/test_windows_startup_readonly.py -q
+uv run pytest tests/integration/test_msix_windows_inventory.py -q
 uv run bandit -q -r src
 uv run pip-audit
 uv build

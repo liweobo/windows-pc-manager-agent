@@ -319,3 +319,16 @@ are not intentionally stored in audit events.
 
 Closing the window normally hides it to the tray. Use the tray's safe exit action to cancel
 work, wait for workers, hide the icon, and close the application.
+## 安全卸载当前用户 MSIX / Store App
+
+只从软件表选择一个具体应用。应用会重新读取 Windows Package 身份；名称相似时必须重新
+选择，不会批量卸载。Framework、Resource、系统、安全、依赖、Provisioned 和无法确定
+类型的 Package 会直接阻止。
+
+第一次确认是计划确认。第二次是卸载前即时确认，会显示 Package Full Name、Family、版本、
+架构、当前用户范围、Package 类型、依赖状态和真实数据影响。Windows 可能移除该 Package
+管理的 LocalState，也可能移除无人使用的依赖包；Agent 请求保留 Roamable 数据，并在发现
+已知依赖风险时不执行。Agent 不额外删除用户文件。
+
+卸载后以新清单为准。看到 `PACKAGE_INSTANCE_REPLACED` 表示同一 Family 出现了另一个版本，
+不等于卸载完成。回滚为 `NONE`；需要恢复时应从 Microsoft Store 手动重新安装并检查数据。

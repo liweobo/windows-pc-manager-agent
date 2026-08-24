@@ -11,6 +11,7 @@ from uuid import UUID
 from pc_manager_agent import __version__
 from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
+from pc_manager_agent.audit.msix_uninstall import MsixUninstallAuditLogger
 from pc_manager_agent.audit.process_actions import ProcessActionAuditLogger
 from pc_manager_agent.audit.repository import AuditRepository
 from pc_manager_agent.audit.service_actions import ServiceActionAuditLogger
@@ -35,6 +36,7 @@ from pc_manager_agent.confirmation.file_operations import (
     OperationConfirmationService,
     RollbackConfirmationService,
 )
+from pc_manager_agent.confirmation.msix_uninstall import MsixConfirmationService
 from pc_manager_agent.confirmation.process_actions import ProcessActionConfirmationService
 from pc_manager_agent.confirmation.service_actions import ServiceActionConfirmationService
 from pc_manager_agent.confirmation.service_startup_actions import (
@@ -74,6 +76,8 @@ from pc_manager_agent.orchestration.file_operation_planner import (
     FileOperationSourceResolver,
 )
 from pc_manager_agent.orchestration.file_operation_service import FileOperationService
+from pc_manager_agent.orchestration.msix_execution_preflight import MsixExecutionPreflightService
+from pc_manager_agent.orchestration.msix_uninstall_execution import MsixUninstallService
 from pc_manager_agent.orchestration.process_action_planner import ProcessActionPlanCompiler
 from pc_manager_agent.orchestration.process_actions import ProcessActionService
 from pc_manager_agent.orchestration.process_target_resolver import ProcessTargetResolver
@@ -132,6 +136,10 @@ from pc_manager_agent.persistence.file_operations import (
     OperationRepository,
     TransactionExecutionGuard,
 )
+from pc_manager_agent.persistence.msix_uninstall import (
+    MsixUninstallExecutionGuard,
+    MsixUninstallRepository,
+)
 from pc_manager_agent.persistence.process_actions import (
     ProcessActionRepository,
     ProcessExecutionGuard,
@@ -178,6 +186,7 @@ from pc_manager_agent.platform_support.windows.msi_uninstall import (
     WindowsMsiUninstallPlatform,
     current_process_is_elevated,
 )
+from pc_manager_agent.platform_support.windows.msix_packages import WindowsMsixPackagePlatform
 from pc_manager_agent.platform_support.windows.path_info import (
     is_network_path,
     last_access_time_reliable,
@@ -284,6 +293,7 @@ from pc_manager_agent.tools.system_tools.collectors import (
     StartupTool,
     SystemInfoTool,
 )
+from pc_manager_agent.tools.system_tools.msix_uninstall import MsixUninstallTool
 from pc_manager_agent.tools.system_tools.process_actions import (
     ForceTerminateProcessTool,
     RequestProcessExitTool,
@@ -396,6 +406,14 @@ class WingetUninstallServices:
     software_resolver: SoftwareTargetResolver
     package_resolver: PackageTargetResolver
     service: WingetUninstallService
+
+
+@dataclass(frozen=True, slots=True)
+class MsixUninstallServices:
+    """Dependency bundle for the Stage 4D2C2 current-user WinRT workflow."""
+
+    registry: ToolRegistry
+    service: MsixUninstallService
 
 
 @dataclass(frozen=True, slots=True)
@@ -515,6 +533,8 @@ class ApplicationRuntime:
         self.interrupted_vendor_uninstall_ids = self.vendor_uninstall_repository.initialize()
         self.winget_uninstall_repository = WingetUninstallRepository(settings.database_path)
         self.interrupted_winget_uninstall_ids = self.winget_uninstall_repository.initialize()
+        self.msix_uninstall_repository = MsixUninstallRepository(settings.database_path)
+        self.interrupted_msix_uninstall_ids = self.msix_uninstall_repository.initialize()
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
         self.process_management_platform = WindowsProcessManagementPlatform()
@@ -1106,6 +1126,37 @@ class ApplicationRuntime:
             service=service,
         )
 
+    def create_msix_uninstall_services(self) -> MsixUninstallServices:
+        """Build the one-tool current-user MSIX WinRT removal boundary."""
+        platform = WindowsMsixPackagePlatform()
+        registry = ToolRegistry(
+            write_guard=MsixUninstallExecutionGuard(self.msix_uninstall_repository)
+        )
+        registry.register(MsixUninstallTool(platform, self.settings.diagnostic_max_items))
+        preflight = MsixExecutionPreflightService(
+            WindowsSystemDiagnosticsPlatform(), self.settings.diagnostic_max_items
+        )
+        service = MsixUninstallService(
+            platform=platform,
+            repository=self.msix_uninstall_repository,
+            confirmations=MsixConfirmationService(
+                self.msix_uninstall_repository,
+                plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+                runtime_ttl_seconds=60,
+            ),
+            registry=registry,
+            audit=MsixUninstallAuditLogger(
+                self.audit,
+                app_version=__version__,
+                git_commit=os.getenv("GITHUB_SHA"),
+            ),
+            preflight=preflight.inspect,
+            process_is_elevated=current_process_is_elevated,
+            max_items=self.settings.diagnostic_max_items,
+            preview_ttl_seconds=self.settings.confirmation_ttl_seconds,
+        )
+        return MsixUninstallServices(registry=registry, service=service)
+
     def create_process_action_services(self) -> ProcessActionServices:
         """Build the Stage 4A resolver, policy, confirmations, registry, and executor."""
         platform = self.process_management_platform
@@ -1315,6 +1366,7 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.msix_uninstall_repository.close()
         self.winget_uninstall_repository.close()
         self.vendor_uninstall_repository.close()
         self.msi_uninstall_repository.close()

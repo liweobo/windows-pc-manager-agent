@@ -28,6 +28,11 @@ dependencies = [
   "pyside6>=6.10,<7",
   "pywin32>=311,<313 ; sys_platform == 'win32'",
   "sqlalchemy>=2.0,<3",
+  "winrt-Windows.ApplicationModel>=3.2.1,<4 ; sys_platform == 'win32'",
+  "winrt-Windows.Foundation>=3.2.1,<4 ; sys_platform == 'win32'",
+  "winrt-Windows.Foundation.Collections>=3.2.1,<4 ; sys_platform == 'win32'",
+  "winrt-Windows.Management.Deployment>=3.2.1,<4 ; sys_platform == 'win32'",
+  "winrt-Windows.System>=3.2.1,<4 ; sys_platform == 'win32'",
 ]
 
 [project.scripts]

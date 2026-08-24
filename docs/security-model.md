@@ -376,3 +376,20 @@ record only after postcondition verification. Undo and audit are separate tables
 purposes. Reverse execution refuses changed results, occupied original paths, unsafe
 scope, and non-empty created directories. `FULL` describes the normal verified case,
 not a promise that later user changes cannot create a rollback conflict.
+## Stage 4D2C2 policy
+
+MSIX removal is R2, single-object, current-user only and rollback `NONE`. An executable Preview needs
+an ordinary healthy Store package with a current-user registration, `USER_MSIX_APP` type,
+`USER_APPLICATION` safety class, complete inventory/relationships/preflight, no reverse dependents,
+no direct dependency that could become an orphan, no running related service, no overlapping
+uninstall, and a non-elevated Agent.
+
+Framework, Resource, Bundle, Optional, System-signature, Windows/Security family, Provisioned,
+Dependency and Unknown classes are blocked without override. The two confirmations bind plan,
+Preview, exact Full Name, Family, version, architecture, scope, type, dependency, safety, preflight,
+data-impact and risk digests. Any Store update or relationship change invalidates approval.
+
+The fixed Windows option requests Roamable-data preservation. Windows may still remove
+Package-managed LocalState and unused dependency packages; the immediate confirmation says so. The
+Agent performs no additional file/registry/user-data deletion and never uses PowerShell, shell,
+all-users removal, Provisioned removal, elevation, process termination or service stop.

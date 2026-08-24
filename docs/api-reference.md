@@ -5274,3 +5274,125 @@ FileOperationPlanner.plan_intent (可选)
   -> RollbackManager.resolve_confirmation
   -> RollbackManager.execute (reverse sequence, same registered boundary)
 ```
+
+## Stage 4D2C2 MSIX / Store App API
+
+### Domain models and validation
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `MsixFamilyIdentity.canonical_digest()` | 对稳定 Family Name、Package Name、Publisher ID 生成 SHA-256 授权摘要；无 I/O。 |
+| `MsixInstanceIdentity.canonical_digest()` | 对 Full Name、版本、架构、Resource ID 生成版本敏感摘要；Store 更新会改变结果。 |
+| `MsixPackageIdentity.enforce_current_user_claim()` | Pydantic 后置校验；拒绝“当前用户范围但未注册”及任何 Provisioned 查询声明，失败抛 `ValueError`。 |
+| `MsixPackageIdentity.canonical_digest()` | 绑定 Family、Instance、范围、类型、健康/结构标志和签名类别。 |
+| `MsixTargetQuery.require_selector()` | 要求精确摘要/Family/Full Name 或有限展示查询之一；空查询抛 `ValueError`。 |
+| `MsixDependencySnapshot.canonical_digest()` | 绑定查询完整性、直接依赖、反向依赖、孤立依赖风险及警告。 |
+| `MsixPreflight.canonical_digest()` | 绑定进程/服务探测完整性、关联数量、并发状态、阻止项和警告。 |
+| `MsixRemovalAssessment.allow_only_ordinary_r2()` | 只允许 `USER_APPLICATION + R2` 的 ALLOW；其他可执行组合抛 `ValueError`。 |
+| `MsixRemovalAssessment.canonical_digest()` | 对最终安全分类、风险、决定和理由生成摘要。 |
+| `MsixUninstallPlan.validate_contract()` | 强制工具名 `software.uninstall.msix`、R2、两级确认和 rollback NONE。 |
+| `MsixUninstallPlan.canonical_digest()` | 对整个不可变计划生成授权摘要。 |
+| `MsixUninstallPreview.bind_evidence()` | 校验有效期、目标依赖摘要、类型/范围/政策/预检的一致性和真实回滚级别。 |
+| `MsixUninstallPreview.invariant_digest()` | 生成两次确认间必须不变的 Package、依赖、政策、预检和数据影响摘要。 |
+| `MsixUninstallPreview.canonical_digest()` | 对包含有效期的完整 Preview 生成摘要。 |
+| `ValidatedMsixRemovalAction.enforce_narrow_action()` | 只接受当前用户普通 App，并强制保留 Roamable 选项；范围/类型/选项扩大抛 `ValueError`。 |
+| `MsixUninstallRequest.bind_transaction()` | 要求内部 Action 和持久事务 UUID 完全一致。 |
+
+### Platform and WinRT adapter
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `MsixPackagePlatform.inventory_current_user(max_items, cancellation)` | 平台协议：返回有界当前用户清单；不得查询其他用户或 Provisioned。 |
+| `MsixPackagePlatform.remove_current_user(action, cancellation)` | 平台协议：只移除一个已验证当前用户实例。 |
+| `MsixPackagePlatform.dependency_snapshot(identity)` | 平台协议：返回直接/反向 Package 关系及完整性。 |
+| `WindowsMsixPackagePlatform.inventory_current_user(...)` | 使用 WinRT PackageManager 空 SID 查询当前用户；逐项复制结构化属性，取消/上限/不可访问元数据产生不完整清单，不打印身份。 |
+| `WindowsMsixPackagePlatform.remove_current_user(...)` | 执行前按 Full Name 重查并比较完整身份，仅调用 `remove_package_with_options_async` 和固定 `PRESERVE_ROAMABLE_APPLICATION_DATA`；无 PowerShell/提权/重试。 |
+| `WindowsMsixPackagePlatform.dependency_snapshot(identity)` | 对精确实例调用 `FindRelatedPackages` 的 DEPENDENCIES/DEPENDENTS，包含 framework/optional/resource/host-runtime；失败返回 UNAVAILABLE。 |
+| `_await_deployment(operation, timeout_seconds)` | 在固定上限内观察一个 WinRT 异步操作；超时不重试，也不强杀系统部署工作。 |
+| `_read_package(package)` | 将 documented WinRT 属性复制为 `RawMsixPackageRecord`；不读取 manifest/文件内容/用户数据。 |
+| `_normalize_package(raw)` | 分离 Raw 与 Normalized，构造 Family/Instance/current-user 身份。 |
+| `_classify_raw(raw)` | 按强结构标志优先分类 Framework/Resource/Bundle/Optional；stub/不健康/无 App entry 为 Unknown。 |
+| `_related(target, options)` | 返回排序后的身份级关系，绝不保存 manifest 或数据路径。 |
+| `_unavailable_dependencies(identity, reason)` | 构造 `UNAVAILABLE + orphan risk` 的失败关闭快照。 |
+| `_optional_text(value)` | 将空 WinRT 字符串归一为 `None`。 |
+| `_map_hresult(exc)` | 将有限 HRESULT 映射为访问拒绝、占用、依赖或部署错误；未知保持部署错误。 |
+| `_map_hresult_code(code)` | 对 WinRT `extended_error_code` 使用同一有限映射；非零未知值保持部署失败。 |
+| `WindowsMsixSoftwarePackageProvider.__init__(platform)` | 注入或创建只读 WinRT 平台；不执行 Package 写操作。 |
+| `WindowsMsixSoftwarePackageProvider.collect(max_items, cancellation)` | 将当前用户 MSIX Family/Instance 结构化投影到 Stage 4D1 `RawInstalledSoftwareEntry`，保留精确 Package anchors 并传播不完整状态。 |
+| `_software_architecture(value)` | 将 WinRT x86/x64/其他架构保守映射到现有 SoftwareArchitecture。 |
+
+### Analysis, safety, preflight and verification
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `MsixInventoryService.__init__(platform, max_items)` | 注入窄平台并校验正上限。 |
+| `MsixInventoryService.collect(cancellation)` | 读取新当前用户清单；无模型和 GUI 依赖。 |
+| `MsixTargetResolver.resolve(query, inventory)` | 精确摘要/Full Name/Family 只能匹配一个；展示文字只返回候选，清单不完整时不选择。 |
+| `MsixPackageTypeClassifier.classify(package)` | 强标志优先，再保护 System 签名、Windows 核心 Family 和 Security 类；不会用名称降低保护。 |
+| `MsixRemovalPolicy.assess(...)` | 合并范围、类型、现有 SoftwareSafetyClass、健康、依赖、预检和提权状态；任一不确定即 BLOCK。 |
+| `MsixPreviewService.__init__(ttl_seconds, now)` | 配置正有效期和可测试时钟。 |
+| `MsixPreviewService.build(...)` | 生成绑定所有证据的 Preview，固定写入 Roamable/LocalState/依赖/无额外删除的真实语义。 |
+| `MsixExecutionValidator.__init__(platform, max_items)` | 组合执行前清单和关系重查服务。 |
+| `MsixExecutionValidator.validate(preview, fresh_preflight, cancellation)` | 比较精确身份、依赖和预检摘要；Store 更新/关系变化/清单不完整抛 `RuntimeError`。 |
+| `MsixUninstallVerifier.verify(original, inventory, result_category, ...)` | 新清单区分仍注册、同 Family 新实例、已移除、软件证据仍在、中断和无法验证；不把 API 返回当成功。 |
+| `MsixResidualAnalyzer.inspect(installed_path)` | 只对一个已知路径调用 `lstat`；不枚举、不递归、不删除。 |
+| `ready_msix_preflight(another_uninstall_active)` | 为测试/无关联对象适配器构造完整预检；并发存在时为 BLOCKED。 |
+| `MsixExecutionPreflightService.__init__(platform, max_items)` | 注入只读系统诊断平台和有界数量。 |
+| `MsixExecutionPreflightService.inspect(package, active)` | 将解析后的 Package 安装根与进程/服务可执行路径相关联；进程只警告，运行服务/不完整/并发阻止，不执行控制。 |
+| `_inside(path, root)` | 严格解析并用 `relative_to` 判断路径属于关系；错误返回 False。 |
+
+### Workflow, confirmations and persistence
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `MsixUninstallService.__init__(...)` | 注入平台、持久层、确认、注册表、审计、预检和提权探针；无全局可变状态。 |
+| `MsixUninstallService.prepare(goal, query, cancellation)` | Fresh inventory→resolve→classify→dependencies→preflight→policy→plan/Preview→durable transaction→audit→plan confirmation；BLOCK 时不创建执行权。 |
+| `MsixUninstallService.resolve_confirmation(...)` | 解析任一级精确确认并立即审计；拒绝/过期/不匹配不继续。 |
+| `MsixUninstallService.prepare_runtime_confirmation(...)` | 进入 VALIDATING，重查身份/依赖/预检后才发短期即时确认。 |
+| `MsixUninstallService.execute(...)` | 再次重查、原子消费双确认、写入 pre-dispatch audit、通过 ToolRegistry 一次执行并持久化验证终态。 |
+| `MsixUninstallService._validated_action(...)` | 从 Fresh 本地事实构造唯一内部 Action；版本/依赖/预检变化抛 `MsixUninstallExecutionError`。 |
+| `MsixUninstallService._safety_class(type)` | 只把 User App 映射为 USER_APPLICATION；System/Security 映射为保护类，其余 Unknown。 |
+| `MsixConfirmationStore.save_confirmation/get_confirmation/update_confirmation/consume_pair` | 持久协议：保存、读取、迁移和原子消费 Gate；实现必须单次使用。 |
+| `MsixConfirmationService.__init__(store, plan_ttl_seconds, runtime_ttl_seconds, now)` | 校验 TTL 并注入可测试时钟。 |
+| `MsixConfirmationService.request_plan(...)` | 只对未过期可执行 Preview 创建第一 Gate。 |
+| `MsixConfirmationService.approve(...)` | 校验所有摘要并批准/拒绝一个 PENDING Gate；重放抛 `MsixConfirmationError`。 |
+| `MsixConfirmationService.request_runtime(...)` | 要求当前 APPROVED plan Gate，再创建 parent-bound 短期 Gate。 |
+| `MsixConfirmationService.consume_runtime(...)` | 校验并一次原子消费 plan/runtime Gate；再次调用失败。 |
+| `MsixConfirmationService._create(...)` | 绑定 PFN/Family/version/scope/type/dependency/policy/preflight/data impact/risk 并生成具体对象摘要。 |
+| `MsixConfirmationService._require_current/_require_binding/_require_not_expired` | 分别检查 Preview 可执行性、全字段相等和到期；到期会持久化 EXPIRED。 |
+| `_impact_digest(preview)` | 对明确展示的数据影响生成确认摘要。 |
+| `MsixUninstallRepository.__init__(database_path)` | 创建独立 SQLAlchemy engine/session factory；尚不建表。 |
+| `MsixUninstallRepository.initialize()` | 建表、过期未决 Gate、把重启前活动事务标记 INTERRUPTED；绝不重新派发。 |
+| `MsixUninstallRepository.create(plan, preview)` | 检查 MSI/Vendor/winget/MSIX 全局并发并保存 request digest；持久化失败阻止确认。 |
+| `MsixUninstallRepository.has_active_uninstall(exclude)` | 跨四机制返回活动状态，可排除当前 MSIX 事务。 |
+| `MsixUninstallRepository.state/transition` | 读取或持久化事务状态；终态不可改写。 |
+| `MsixUninstallRepository.save_confirmation/get_confirmation/update_confirmation` | 持久化强类型 Gate 和相应事务状态。 |
+| `MsixUninstallRepository.consume_pair(...)` | 同一 SQLite 事务中消费两个 APPROVED Gate 并标记 DISPATCHING。 |
+| `MsixUninstallRepository.close()` | 释放数据库连接池。 |
+| `MsixUninstallRepository._transaction/_require_initialized` | 内部精确行解析与初始化 Gate；缺失抛 `MsixUninstallStoreError`。 |
+| `MsixUninstallExecutionGuard.__init__(repository)` | 注入持久授权源。 |
+| `MsixUninstallExecutionGuard.require(authorization, tool_name, arguments)` | 比较 UUID、工具、两份 argument digest 和 consumed runtime Gate，并在同一事务标记 EXECUTING。 |
+| `_request_for_preview(preview)` | 生成唯一可被预留的 typed request，固定 Roamable 选项。 |
+| `_confirmation_row(confirmation)` | 转换为 digest-bound SQLite 行，不加入 manifest/路径/数据。 |
+| `_any_active_uninstall(session, exclude)` | 用固定 SQL 读取四类 additive transaction 表，默认全局互斥。 |
+
+### Tool, audit and Qt
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `MsixUninstallTool.__init__(platform, max_inventory_items)` | 创建唯一 R2/不可逆/双确认/批量 1 的 `software.uninstall.msix` manifest。 |
+| `MsixUninstallTool.manifest` | 返回固定 ToolManifest。 |
+| `MsixUninstallTool.execute(request, cancellation)` | 只接受 typed request；调用窄移除、Fresh inventory、verifier 和 report-only residual analyzer。 |
+| `_package_from_action(request)` | 为 verifier 重建最小 Normalized projection；无 I/O。 |
+| `MsixUninstallAuditLogger.__init__(repository, app_version, git_commit)` | 注入追加式审计和版本元数据。 |
+| `previewed/confirmation_resolved/started/completed` | 分别记录 Preview、用户决定、强制 pre-dispatch 和部署+验证事件；只存摘要与布尔影响，不存 manifest/用户数据。 |
+| `MsixPrepareWorker.__init__/run/cancel` | 后台准备 Fresh Preview；成功发强类型 bundle，失败发净化文本，取消仅协作式。 |
+| `MsixRuntimePrepareWorker.__init__/run` | 后台执行确认前 revalidation 并发即时 Gate；无写调用。 |
+| `MsixExecuteWorker.__init__/run/cancel` | 后台单次执行；取消只在 dispatch 前有效，不终止 WinRT 操作。 |
+| `require_prepared_msix/require_msix_runtime/require_msix_result` | 收窄 Qt `Signal(object)`；类型错误抛 `TypeError`。 |
+| `MsixUninstallDialog.__init__/_build_ui/_start_prepare` | 建立默认取消、主按钮禁用的非模态双确认窗口，并在线程池开始只读准备。 |
+| `_prepared/_runtime_prepared/_completed` | 收窄 worker 结果并推进 PLAN/RUNTIME/DONE，最终分开显示 deployment 与 inventory verification。 |
+| `_primary_clicked` | PLAN 时批准并重查，RUNTIME 时批准并执行；其他状态只能关闭。 |
+| `_show_preview` | 两次明确展示 PFN、Family、版本、范围、类型、LocalState/依赖/Roamable 和 NONE 回滚。 |
+| `_busy/_failed/_cancel_clicked/_required/closeEvent` | 管理忙碌/失败/取消/状态完整性/窗口关闭；不把关闭解释为强杀。 |
+| `_result_html(result)` | 输出净化的部署类别、验证状态、理由和无额外数据删除声明。 |

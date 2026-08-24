@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased — Stage 4D2C2
+
+### Added
+
+- Structured PyWinRT current-user MSIX/AppX inventory with raw/normalized records, separate Package
+  Family and version-sensitive Package Instance identities, deterministic type classification and
+  exact target resolution.
+- Framework/resource/bundle/optional/system/security/unknown protection, current-user-only scope,
+  complete direct/reverse relationship analysis, orphan-dependency blocking and read-only
+  process/service preflight.
+- Sole `software.uninstall.msix` R2 tool using WinRT PackageManager with the fixed
+  `PreserveRoamableApplicationData` option, durable global uninstall transaction exclusion, two
+  expiring single-use confirmations, TOCTOU revalidation, privacy-minimized audit and fresh package
+  inventory verification.
+- PySide6 double-confirmation flow, MSI/Vendor/winget/MSIX router integration, synthetic unit,
+  integration, security and GUI tests, plus a real-Windows read-only PackageManager probe.
+
+### Security
+
+- Display text is discovery-only. Execution binds Package Full Name, Family, version, architecture,
+  scope, type, dependency snapshot, safety, preflight and data-impact digests.
+- V1 blocks every non-ordinary package, any known dependent, any direct dependency that Windows
+  might remove as orphaned, incomplete inventory/relationship/preflight evidence, elevation and
+  overlapping MSI/Vendor/winget/MSIX work.
+- The Agent never uses PowerShell/CMD/shell, all-users/provisioned removal, elevation, process
+  termination, service stop, retry, recursive residual inspection or extra user-data deletion.
+  Windows may remove package-managed LocalState; the fixed option requests preservation of Roamable
+  data. Rollback is NONE and fresh inventory—not the deployment return—decides success.
+
 ## Unreleased — Stage 4D2C1
 
 ### Added

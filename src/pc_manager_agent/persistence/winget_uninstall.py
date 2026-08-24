@@ -582,6 +582,15 @@ def _any_active_uninstall(
             "blocked",
             "cancelled",
         },
+        "msix_uninstall_transactions": {
+            "verified_removed",
+            "completed_unverified",
+            "access_denied",
+            "cancelled",
+            "failed",
+            "blocked",
+            "interrupted",
+        },
     }
     for table_name, terminal in terminal_by_table.items():
         present = session.execute(
@@ -590,11 +599,14 @@ def _any_active_uninstall(
         ).scalar_one_or_none()
         if present is None:
             continue
-        statement = (
-            text("SELECT state FROM msi_uninstall_transactions")
-            if table_name == "msi_uninstall_transactions"
-            else text("SELECT state FROM vendor_uninstall_transactions")
-        )
+        statements = {
+            "msi_uninstall_transactions": text("SELECT state FROM msi_uninstall_transactions"),
+            "vendor_uninstall_transactions": text(
+                "SELECT state FROM vendor_uninstall_transactions"
+            ),
+            "msix_uninstall_transactions": text("SELECT state FROM msix_uninstall_transactions"),
+        }
+        statement = statements[table_name]
         states = session.execute(statement).scalars()
         if any(str(state) not in terminal for state in states):
             return True

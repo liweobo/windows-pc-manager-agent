@@ -116,11 +116,22 @@ transaction exclusion, dual fresh verification, audit, report-only residuals and
 Custom/msstore sources, machine scope, raw args, source changes, silent/override/force/purge, elevation,
 restart/retry, process/service control, cleanup, MSIX/AppX and Store execution remain absent.
 
-## Stage 4D2C2 — Microsoft Store / MSIX analysis and controlled design (planned)
+## Stage 4D2C2 — controlled current-user MSIX / Store App uninstall (complete)
 
-Future work must separately research Store/MSIX identity, package family/full name, framework/resource/
-bundle protection, per-user registration, deployment APIs, Store licensing and rollback limits.
-Stage 4D2C1 does not call `Remove-AppxPackage` or treat `msstore` as the community `winget` source.
+Structured current-user WinRT inventory, Family/Instance identity, package-type and protected-class
+policy, complete relationship gate, process/service preflight, double confirmation, fixed
+`PreserveRoamableApplicationData` PackageManager adapter, global uninstall exclusion, fresh
+verification, privacy-minimized audit, report-only residual status and GUI are complete.
+
+All-users and Provisioned removal, Framework/Resource/Bundle/Optional/Dependency/System/Security/
+Unknown removal, PowerShell, elevation, lifecycle control, automatic retry and extra data deletion
+remain absent. Windows may remove package-managed LocalState; V1 blocks known orphan dependency risk.
+
+## Stage 4D3 — residual analysis and user-data protection (planned)
+
+Future work is report-only research into ownership-confidence classification for Program Files,
+AppData, ProgramData, shortcuts, cache, configuration, databases and user-generated content. It does
+not inherit deletion authority from Stage 4D2C2.
 
 ## Stage 4C3+ / other controlled system operations (not started)
 
