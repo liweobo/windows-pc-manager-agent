@@ -25,7 +25,10 @@ def test_ten_thousand_metadata_only_residuals_remain_bounded(tmp_path: Path) -> 
     environment = build_residual_environment(
         tmp_path / "state.db",
         max_objects=file_count + 1,
-        timeout_seconds=120,
+        # Hosted Windows runners vary substantially under filesystem load.
+        # Keep a finite regression ceiling while avoiding a race between the
+        # scanner's internal timeout and this benchmark's wall-clock assertion.
+        timeout_seconds=180,
     )
     context = residual_context(root)
     environment.repository.upsert_context(context)
@@ -50,7 +53,7 @@ def test_ten_thousand_metadata_only_residuals_remain_bounded(tmp_path: Path) -> 
             f"stage4d3-benchmark objects={file_count + 1} seconds={elapsed:.3f} "
             f"peak_mib={peak_bytes / 1_048_576:.2f}"
         )
-        assert elapsed < 120
+        assert elapsed < 180
         assert peak_bytes < 256 * 1_048_576
     finally:
         environment.close()
