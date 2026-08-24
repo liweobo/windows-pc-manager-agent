@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QPushButton
@@ -92,6 +93,7 @@ def test_residual_dialog_reports_filters_exports_and_has_no_cleanup_control(
         monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
         dialog._export(ResidualReportFormat.JSON)
         qtbot.waitUntil(target.exists, timeout=10_000)
+        qtbot.waitUntil(lambda: dialog._worker is None, timeout=10_000)
         assert '"deletion_performed": false' in target.read_text(encoding="utf-8")
     finally:
         dialog.close()
@@ -103,3 +105,23 @@ def test_residual_dialog_source_does_not_expose_stage4d4_authority() -> None:
     assert not hasattr(ResidualAnalysisDialog, "_delete")
     assert not hasattr(ResidualAnalysisDialog, "_cleanup")
     assert not hasattr(ResidualAnalysisDialog, "_trash")
+
+
+@pytest.mark.gui
+def test_residual_dialog_ignores_late_worker_callbacks_while_closing(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued worker result must not open a modal dialog after close begins."""
+    monkeypatch.setattr(ResidualAnalysisDialog, "_start_prepare", lambda _self: None)
+    information = MagicMock()
+    monkeypatch.setattr(QMessageBox, "information", information)
+    dialog = ResidualAnalysisDialog(MagicMock(), uuid4())
+    qtbot.addWidget(dialog)
+    try:
+        dialog.close()
+        assert dialog._closing is True
+        dialog._export_completed(object())
+        information.assert_not_called()
+    finally:
+        dialog.close()

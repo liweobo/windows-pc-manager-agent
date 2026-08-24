@@ -74,6 +74,7 @@ class ResidualAnalysisDialog(QDialog):
         self._confirmation: ConfirmationRequest | None = None
         self._report: ResidualReport | None = None
         self._worker: object | None = None
+        self._closing = False
         self._stage = "PREPARING"
         self.setWindowTitle("卸载后可能残留 — 只读分析")
         self.resize(1_080, 760)
@@ -169,6 +170,8 @@ class ResidualAnalysisDialog(QDialog):
     @Slot(object)
     def _prepared(self, value: object) -> None:
         self._worker = None
+        if self._closing:
+            return
         try:
             prepared = require_prepared_residual(value)
         except TypeError as exc:
@@ -241,6 +244,8 @@ class ResidualAnalysisDialog(QDialog):
     @Slot(object)
     def _completed(self, value: object) -> None:
         self._worker = None
+        if self._closing:
+            return
         try:
             report = require_residual_report(value)
         except TypeError as exc:
@@ -395,6 +400,8 @@ class ResidualAnalysisDialog(QDialog):
     @Slot(object)
     def _export_completed(self, value: object) -> None:
         self._worker = None
+        if self._closing:
+            return
         try:
             require_residual_export(value)
         except TypeError as exc:
@@ -407,6 +414,8 @@ class ResidualAnalysisDialog(QDialog):
     @Slot(str)
     def _export_failed(self, message: str) -> None:
         self._worker = None
+        if self._closing:
+            return
         self.export_json.setEnabled(self._report is not None)
         self.export_csv.setEnabled(self._report is not None)
         QMessageBox.warning(self, "导出失败", message)
@@ -425,6 +434,8 @@ class ResidualAnalysisDialog(QDialog):
     @Slot(str)
     def _failed(self, message: str) -> None:
         self._worker = None
+        if self._closing:
+            return
         self._stage = "FAILED"
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
@@ -478,6 +489,7 @@ class ResidualAnalysisDialog(QDialog):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Request cooperative cancellation before closing the dialog."""
+        self._closing = True
         self._cancel_clicked()
         event.accept()
 

@@ -24,6 +24,12 @@
   items stay protected independently of ownership confidence. Provider payloads redact local paths.
 - Stage 4D3 plan approval is R0 and cannot be reused by a future Stage 4D4 cleanup flow.
 
+### Fixed
+
+- Ignore queued worker callbacks after the residual dialog starts closing, and wait for export
+  completion in GUI coverage so a late modal notification cannot race dialog teardown.
+- Include the Stage 4D3 residual-policy tests in the aggregate 95% CI safety-coverage gate.
+
 ## Unreleased — Stage 4D2C2
 
 ### Added
