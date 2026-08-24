@@ -1,5 +1,32 @@
 # User guide
 
+## 使用 Stage 4D2C1 受控 winget 卸载
+
+1. 请以普通用户启动应用。在“系统诊断”刷新已安装软件，选择一行并启动“受控卸载”；路由器
+   只有在本机元数据明确包含 `winget` 管理器和 Package ID 时才会进入本流程。
+2. 应用在后台核对 Package ID、已安装版本、官方 `winget` Source、current-user 范围、软件
+   身份和 Desktop App Installer alias。只凭名称、近似匹配或“winget 能看到”都不够。
+3. 阅读第一次计划确认：核对软件、Package ID、版本、源、范围、R2/R2_HIGH_IMPACT、相关
+   进程/服务、固定执行方式、Rollback NONE 与恢复说明。默认按钮是取消。
+4. 确认计划后，应用会完整重新读取上述信息以及 winget busy/全局事务状态。任何 Package
+   更新、Source/mapping/alias/风险变化会使第一次确认失效。
+5. 阅读短时“即时确认”。它只授权这一个 Package、这个版本、官方源和当前用户范围一次。
+   用户和模型不能添加 `silent`、`force`、`override`、`purge` 或其他参数。
+6. 启动后可能显示 winget 或底层厂商安装器界面。Agent 不会请求 UAC、自动关闭程序、停止
+   服务、点击界面、自动重启或重试。若安装器要求管理员权限，本次流程不会替你提升。
+7. 执行中点击取消只会请求停止观察，不会强制结束 winget 或底层安装器。先处理可见窗口，
+   再刷新清单；不要马上重复卸载。
+8. 查看“进程结果”和“双重验证”两个独立结论。退出码 0 不是成功；只有 Package 清单与已
+   安装软件清单都完整刷新且原精确 identity 同时消失，才是 `VERIFIED_REMOVED`。
+9. Package 消失但软件仍在、软件消失但 Package 清单失败、Package 仍在或应用中断都不是已
+   验证成功。请人工检查并稍后刷新，不要复用旧确认。
+10. 残留报告只检查原已知安装目录本身，不会遍历或删除程序目录、AppData、配置、数据库、
+    注册表或用户文件。
+
+Rollback 是 `NONE`。需要恢复时，从可信发布者或官方源人工重新安装；重新安装不是 Undo，且
+不保证恢复设置、许可证、插件和用户数据。本阶段不支持 Microsoft Store、MSIX/AppX、Custom
+Source、machine-wide Package 或其他 Package Manager。
+
 ## 使用 Stage 4D2B 受控 Vendor 卸载
 
 1. 在“系统诊断”刷新软件清单并选中一行，点击“受控审查选中 Vendor”；也可以在聊天输入

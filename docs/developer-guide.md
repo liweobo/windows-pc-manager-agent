@@ -1,5 +1,44 @@
 # Developer guide
 
+## Stage 4D2C1 development
+
+实现位于 `domain/winget_uninstall.py`、`orchestration/winget_*`、`safety/winget_*`、
+`confirmation/winget_uninstall.py`、`persistence/winget_uninstall.py`、
+`platform_support/*/winget_uninstall.py`、`tools/system_tools/winget_uninstall.py`、
+`audit/winget_uninstall.py` 和 `ui/winget_uninstall_*`。逐函数说明见 `api-reference.md`。
+
+维护时必须保持：
+
+- registry 精确只有 `software.uninstall.winget`，adapter 输入没有命令/argv/Source URL 字段；
+- 只接受 Package ID+version+official source+current-user scope 与唯一 HIGH Software mapping；
+- `winget list` 本地化表格不能成为唯一执行权威；JSON parser 必须有 schema/大小/数量边界；
+- WindowsApps alias 必须直接证明 AppExecLink 和 Desktop App Installer family，不查 PATH；
+- fixed argument tuple 不可由用户/LLM/配置扩展；禁止 quiet/override/force/purge/source mutation；
+- capability 与 software class 分离，新增 class 没有明确规则时保持 BLOCK；
+- preflight 只读：进程 warning，running service/winget busy/incomplete/active transaction block；
+- elevated Agent、Shell/UAC、自动重启/重试、terminate/kill/service stop 都没有 fallback；
+- 两级 durable confirmation、independent invariant validator 与 write guard 都不可省略；
+- MSI/Vendor/winget repository 必须三方互斥，restart 只标 INTERRUPTED，不 redispatch；
+- exit code 与 final result 分离，只有双清单完整且双方 identity 消失才 VERIFIED_REMOVED；
+- residual 只能 exact-path `lstat`，Rollback 永远 NONE；audit 不保存命令、URL、路径或环境值。
+
+专项命令：
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_winget_*.py `
+  tests/unit/test_software_uninstall_router.py `
+  tests/integration/test_winget_uninstall_workflow.py `
+  tests/security/test_winget_uninstall_security.py `
+  tests/gui/test_winget_uninstall_dialog.py -q
+uv run pytest tests/integration/test_windows_winget_inventory_readonly.py -q
+uv run ruff check .
+uv run mypy src
+```
+
+全部执行测试必须使用 synthetic inventory/fake adapter。普通/CI 测试不得卸载 runner 软件；
+不得提交真实 Package 清单、Source URL、本机 alias 路径、审计数据库或残留报告。
+
 ## Stage 4D2B development
 
 实现分布在 `domain/vendor_uninstall.py`、`orchestration/vendor_*`、

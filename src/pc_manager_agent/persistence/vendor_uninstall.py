@@ -245,9 +245,13 @@ class VendorUninstallRepository:
         request = _request_for_preview(preview)
         try:
             with self._sessions.begin() as session:
-                if _active_vendor_transaction(session) or _active_msi_transaction(session):
+                if (
+                    _active_vendor_transaction(session)
+                    or _active_msi_transaction(session)
+                    or _active_winget_transaction(session)
+                ):
                     raise VendorUninstallStoreError(
-                        "Only one MSI or Vendor uninstall may be active at a time"
+                        "Only one MSI, Vendor, or winget uninstall may be active at a time"
                     )
                 session.add(
                     VendorUninstallTransactionRow(
@@ -289,10 +293,14 @@ class VendorUninstallRepository:
         """Return whether either durable MSI or Vendor workflow is non-terminal."""
         self._require_initialized()
         with self._sessions() as session:
-            return _active_vendor_transaction(
-                session,
-                exclude_vendor_transaction,
-            ) or _active_msi_transaction(session)
+            return (
+                _active_vendor_transaction(
+                    session,
+                    exclude_vendor_transaction,
+                )
+                or _active_msi_transaction(session)
+                or _active_winget_transaction(session)
+            )
 
     def transition(
         self,
@@ -620,3 +628,27 @@ def _active_msi_transaction(session: Session) -> bool:
         return False
     states = session.execute(text("SELECT state FROM msi_uninstall_transactions")).scalars()
     return any(str(state) not in _MSI_TERMINAL for state in states)
+
+
+def _active_winget_transaction(session: Session) -> bool:
+    """Read the additive winget table and identify non-terminal work."""
+    present = session.execute(
+        text(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='winget_uninstall_transactions'"
+        )
+    ).scalar_one_or_none()
+    if present is None:
+        return False
+    terminal = {
+        "verified_removed",
+        "completed_unverified",
+        "reboot_required",
+        "privilege_required",
+        "failed",
+        "interrupted",
+        "blocked",
+        "cancelled",
+    }
+    states = session.execute(text("SELECT state FROM winget_uninstall_transactions")).scalars()
+    return any(str(state) not in terminal for state in states)

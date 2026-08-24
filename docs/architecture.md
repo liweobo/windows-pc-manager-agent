@@ -1,5 +1,43 @@
 # Architecture
 
+## Stage 4D2C1 controlled winget Package execution boundary
+
+```text
+exact Installed Software selection
+  -> read-only SoftwareUninstallRouter (MSI / Vendor / winget / ambiguous / unsupported)
+  -> fresh `winget export --source winget` PackageInventoryService + exact PackageTargetResolver
+  -> high-confidence WingetSoftwareMapper (ID + manager + version + current-user scope)
+  -> fixed WindowsApps AppExecLink -> Desktop App Installer identity
+  -> WingetCapabilityPolicy -> existing software class policy -> WingetUninstallPolicy
+  -> read-only process/service/winget-busy/global-transaction preflight
+  -> immutable plan + expiring Preview + durable plan confirmation
+  -> rebuild Package/Software/mapping/alias/policy/preflight evidence
+  -> independent invariant review + short-lived immediate confirmation
+  -> atomic pair consumption + mandatory pre-start audit
+  -> ToolRegistry[software.uninstall.winget] + one-shot execution guard
+  -> fixed argv, absolute alias, sanitized env, DEVNULL, shell=False
+  -> process evidence (no kill, stop, elevation, restart or retry)
+  -> fresh Package inventory + fresh Installed Software inventory
+  -> exact-path lstat residual report + terminal transaction/audit
+```
+
+Package inventory and Installed Software inventory remain separate authorities. `winget export` is
+used because localized `winget list` table text is not treated as a stable API. Export records are
+accepted only from source name `winget` plus the exact Microsoft source identifier；Source URL 被忽略。
+Execution eligibility still requires a unique current-user Software identity containing an exact
+structured package-manager/Package ID/version link. This intentionally creates safe false negatives
+when Windows metadata cannot prove the mapping.
+
+The three uninstall mechanisms keep independent domain types, repositories, registries, adapters and
+confirmations. Each repository reads the other additive transaction tables so only one MSI, Vendor or
+winget transaction can be active. Winget's write guard changes `DISPATCHING` to `EXECUTING` inside the
+same durable authorization check immediately before the adapter call.
+
+`ValidatedWingetUninstallAction` deliberately has no argv field. The adapter alone generates the
+finite argument tuple. App execution alias identity is reread at the adapter boundary, while Package,
+Software, mapping, source, version, safety and runtime facts are reread before immediate confirmation.
+Stopping monitoring leaves the child alive and reports `INTERRUPTED`; restart never redispatches.
+
 ## Stage 4D2B controlled Vendor execution boundary
 
 Stage 4D2B is a second, separate one-tool write slice. It does not turn registry command text into a

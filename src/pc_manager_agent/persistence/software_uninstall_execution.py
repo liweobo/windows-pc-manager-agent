@@ -237,9 +237,9 @@ class MsiUninstallRepository:
                         raise MsiUninstallStoreError(
                             "Only one MSI uninstall may be active at a time"
                         )
-                if _active_vendor_transaction(session):
+                if _active_vendor_transaction(session) or _active_winget_transaction(session):
                     raise MsiUninstallStoreError(
-                        "Only one MSI or Vendor uninstall may be active at a time"
+                        "Only one MSI, Vendor, or winget uninstall may be active at a time"
                     )
                 session.add(
                     MsiUninstallTransactionRow(
@@ -627,4 +627,28 @@ def _active_vendor_transaction(session: Session) -> bool:
         "cancelled",
     }
     states = session.execute(text("SELECT state FROM vendor_uninstall_transactions")).scalars()
+    return any(str(state) not in terminal for state in states)
+
+
+def _active_winget_transaction(session: Session) -> bool:
+    """Read the additive winget table and identify non-terminal work."""
+    present = session.execute(
+        text(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='winget_uninstall_transactions'"
+        )
+    ).scalar_one_or_none()
+    if present is None:
+        return False
+    terminal = {
+        "verified_removed",
+        "completed_unverified",
+        "reboot_required",
+        "privilege_required",
+        "failed",
+        "interrupted",
+        "blocked",
+        "cancelled",
+    }
+    states = session.execute(text("SELECT state FROM winget_uninstall_transactions")).scalars()
     return any(str(state) not in terminal for state in states)

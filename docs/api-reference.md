@@ -1,5 +1,226 @@
 # API reference
 
+## Stage 4D2C1 受控 winget Package 卸载 API
+
+本节逐一说明 Stage 4D2C1 新增的生产对象、函数和方法。执行边界只有
+`software.uninstall.winget`：调用方不能传入命令、可执行文件、Source URL 或自由参数；Windows
+适配器只接受内部生成的 `ValidatedWingetUninstallAction`，再由代码生成唯一参数数组。
+
+### 领域模型 `domain.winget_uninstall`
+
+| 对象 / 函数 | 详细作用、输入输出和安全约束 |
+|---|---|
+| `WingetAvailabilityState` | `AVAILABLE` 表示 App Installer 别名身份已证明；`UNAVAILABLE` 表示未安装/环境缺失；`UNTRUSTED` 表示存在但身份不可证明。后两者都不能确认执行。 |
+| `WingetInventoryState` | 表示 JSON Package 清单完整、失败或因安全数量上限截断；只有 `COMPLETE` 能参与执行。 |
+| `WingetMappingConfidence` | Package 与 Installed Software 的 HIGH/MEDIUM/LOW/NONE 关系；只有唯一 `HIGH` 可执行。 |
+| `WingetCapabilityDecision` | 只描述 winget 机制是 SUPPORTED/BLOCKED/UNSUPPORTED，不替代软件安全分类。 |
+| `WingetExecutionDecision` | 最终软件策略的 ALLOW/BLOCK；用户确认不能覆盖 BLOCK。 |
+| `WingetPreflightState` | 只读进程、服务、winget busy 与全局事务检查的 READY/BLOCKED/UNKNOWN。 |
+| `WingetProcessResultCategory` | 记录进程退出 0/非 0、启动失败、权限/重启证据、启动前取消或停止监控；不是卸载成功结论。 |
+| `WingetVerificationState` | Package+Software 双重刷新结论，区分双方消失、单方仍存在、清单未知、仍安装、实例变化、中断与失败。 |
+| `WingetUninstallTransactionState` | durable Preview→两级确认→dispatch→execute→verify 生命周期；`INTERRUPTED` 没有自动重试边。 |
+| `WingetExecutableIdentity` | 保存精确 alias path、App Installer full/family name、alias target、reparse tag、大小/时间与 reparse bytes SHA-256。 |
+| `WingetExecutableIdentity.require_desktop_app_installer()` | 构造后校验 family 必须为 `Microsoft.DesktopAppInstaller_8wekyb3d8bbwe`，target 仅允许 winget/AppInstallerCLI。 |
+| `WingetExecutableIdentity.invariant_digest()` | 排除观察时间后哈希稳定 alias 事实，用于 TOCTOU 重验和确认绑定。 |
+| `WingetAvailability` | 将 availability state、可选 executable identity 和可显示原因组合为不可变结果。 |
+| `WingetAvailability.bind_state_to_identity()` | 强制只有 AVAILABLE 才能携带 executable，避免“不可用但仍有执行身份”的矛盾对象。 |
+| `RawWingetPackage` | `winget export` 的短生命周期输入：Package ID、版本、源名、源标识和范围；不保存 Source URL。 |
+| `WingetPackageIdentity` | 执行核心身份：Package ID、已安装版本、官方源名/标识、current-user scope。 |
+| `WingetPackageIdentity.require_narrow_identity()` | 拒绝空白/控制/命令字符、自定义源、Store 源、未知 source identifier 与 machine scope。 |
+| `WingetPackageIdentity.canonical_digest()` | 哈希 Package ID、版本、源和范围；任何变化使旧确认失效。 |
+| `NormalizedWingetPackage` | 安全 UI/策略投影，只暴露绑定后的 ID 与版本。 |
+| `NormalizedWingetPackage.bind_visible_fields()` | 防止 UI 显示版本/ID 与实际执行 identity 不同。 |
+| `WingetPackageInventory` | 有界 Package tuple、采集时间、完整性状态与警告。 |
+| `WingetPackageQuery` | 只允许 identity digest 或明确 Package ID/版本选择，不提供 Package Name 模糊执行。 |
+| `WingetPackageQuery.require_selector()` | 拒绝无选择器查询并先校验 Package ID 字符集。 |
+| `ResolvedWingetPackage` | 返回唯一 selected 或显式 candidates/ambiguous；不自动选“最像”的包。 |
+| `ResolvedWingetPackage.validate_resolution()` | 强制 selected 与 candidates/ambiguous 互斥。 |
+| `WingetSoftwareMapping` | 绑定 Package digest、可选 Software digest、置信度、证据与警告。 |
+| `WingetSoftwareMapping.executable` | 仅当 HIGH 且有唯一 Software digest 时为 true。 |
+| `WingetSoftwareMapping.canonical_digest()` | 将 mapping 事实绑定到计划和两次确认。 |
+| `WingetCapabilityAssessment` | 保存机制决定、理由、Package digest 与可信 executable digest。 |
+| `WingetCapabilityAssessment.canonical_digest()` | 生成机制能力摘要。 |
+| `WingetExecutionAssessment` | 保存 safety class、ALLOW/BLOCK、R2/R2_HIGH 风险、理由和证据。 |
+| `WingetExecutionAssessment.require_r2_for_allow()` | ALLOW 只允许 R2/R2_HIGH_IMPACT；R3/R4 不能伪装成可执行 Preview。 |
+| `WingetExecutionAssessment.canonical_digest()` | 绑定软件策略事实。 |
+| `WingetRelatedProcess` | 相关进程的 PID、名称和路径摘要；结构中没有 terminate 权限。 |
+| `WingetRelatedService` | 相关服务的名称/显示名/状态；结构中没有 stop 权限。 |
+| `WingetExecutionPreflight` | 保存 probe 完整性、相关对象、winget busy、全局 transaction、blocker 与 warning。 |
+| `WingetExecutionPreflight.canonical_digest()` | 将全部运行态事实绑定到确认。 |
+| `WingetUninstallPlan` | 单 Package、单工具、双确认、Rollback NONE 的不可变计划，只持有安全摘要。 |
+| `WingetUninstallPlan.validate_contract()` | 强制工具名、R2 风险、两级确认与不可自动回滚。 |
+| `WingetUninstallPlan.canonical_digest()` | 哈希所有授权相关字段。 |
+| `WingetUninstallPreview` | 本地短时 Preview，包含 Package、Software、mapping、winget identity、capability、policy、preflight 和恢复说明。 |
+| `WingetUninstallPreview.bind_evidence()` | 校验有效期、Package/Software mapping、所有 ALLOW/READY 条件、executable 布尔与 Rollback NONE 一致。 |
+| `WingetUninstallPreview.invariant_digest()` | 排除刷新时间/Preview ID，保留所有执行事实，供第二次确认重现。 |
+| `WingetUninstallPreview.canonical_digest()` | 哈希该次具体 Preview，包括 ID 和有效期。 |
+| `ValidatedWingetUninstallAction` | 写适配器唯一输入；只有 transaction、Package identity、Software digest、可信 executable identity 和验证时间，没有 argv 字段。 |
+| `ValidatedWingetUninstallAction.canonical_digest()` | 哈希 typed action。 |
+| `WingetUninstallRequest` | ToolRegistry 输入，绑定 transaction/operation/plan/Preview ID 与 validated action。 |
+| `WingetProcessExecutionResult` | 保存启动/监控/退出证据、PID、exit code、时间与错误类别。 |
+| `WingetUninstallResult` | 工具输出：两个 identity digest 与 process evidence，不声称卸载成功。 |
+| `WingetResidualReport` | 只报告 exact install path 是否存在/重解析；`deletion_performed` 固定 false。 |
+| `WingetUninstallVerification` | Package 与 Software 两个清单是否完整刷新、原身份是否存在、证据与警告。 |
+| `WingetUninstallExecutionReport` | GUI/audit 最终报告，分开呈现 process、dual verification、residual 和 recovery guidance。 |
+| `fixed_winget_uninstall_arguments(identity)` | 从已验证 identity 生成唯一 flags：`uninstall --id … --exact --source winget --version … --scope user --interactive --disable-interactivity`；调用方不能追加 flag。 |
+
+### 平台协议与 Windows 适配器
+
+| 函数 / 方法 | 详细作用、输入输出和失败语义 |
+|---|---|
+| `WingetAvailabilityPlatform.inspect()` | Protocol：只读发现可信 App Installer alias；实现不得搜索 PATH。 |
+| `WingetPackageInventoryPlatform.inventory(max_items, cancellation)` | Protocol：返回有界结构化清单，失败必须显式。 |
+| `WingetUninstallPlatform.uninstall(action, cancellation)` | Protocol：仅接受 validated action；启动后取消只能停止监控。 |
+| `_Process.poll()` / `_PopenFactory.__call__()` | 内部依赖注入协议，使测试能证明 argv、环境和 `shell=False`，而不启动真实 winget。 |
+| `WindowsWingetAvailabilityPlatform.__init__(local_app_data)` | 默认读当前进程 `LOCALAPPDATA`；测试可注入根目录。 |
+| `WindowsWingetAvailabilityPlatform.inspect()` | 只检查固定 `%LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe`，直接读 AppExecLink reparse data 并验证 App Installer family；任何异常返回 UNTRUSTED。 |
+| `WindowsWingetPackageInventoryPlatform.__init__(availability, data_directory, timeout_seconds)` | 注入 alias 身份服务、Agent 数据目录和有限超时。 |
+| `WindowsWingetPackageInventoryPlatform.inventory(max_items, cancellation)` | 在 Agent 临时目录运行只读 `winget export`，DEVNULL 标准流、脱敏环境、`shell=False`；只解析有界 JSON，失败返回 FAILED。 |
+| `IndependentWingetSoftwarePackageProvider.collect(...)` | Installed Software 清单的无重复占位：Package 清单由独立 typed service 提供，因此这里不制造同一包的第二个 Software identity，也不报告虚假缺失。 |
+| `WindowsWingetUninstallPlatform.__init__(availability, poll_seconds, process_factory, environment)` | 注入 alias 重验、监控间隔、测试进程工厂和环境来源。 |
+| `WindowsWingetUninstallPlatform.uninstall(action, cancellation)` | 先比较 fresh executable invariant，再以 absolute executable、固定 tuple、固定 cwd、DEVNULL、allow-list env、`close_fds=True`、`shell=False` 启动一次；从不 terminate/kill/retry/elevate/restart。 |
+| `_local_app_data()` | 只读取 `LOCALAPPDATA` 并转成 Path；缺失返回 None。 |
+| `_read_app_execution_alias(path)` | 用 `CreateFileW(FILE_FLAG_OPEN_REPARSE_POINT)` 与 `DeviceIoControl(FSCTL_GET_REPARSE_POINT)` 读取 `IO_REPARSE_TAG_APPEXECLINK`；只解析身份，不跟随成任意命令。 |
+| `_package_family_from_full_name(full_name)` | 从 full package name 保守导出 family，并要求精确 Desktop App Installer family。 |
+| `_parse_export(path, max_items)` | `lstat` 检查 regular/bounded JSON，忽略 Source URL/未知字段，只接受官方 source name+identifier；非官方 Source 整体丢弃，官方 Source 内不完整或危险记录产生警告。 |
+| `_sanitized_environment(source)` | 仅保留普通 Windows 运行变量；丢弃 PATH、API key、token 和 winget 自定义变量。 |
+| `_process_result(...)` | 统一构造进程事实和 monotonic duration，不把 exit code 解释成 success。 |
+
+### 只读库存、解析、映射和 Preflight
+
+| 函数 / 方法 | 详细作用 |
+|---|---|
+| `WingetAvailabilityService.__init__(platform)` | 注入只读 alias 平台。 |
+| `WingetAvailabilityService.inspect()` | 返回当前 alias 证据。 |
+| `PackageInventoryService.__init__(platform)` | 注入结构化 Package provider。 |
+| `PackageInventoryService.inventory(max_items, cancellation)` | 创建缺省 cancellation token 并返回 bounded inventory。 |
+| `PackageTargetResolver.__init__(inventory)` | 注入 fresh inventory service。 |
+| `PackageTargetResolver.resolve(query, max_items, cancellation)` | 每次重新采集并按 digest/Package ID/版本精确解析。 |
+| `PackageTargetResolver.inspect(identity_digest, max_items, cancellation)` | 用于运行前/运行后的 exact identity 检查。 |
+| `PackageTargetResolver.resolve_from_inventory(query, inventory)` | 纯函数式解析；partial inventory、零个或多个匹配都返回 ambiguous。 |
+| `_unresolved(query, candidates, reason)` | 构造有界 unresolved 结果。 |
+| `WingetSoftwareMapper.map(package, software_entries)` | 只有 Package ID、`winget` manager、版本、current-user scope 唯一匹配才返回 HIGH；名称相似最多 MEDIUM，不能执行。 |
+| `_same(left, right)` | 仅用于产生启发式警告的规范化文本相等，不参与 HIGH 授权。 |
+| `WingetExecutionPreflightService.__init__(platform, max_items)` | 注入只读 Stage 3 diagnostics。 |
+| `WingetExecutionPreflightService.inspect(software, cancellation, another_uninstall_active)` | exact install-root 关联进程/服务；进程仅 warning，running service、winget busy、probe incomplete、取消或 active transaction 均 block。 |
+| `_canonical(path)` | `abspath`+`normcase` 规范文本，不跟随 reparse。 |
+| `_is_within(path, root)` | 用路径组件关系验证 containment，避免前缀绕过。 |
+| `WingetResidualAnalyzer.analyze(install_location)` | 只对 exact path 做一次 `lstat`；不枚举、跟随或删除。 |
+
+### 能力、安全策略、Preview 和审查
+
+| 函数 / 方法 | 详细作用 |
+|---|---|
+| `WingetCapabilityPolicy.assess(package, mapping, availability)` | 独立判断官方源机制、HIGH mapping 与可信 alias 是否齐全；不读取软件安全 class。 |
+| `WingetUninstallPolicy.assess(scope, analysis)` | current-user USER_APPLICATION/DEVELOPER_TOOL 为 R2；developer runtime/database/background 为 R2_HIGH；shared/driver/hardware/Windows/security/network/Agent/enterprise/package-manager/unknown 全部 BLOCK。 |
+| `_blocked(analysis, reason)` | 统一构造安全的 R2/BLOCK 结果，确保“winget 支持”不能绕过 class。 |
+| `WingetUninstallPreviewEngine.__init__(ttl_seconds)` | 配置正数 Preview TTL。 |
+| `WingetUninstallPreviewEngine.build(...)` | 比较 plan 内七类 evidence digest，随后生成 expiring Preview；摘要不同直接异常。 |
+| `WingetUninstallSafetyError` | 运行时 identity/policy/Preview 变化的 fail-closed 错误。 |
+| `WingetUninstallSafetyValidator.validate(plan, approved, fresh)` | 比较完整 approved/fresh Preview invariant、有效期、计划与 executable 状态。 |
+| `WingetUninstallSafetyValidator.validate_invariant(plan, approved_digest, fresh)` | 使用第一确认已持久化的 invariant digest 独立验证 fresh Preview。 |
+
+### 两级确认 `confirmation.winget_uninstall`
+
+| 函数 / 方法 | 详细作用 |
+|---|---|
+| `WingetUninstallConfirmationTier` / `WingetUninstallConfirmationState` | 区分 PLAN/RUNTIME 与 pending/approved/rejected/expired/consumed；consumed 不能重放。 |
+| `WingetUninstallConfirmation` | 绑定 parent、transaction/operation/plan/Preview、plan/preview/invariant/Package/Software/mapping/executable/capability/safety/preflight digests、risk、对象摘要和过期时间。 |
+| `WingetConfirmationStore.save_plan_confirmation()` | Protocol：durable 保存第一 gate。 |
+| `WingetConfirmationStore.save_runtime_confirmation()` | Protocol：保存 fresh Preview 和短时 gate。 |
+| `WingetConfirmationStore.get_confirmation()` | Protocol：读取 durable capability。 |
+| `WingetConfirmationStore.resolve_confirmation()` | Protocol：持久化用户决定或 expiry。 |
+| `WingetConfirmationStore.consume_confirmation_pair()` | Protocol：原子消费 parent-child pair。 |
+| `WingetUninstallConfirmationError` | stale、mismatch、expiry、absent 或 replay 的安全错误。 |
+| `WingetUninstallConfirmationService.__init__(store, plan_ttl_seconds, runtime_ttl_seconds, now)` | 注入 durable store、两个正 TTL 与测试时钟。 |
+| `request_plan(plan, preview)` | 要求当前 executable Preview，创建并保存第一确认。 |
+| `resolve_plan(id, approved, plan, preview)` | 核对 tier/state/expiry/全部 binding，再保存批准或拒绝。 |
+| `request_runtime(parent_id, plan, preview)` | 要求已批准 parent 与相同 fresh invariant，创建短时即时确认。 |
+| `resolve_runtime(id, approved, plan, preview)` | 保存对象级即时决定。 |
+| `consume_runtime(id, plan, preview)` | 重新校验 parent/child 与有效期，通过 store 原子消费，只授权一次 dispatch。 |
+| `_resolve(...)` | PLAN/RUNTIME 共用 pending→approved/rejected 逻辑。 |
+| `_create(...)` | 生成 digest-only confirmation；不复制命令、path、URL 或环境。 |
+| `_require_not_expired(confirmation)` | 到期即 durable 标 EXPIRED 并拒绝。 |
+| `_require_executable(plan, preview)` | 核对 plan/transaction/operation/identity/risk 与 Preview。 |
+| `_require_current(confirmation, plan, preview)` | 逐字段比较所有 confirmation binding。 |
+
+### 持久事务、写 Guard、Tool 与审计
+
+| 函数 / 方法 | 详细作用 |
+|---|---|
+| `WingetUninstallRepository.__init__(database_path)` | 创建独立 SQLite engine/session；路径由运行时传入用户数据目录。 |
+| `initialize()` | 建表、把重启前非终态改为 INTERRUPTED、过期所有 pending/approved gate；从不 redispatch。 |
+| `create(plan, preview)` | 检查 MSI/Vendor/winget 全局互斥后写 PREVIEWED 与 exact request digest。 |
+| `has_active_uninstall(exclude_winget_transaction)` | 查询三种卸载表的非终态；runtime 可排除自身。 |
+| `transition(...)` | 按 allow-list 推进状态并只保存最小 process/verification 事实。 |
+| `state(transaction_id)` | 读取当前 durable 状态。 |
+| `save_plan_confirmation()` / `save_runtime_confirmation()` | 原子保存 gate，并在 runtime gate 时更新 fresh Preview/request binding。 |
+| `get_confirmation()` | 从 JSON 载荷恢复 typed confirmation，并以 row state 为准。 |
+| `resolve_confirmation()` | 原子更新 gate 与对应 transaction。 |
+| `consume_confirmation_pair()` | 检查 parent-child、state、Preview/invariant/identity/executable 后把两者设 CONSUMED、transaction 设 DISPATCHING。 |
+| `close()` | 释放 SQLite pool 并使 repository 失效。 |
+| `_save_confirmation(...)` | 两级 gate 共用的内部事务写入。 |
+| `_transaction(session, id)` | 精确读取 row；未知 ID fail closed。 |
+| `_require_initialized()` | 防止数据库初始化失败后继续高风险操作。 |
+| `WingetUninstallExecutionGuard.__init__(repository)` | 注入 durable store。 |
+| `WingetUninstallExecutionGuard.require(authorization, tool_name, arguments)` | 同一数据库事务中核对 exact request digest、IDs、consumed runtime gate，并把 DISPATCHING 改为 EXECUTING。 |
+| `_request_for_preview(preview)` | 从 Preview 内部构造唯一 typed request；没有自由 argv。 |
+| `_any_active_uninstall(session, exclude)` | 查询 winget ORM 与 MSI/Vendor additive tables，执行全局互斥。 |
+| `WingetUninstallTool.__init__(platform)` | 声明唯一 R2、batch1、双确认、irreversible、Rollback NONE manifest。 |
+| `WingetUninstallTool.manifest` | 返回不可变 tool manifest。 |
+| `WingetUninstallTool.execute(request, cancellation)` | 类型检查 request，调用平台一次并返回 process-only result。 |
+| `WingetUninstallAuditLogger.__init__(repository, app_version, git_commit)` | 注入 append-only audit 与构建身份。 |
+| `previewed(plan, preview)` | 记录 evidence digests、可执行决定与 Rollback NONE。 |
+| `confirmation_resolved(plan, confirmation)` | 记录 tier、binding 和用户决定。 |
+| `started(plan, preview, runtime_confirmation_id)` | mandatory pre-launch 事件；没有它就不启动。 |
+| `completed(plan, report)` | 分开记录 process 和 dual verification，并声明无 shell/elevation/control/restart/deletion。 |
+| `failed(plan, phase, error_code, mutation_may_have_started)` | 脱敏记录失败、是否可能已启动与禁止自动 retry。 |
+
+### 编排、验证与 GUI
+
+| 函数 / 方法 | 详细作用 |
+|---|---|
+| `WingetUninstallExecutionError` | 任一计划/身份/策略/运行时 gate 失败的安全错误。 |
+| `PreparedWingetUninstall` | 包含 plan、Preview、第一确认或 package candidates。 |
+| `PreparedWingetRuntimeConfirmation` | 包含 fresh Preview 与短时即时确认。 |
+| `WingetUninstallService.__init__(...)` | 依赖注入全部独立边界；服务本身不构造任意命令。 |
+| `prepare(user_goal, software_query, cancellation)` | 阻止 elevated Agent，fresh 解析 Software/Package、HIGH mapping、能力/class/preflight，创建 plan/Preview/transaction/audit/第一确认。 |
+| `resolve_plan_confirmation(...)` | 保存并审计第一次用户决定。 |
+| `prepare_runtime_confirmation(...)` | 再次读取 Package、Software、mapping、alias、policy、preflight/互斥；独立比较 invariant 后创建第二确认。 |
+| `resolve_runtime_confirmation(...)` | 保存并审计即时决定。 |
+| `execute(...)` | 消费 pair，先写 audit，构造 typed request，经 ToolRegistry/guard 单次 dispatch，随后 dual verify、exact-path residual、终态与 audit；不 retry。 |
+| `_build_evidence(...)` | 统一构造 availability/capability/safety/preflight，不持有写平台。 |
+| `_block(plan, code, message)` | best-effort 将失败 runtime revalidation 记为 BLOCKED。 |
+| `_terminal_state(verification)` | 将双重验证映射为 verified/completed-unverified/interrupted/failed。 |
+| `WingetUninstallVerifier.__init__(package_resolver, software_resolver)` | 注入两个彼此独立的 fresh inventory。 |
+| `WingetUninstallVerifier.verify(...)` | 停止监控时不做早熟 success；否则分别刷新 Package 与 Software，只有双方完整且原 identity 都消失才 VERIFIED_REMOVED。 |
+| `WingetWorkerSignals` | Qt worker 的 completed/failed 线程安全信号。 |
+| `PreparedWingetUninstallWithServices` | 保持同一次 service graph 与 prepared state，避免换 repository。 |
+| `WingetUninstallPrepareWorker.__init__/run/cancel` | UI 线程外准备证据；cancel 只取消尚未执行的只读工作。 |
+| `WingetRuntimePrepareWorker.__init__/run/cancel` | UI 线程外重验并创建第二 gate。 |
+| `WingetUninstallExecuteWorker.__init__/run/cancel` | UI 线程外执行；启动后 cancel 只停止监控。 |
+| `require_prepared_winget_uninstall()` / `require_runtime_winget_confirmation()` / `require_winget_uninstall_report()` | Qt `object` signal 的运行时类型收窄；错误 payload fail closed。 |
+| `WingetUninstallDialog.__init__()` | 创建 modeless 双确认窗口，取消按钮为默认。 |
+| `_build_ui()` | 构建风险、详情、进度、确认/取消控件；普通通知不能替代确认。 |
+| `_start_prepare()` / `_prepared()` | 启动后台 preparation 并接收 typed result。 |
+| `_primary_clicked()` | 只按有限 UI 状态推进，不直接调用系统工具。 |
+| `_approve_plan()` / `_runtime_prepared()` / `_approve_runtime()` | 依次完成第一次确认、fresh 重验、第二次确认和 worker dispatch。 |
+| `_completed()` / `_show_preview()` / `_report_html()` | 展示 exact ID/版本/源/范围/风险/rollback，以及 process 与 dual verification 的不同。 |
+| `_failed()` | 友好显示 fail-closed 原因并声明不重试。 |
+| `_cancel_clicked()` / `closeEvent()` | 启动前取消；启动后只请求停止监控，从不强杀。 |
+| `_set_busy()` / `_required_state()` | 管理忙碌状态并安全取得当前 service/plan/Preview/confirmation。 |
+
+### 本阶段修改的既有 API
+
+| 方法 | 变化 |
+|---|---|
+| `SoftwareUninstallRouter.route()` | 新增 `WINGET` 结果，但只在 fresh current-user、structured package manager/Package ID 与 capability 全匹配时返回；不产生执行授权。 |
+| `MsiUninstallRepository.create()` / `VendorUninstallRepository.create()` | 现在同时检查 winget active table，三种卸载机制全局互斥。 |
+| `VendorUninstallRepository.has_active_uninstall()` | 现在也报告 active winget transaction。 |
+| `ApplicationRuntime.create_winget_uninstall_services()` | 组合专用 Package/Software resolver、alias/inventory/adapter、policy、confirmation、repository、registry、verifier、audit。 |
+| `ApplicationRuntime.close()` | 关闭 winget repository。 |
+| `SystemDiagnosticsTab.open_winget_uninstall()` / `_route_completed()` | 路由到新的非技术双确认窗口。 |
+
 ## Stage 4D2B 受控 Vendor Uninstaller API
 
 本节逐一说明 Stage 4D2B 新增的生产函数、方法、协议和公开数据对象。最重要的不变量是：

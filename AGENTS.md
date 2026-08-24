@@ -104,6 +104,33 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4D2C1 retains Stage 4D2B and adds exactly one independent write tool:
+`software.uninstall.winget`. It accepts only an internally built
+`ValidatedWingetUninstallAction` for one exact, high-confidence, current-user Package-to-Software
+mapping from the official `winget` source. Package ID, installed version, source name, official
+source identifier, current-user scope, normalized Software identity and mapping digest are all
+mandatory. Display names, table text, raw command lines, custom sources, `msstore`, MSIX/AppX and
+machine-scope packages never authorize execution.
+
+The only executable is the trusted Desktop App Installer App Execution Alias at the fixed
+current-user WindowsApps path. Its package family, package full name, reparse tag, alias target,
+file metadata and SHA-256 evidence must remain stable. The adapter uses only the deterministic
+argument array `uninstall --id <id> --exact --source winget --version <version> --scope user
+--interactive --disable-interactivity`, an explicit executable and cwd, a sanitized environment,
+DEVNULL streams and `shell=False`. There is no caller-supplied argument, override, silent/force
+mode, PATH lookup, custom source, elevation, retry, reboot, process termination, service stop,
+fallback mechanism, residual deletion or generic command runner.
+
+Execution repeats package inventory, Software inventory, mapping, executable identity, policy,
+non-elevated-process and process/service/busy-state preflight checks. Running related processes are
+warnings; a running related service, active winget process, incomplete evidence, cancellation or
+any active MSI/Vendor/winget transaction blocks. Plan and immediate confirmations bind every
+identity and evidence digest, are durable, expiring and single-use, and are atomically consumed
+before launch. Process exit is never success: both fresh official-source package inventory and
+fresh Software inventory must prove the original identities absent. Monitoring cancellation leaves
+the child process alive and marks the transaction interrupted; restart never redispatches it.
+Residual inspection is exact-path `lstat` only. Rollback is NONE and reinstall guidance is not Undo.
+
 Stage 4D2B retains Stage 4D2A and adds exactly one independent write tool:
 `software.uninstall.vendor`. It accepts only an internally built `ValidatedVendorUninstallAction`
 for one exact high-confidence current-user Vendor entry. Raw `UninstallString` and
@@ -122,7 +149,7 @@ explicit executable and cwd, sanitized child environment, DEVNULL standard strea
 
 The plan and immediate confirmations bind all software, capability, executable, file, hash,
 signature, Publisher, argument, safety, preflight and risk digests; they are durable, expiring and
-single-use. Only one MSI-or-Vendor transaction may be active. Related processes are warnings and
+single-use. Only one MSI-or-Vendor-or-winget transaction may be active. Related processes are warnings and
 running related services block, but the Agent never terminates/stops either. Vendor UI remains under
 user control. Stopping monitoring never kills the uninstaller; long-running work remains active,
 restart marks it `INTERRUPTED`, and no path redispatches automatically. Process exit is not success:

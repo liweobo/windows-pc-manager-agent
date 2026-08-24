@@ -1,5 +1,23 @@
 # Threat model
 
+## Stage 4D2C1 additions
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| LLM/user injects flags or a Package Name selects the wrong app | Tool schema has no args/name field; Package ID/version/source/scope are typed; adapter generates the only argv tuple | Package-manager/manifest metadata may itself be wrong |
+| Custom or Store source is substituted | Exact official source name and identifier bind identity; Source URL is ignored; no source mutation API exists | Official source availability/cache can fail, producing safe false negatives |
+| `winget.exe` is hijacked through PATH or an alias replacement | Fixed WindowsApps path, AppExecLink inspection, Desktop App Installer family binding, SHA-256 and revalidation | Same-user race after the final observation remains a platform residual risk |
+| Machine-wide or elevated removal escapes least privilege | Current-user mapping/scope and fixed `--scope user`; elevated Agent blocked; no runas/ShellExecute | A vendor installer may independently request privilege and then fail/require user action |
+| winget support bypasses protected software policy | Capability and safety are separate; shared/driver/Windows/security/network/Agent/enterprise/package-manager/unknown remain blocked | Dependency knowledge remains incomplete for allowed R2_HIGH targets |
+| Existing apps/services are silently stopped | Read-only preflight; processes warning-only, running services block; no control adapters are injected | The underlying installer may control its own related processes |
+| Environment leaks API keys or redirects behavior | Small allow-list drops keys/tokens/PATH/custom winget variables; DEVNULL streams | Same-user child can still read resources permitted by Windows ACLs |
+| Exit code 0 is reported as success | Fresh Package and Installed Software inventories are independent; both exact identities must disappear | Inventory updates may lag, so a real removal can remain safely unverified |
+| Cancellation kills an installer and corrupts state | Pre-launch cancellation only; after launch stopping monitoring never terminate/kill | User may manually close vendor UI; Agent cannot guarantee installer atomicity |
+| Crash causes duplicate removal | Non-terminal transaction becomes INTERRUPTED and gates expire; there is no redispatch edge | External winget/installer process may remain running and needs observation |
+| Concurrent MSI/Vendor/winget transactions interfere | All three repositories inspect additive active tables before reservation | External uninstall programs are outside this database lock |
+| Residual cleanup deletes data or follows junction | Exact-path `lstat` only, no enumerate/follow/delete APIs | Report intentionally cannot identify all leftovers |
+| Prompt injection in package metadata | IDs/names/content are untrusted data, never prompts/commands; UI escapes display text | Malicious display text can still be shown as inert data |
+
 ## Stage 4D2B additions
 
 | Threat | Control | Residual risk |

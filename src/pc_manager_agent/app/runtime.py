@@ -23,6 +23,7 @@ from pc_manager_agent.audit.startup_actions import StartupActionAuditLogger
 from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
 from pc_manager_agent.audit.vendor_uninstall import VendorUninstallAuditLogger
+from pc_manager_agent.audit.winget_uninstall import WingetUninstallAuditLogger
 from pc_manager_agent.authorization.models import AuthorizedPath
 from pc_manager_agent.authorization.service import AuthorizedPathService
 from pc_manager_agent.config.settings import AppSettings
@@ -50,6 +51,7 @@ from pc_manager_agent.confirmation.state_machine import ConfirmationService
 from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmationService
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
 from pc_manager_agent.confirmation.vendor_uninstall import VendorUninstallConfirmationService
+from pc_manager_agent.confirmation.winget_uninstall import WingetUninstallConfirmationService
 from pc_manager_agent.domain.file_analysis import FileAnalysisProgress
 from pc_manager_agent.domain.reports import ScanProgress
 from pc_manager_agent.domain.risk import RiskLevel
@@ -112,6 +114,18 @@ from pc_manager_agent.orchestration.vendor_residual_analyzer import VendorResidu
 from pc_manager_agent.orchestration.vendor_uninstall_execution import VendorUninstallService
 from pc_manager_agent.orchestration.vendor_uninstall_metadata import VendorUninstallMetadataParser
 from pc_manager_agent.orchestration.vendor_uninstall_verifier import VendorUninstallVerifier
+from pc_manager_agent.orchestration.winget_execution_preflight import (
+    WingetExecutionPreflightService,
+)
+from pc_manager_agent.orchestration.winget_inventory import (
+    PackageInventoryService,
+    WingetAvailabilityService,
+)
+from pc_manager_agent.orchestration.winget_residual_analyzer import WingetResidualAnalyzer
+from pc_manager_agent.orchestration.winget_software_mapping import WingetSoftwareMapper
+from pc_manager_agent.orchestration.winget_target_resolver import PackageTargetResolver
+from pc_manager_agent.orchestration.winget_uninstall_execution import WingetUninstallService
+from pc_manager_agent.orchestration.winget_uninstall_verifier import WingetUninstallVerifier
 from pc_manager_agent.persistence.analysis_results import AnalysisResultRepository
 from pc_manager_agent.persistence.authorized_paths import AuthorizedPathRepository
 from pc_manager_agent.persistence.file_operations import (
@@ -143,6 +157,10 @@ from pc_manager_agent.persistence.startup_actions import (
 from pc_manager_agent.persistence.vendor_uninstall import (
     VendorUninstallExecutionGuard,
     VendorUninstallRepository,
+)
+from pc_manager_agent.persistence.winget_uninstall import (
+    WingetUninstallExecutionGuard,
+    WingetUninstallRepository,
 )
 from pc_manager_agent.platform_support.processes import ProcessManagementPlatform
 from pc_manager_agent.platform_support.service_control import ServiceControlPlatform
@@ -187,6 +205,12 @@ from pc_manager_agent.platform_support.windows.system_diagnostics import (
 from pc_manager_agent.platform_support.windows.vendor_uninstall import (
     WindowsVendorExecutablePlatform,
     WindowsVendorUninstallPlatform,
+)
+from pc_manager_agent.platform_support.windows.winget_uninstall import (
+    IndependentWingetSoftwarePackageProvider,
+    WindowsWingetAvailabilityPlatform,
+    WindowsWingetPackageInventoryPlatform,
+    WindowsWingetUninstallPlatform,
 )
 from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
@@ -233,6 +257,10 @@ from pc_manager_agent.safety.vendor_executable_trust import VendorExecutableTrus
 from pc_manager_agent.safety.vendor_uninstall_policy import VendorUninstallExecutionPolicy
 from pc_manager_agent.safety.vendor_uninstall_preview import VendorUninstallPreviewEngine
 from pc_manager_agent.safety.vendor_uninstall_validator import VendorUninstallSafetyValidator
+from pc_manager_agent.safety.winget_capability_policy import WingetCapabilityPolicy
+from pc_manager_agent.safety.winget_uninstall_policy import WingetUninstallPolicy
+from pc_manager_agent.safety.winget_uninstall_preview import WingetUninstallPreviewEngine
+from pc_manager_agent.safety.winget_uninstall_validator import WingetUninstallSafetyValidator
 from pc_manager_agent.tools.file_tools.create_directory import CreateDirectoryTool
 from pc_manager_agent.tools.file_tools.duplicate_analyzer import DuplicateFileAnalyzer
 from pc_manager_agent.tools.file_tools.hashing import SafeFileHasher
@@ -282,6 +310,7 @@ from pc_manager_agent.tools.system_tools.startup_actions import (
     RestoreStartupTool,
 )
 from pc_manager_agent.tools.system_tools.vendor_uninstall import VendorUninstallTool
+from pc_manager_agent.tools.system_tools.winget_uninstall import WingetUninstallTool
 
 
 class ProviderConfigurationError(RuntimeError):
@@ -357,6 +386,16 @@ class VendorUninstallServices:
     registry: ToolRegistry
     resolver: SoftwareTargetResolver
     service: VendorUninstallService
+
+
+@dataclass(frozen=True, slots=True)
+class WingetUninstallServices:
+    """Dependency bundle for one trusted Stage 4D2C1 package workflow."""
+
+    registry: ToolRegistry
+    software_resolver: SoftwareTargetResolver
+    package_resolver: PackageTargetResolver
+    service: WingetUninstallService
 
 
 @dataclass(frozen=True, slots=True)
@@ -474,6 +513,8 @@ class ApplicationRuntime:
         self.interrupted_msi_uninstall_ids = self.msi_uninstall_repository.initialize()
         self.vendor_uninstall_repository = VendorUninstallRepository(settings.database_path)
         self.interrupted_vendor_uninstall_ids = self.vendor_uninstall_repository.initialize()
+        self.winget_uninstall_repository = WingetUninstallRepository(settings.database_path)
+        self.interrupted_winget_uninstall_ids = self.winget_uninstall_repository.initialize()
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
         self.process_management_platform = WindowsProcessManagementPlatform()
@@ -997,6 +1038,74 @@ class ApplicationRuntime:
         )
         return VendorUninstallServices(registry=registry, resolver=resolver, service=service)
 
+    def create_winget_uninstall_services(self) -> WingetUninstallServices:
+        """Build the one-tool official-source current-user winget boundary."""
+        availability_platform = WindowsWingetAvailabilityPlatform()
+        package_inventory = PackageInventoryService(
+            WindowsWingetPackageInventoryPlatform(
+                availability_platform,
+                self.settings.data_directory / "temporary",
+            )
+        )
+        package_resolver = PackageTargetResolver(package_inventory)
+        software_inventory = SoftwareInventoryService(
+            WindowsSoftwareInventoryPlatform(
+                package_provider=IndependentWingetSoftwarePackageProvider()
+            )
+        )
+        software_resolver = SoftwareTargetResolver(software_inventory)
+        registry = ToolRegistry(
+            write_guard=WingetUninstallExecutionGuard(self.winget_uninstall_repository)
+        )
+        registry.register(
+            WingetUninstallTool(
+                WindowsWingetUninstallPlatform(
+                    availability_platform,
+                    poll_seconds=self.settings.winget_monitor_poll_seconds,
+                )
+            )
+        )
+        verifier = WingetUninstallVerifier(package_resolver, software_resolver)
+        service = WingetUninstallService(
+            package_resolver=package_resolver,
+            software_resolver=software_resolver,
+            mapper=WingetSoftwareMapper(),
+            availability=WingetAvailabilityService(availability_platform),
+            capability=WingetCapabilityPolicy(),
+            analysis_policy=SoftwareUninstallSafetyPolicy(
+                agent_root=Path(__file__).resolve().parents[1]
+            ),
+            execution_policy=WingetUninstallPolicy(),
+            preflight=WingetExecutionPreflightService(
+                WindowsSystemDiagnosticsPlatform(),
+                max_items=self.settings.diagnostic_max_items,
+            ),
+            preview_engine=WingetUninstallPreviewEngine(self.settings.confirmation_ttl_seconds),
+            validator=WingetUninstallSafetyValidator(),
+            repository=self.winget_uninstall_repository,
+            confirmations=WingetUninstallConfirmationService(
+                self.winget_uninstall_repository,
+                plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+                runtime_ttl_seconds=(self.settings.winget_runtime_confirmation_ttl_seconds),
+            ),
+            registry=registry,
+            verifier=verifier,
+            residual=WingetResidualAnalyzer(),
+            audit=WingetUninstallAuditLogger(
+                self.audit,
+                app_version=__version__,
+                git_commit=os.getenv("GITHUB_SHA"),
+            ),
+            max_items=self.settings.diagnostic_max_items,
+            process_is_elevated=current_process_is_elevated,
+        )
+        return WingetUninstallServices(
+            registry=registry,
+            software_resolver=software_resolver,
+            package_resolver=package_resolver,
+            service=service,
+        )
+
     def create_process_action_services(self) -> ProcessActionServices:
         """Build the Stage 4A resolver, policy, confirmations, registry, and executor."""
         platform = self.process_management_platform
@@ -1206,6 +1315,7 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.winget_uninstall_repository.close()
         self.vendor_uninstall_repository.close()
         self.msi_uninstall_repository.close()
         self.service_startup_backup_vault.close()

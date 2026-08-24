@@ -1,4 +1,4 @@
-"""Read-only deterministic routing between the MSI and Vendor execution mechanisms."""
+"""Read-only deterministic routing among MSI, Vendor, and winget mechanisms."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ class SoftwareUninstallMechanism(StrEnum):
 
     MSI = "msi"
     VENDOR = "vendor"
+    WINGET = "winget"
     AMBIGUOUS = "ambiguous"
     UNSUPPORTED = "unsupported"
 
@@ -35,7 +36,7 @@ class SoftwareUninstallRoute:
 
 
 class SoftwareUninstallRouter:
-    """Select MSI or Vendor only from fresh structured local metadata."""
+    """Select one mechanism only from fresh structured local metadata."""
 
     def __init__(
         self,
@@ -70,6 +71,23 @@ class SoftwareUninstallRouter:
                 resolution,
                 "本地来源证据不完整，不能选择卸载机制。",
             )
+        if (
+            target.scope.value == "current_user"
+            and target.identity.package_manager_id is not None
+            and target.identity.package_manager_id.casefold() in {"winget", "microsoft.winget"}
+            and target.identity.package_id is not None
+            and raw.package_id == target.identity.package_id
+        ):
+            capability = self._capability.resolve(target, raw)
+            if (
+                capability.capability_type is UninstallCapabilityType.PACKAGE_MANAGER
+                and capability.support is CapabilitySupport.METADATA_SUPPORTED
+            ):
+                return SoftwareUninstallRoute(
+                    SoftwareUninstallMechanism.WINGET,
+                    resolution,
+                    "已识别为当前用户的精确 winget Package，将进入官方源、映射和双确认流程。",
+                )
         if target.windows_installer is True:
             capability = self._capability.resolve(target, raw)
             if (
@@ -96,5 +114,5 @@ class SoftwareUninstallRouter:
         return SoftwareUninstallRoute(
             SoftwareUninstallMechanism.UNSUPPORTED,
             resolution,
-            "当前元数据不符合 MSI 或 Stage 4D2B 厂商卸载器的狭窄安全边界。",
+            "当前元数据不符合 MSI、Stage 4D2B 厂商卸载器或 winget 的狭窄安全边界。",
         )

@@ -1,5 +1,38 @@
 # Security model
 
+## Stage 4D2C1 winget Package controls
+
+- Exactly one new tool exists: `software.uninstall.winget`, one object, R2/R2_HIGH plan, two
+  confirmations, batch size 1 and Rollback `NONE`.
+- Only exact Package ID, installed version, official source name/identifier and current-user scope
+  form an executable Package identity. Package Name, substring selection, custom/msstore sources,
+  Source URL and machine scope never authorize execution.
+- A Package must map to exactly one Installed Software identity by structured package ID, manager,
+  version and scope. Display-name similarity is warning-only and cannot be upgraded by the LLM/UI.
+- The executable is the fixed current-user WindowsApps alias. Direct Win32 reparse inspection must
+  prove `IO_REPARSE_TAG_APPEXECLINK` and Desktop App Installer family; PATH search/fallback is absent.
+- The fixed argument function is not caller-extensible. No override, silent, force, all, purge,
+  custom source, source modification, installer args, restart or nested execution option exists.
+- Existing software safety classification runs independently. Shared runtimes, drivers/hardware,
+  Windows/security/network/Agent/enterprise/package-manager/unknown classes remain blocked even when
+  winget reports support. Selected developer/runtime/server targets are R2_HIGH_IMPACT.
+- Preflight has read-only diagnostics only. Related processes are warnings; running related services,
+  winget busy, incomplete evidence or any active MSI/Vendor/winget transaction block.
+- Elevated Agent processes are blocked. The adapter has no runas/ShellExecute/UAC fallback and passes
+  `--scope user`; a child/installer privilege request becomes non-success evidence only.
+- Plan and immediate gates bind Package, Software, mapping, alias, capability, safety, preflight,
+  risk, plan and Preview digests. They are durable, expiring, parent-linked and atomically single-use.
+- The child receives a small ordinary-Windows environment allow-list. API keys, token variables,
+  PATH and winget custom configuration are not forwarded. Standard streams are DEVNULL.
+- Cancellation before launch prevents process creation. After launch it only stops monitoring; no
+  terminate/kill, service stop, retry or automatic restart occurs.
+- Package-manager exit code is not final success. Both independent fresh inventories must be complete
+  and both original exact identities absent. Contradictions stay visible and unverified.
+- Residual analysis does one `lstat` on the known install location and never enumerates, follows or
+  deletes program files, AppData, user data or registry entries.
+- Durable reservation and mandatory pre-start audit are required. Audit stores digests/categories,
+  not commands, Source URLs, executable paths, environment values or local software inventory dumps.
+
 ## Stage 4D2B Vendor uninstaller controls
 
 - Exactly one Vendor write tool exists: `software.uninstall.vendor`, R2 manifest, batch size 1,

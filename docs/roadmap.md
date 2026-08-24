@@ -106,11 +106,21 @@ fresh inventory determines removal and residuals are report-only. Raw/Quiet Unin
 wrappers, scripts, network/relative/PATH targets, elevation, retry, reboot, process/service control,
 vendor-UI automation and cleanup remain prohibited.
 
-## Stage 4D2C — Package Manager / MSIX controlled uninstall (planned)
+## Stage 4D2C1 — controlled current-user winget uninstall (complete)
 
-Future work may research winget package identity, trusted package sources, structured package-manager
-arguments, Store/AppX/MSIX identity, framework protection, risk/confirmation policy and fresh
-verification. Stage 4D2B contains no winget, `Remove-AppxPackage`, package manager or MSIX execution.
+Trusted Desktop App Installer alias identity, official-source bounded Package inventory, exact
+Package ID/version/source/scope identity, high-confidence Package-to-Software mapping, protected-class
+policy, read-only preflight, two durable confirmations, fixed shell-free adapter, three-mechanism
+transaction exclusion, dual fresh verification, audit, report-only residuals and GUI are complete.
+
+Custom/msstore sources, machine scope, raw args, source changes, silent/override/force/purge, elevation,
+restart/retry, process/service control, cleanup, MSIX/AppX and Store execution remain absent.
+
+## Stage 4D2C2 — Microsoft Store / MSIX analysis and controlled design (planned)
+
+Future work must separately research Store/MSIX identity, package family/full name, framework/resource/
+bundle protection, per-user registration, deployment APIs, Store licensing and rollback limits.
+Stage 4D2C1 does not call `Remove-AppxPackage` or treat `msstore` as the community `winget` source.
 
 ## Stage 4C3+ / other controlled system operations (not started)
 

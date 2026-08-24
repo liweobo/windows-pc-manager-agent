@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — Stage 4D2C1
+
+### Added
+
+- Trusted Desktop App Installer App Execution Alias identity, bounded official-source `winget
+  export` JSON inventory, exact Package identity/resolver and high-confidence Package-to-Software
+  mapping.
+- Default-deny Package capability and software-class policies, read-only process/service/busy-state
+  preflight, expiring Preview and two durable digest-bound confirmations.
+- Sole `software.uninstall.winget` tool with a fixed current-user interactive argument array,
+  sanitized child environment, explicit executable/cwd, DEVNULL streams and `shell=False`.
+- Global MSI/Vendor/winget transaction exclusion, atomic one-shot write guard, crash interruption,
+  privacy-minimized audit, dual Package+Software verification and exact-path residual report.
+- PySide6 non-technical double-confirmation flow, deterministic router integration, synthetic unit/
+  integration/security/GUI coverage and a real-Windows read-only alias/inventory probe.
+
+### Security
+
+- Block Package Name execution, ambiguous/missing identity, custom/msstore source, machine scope,
+  stale version/source/mapping/alias, protected software, related running services, incomplete
+  probes, elevated Agent and overlapping uninstall transactions.
+- No raw args, override/silent/force/all/purge, source mutation, PATH lookup, Shell/PowerShell/CMD,
+  UAC, automatic retry/restart, process termination, service stop, MSIX/AppX/Store fallback or
+  program/user/residual deletion.
+- Exit code never means success. Both fresh inventories must prove the exact identities disappeared;
+  otherwise the result remains explicit and unverified. Rollback is NONE.
+
 ## Unreleased — Stage 4D2B
 
 ### Added
