@@ -1,5 +1,29 @@
 # Windows PC Manager Agent
 
+## Stage 4D2C1：受控 winget Package 卸载
+
+Stage 4D2C1 新增且只新增一个写工具：`software.uninstall.winget`。它只处理一个精确的
+current-user Package，并要求 Package ID、已安装版本、官方 `winget` Source、Installed
+Software 身份和 Microsoft Desktop App Installer alias 都有当前、唯一且高可信的结构化证据。
+Package Name、用户输入、模型输出、Source URL 和自由参数都不能进入执行器。
+只读清单固定使用 `winget export --source winget`，不会让默认 Store 或自定义源扩大目标集合。
+
+Windows 适配器不会搜索 PATH。它只检查当前用户 WindowsApps 中的 `winget.exe` App Execution
+Alias，直接读取 `IO_REPARSE_TAG_APPEXECLINK` 并绑定 Desktop App Installer package family。
+执行参数由代码固定为 `uninstall --id <ID> --exact --source winget --version <version>
+--scope user --interactive --disable-interactivity`，并使用 absolute executable、显式 cwd、
+DEVNULL、脱敏环境和 `shell=False`。没有 override/silent/force/all/purge、自定义源、UAC、自动
+重启、进程终止、服务停止、MSIX/AppX/Store fallback 或残留删除。
+
+普通用户应用/开发工具是 R2；开发运行时、数据库/后台平台是 R2_HIGH_IMPACT。共享运行库、
+驱动/硬件、Windows、安全/网络、Agent、企业、Package Manager 和未知软件全部阻止。相关进程
+只显示警告，相关运行服务、winget busy、清单不完整或另一 MSI/Vendor/winget 事务会阻止执行。
+
+计划确认后会完整重验并产生短时即时确认。两个确认绑定 Package、Software、mapping、source、
+version、alias、固定参数策略、安全/preflight/risk 摘要，持久化、过期且只能消费一次。退出码
+只是一条证据；最终只有 fresh Package 清单和 Installed Software 清单都完整且原 identity 同时
+消失，才报告 `VERIFIED_REMOVED`。Rollback 为 `NONE`，重新安装只是人工恢复，不是 Undo。
+
 ## Stage 4D2B：受控交互式 Vendor Uninstaller
 
 Stage 4D2B 新增且只新增一个厂商卸载写工具：`software.uninstall.vendor`。它不接受原始

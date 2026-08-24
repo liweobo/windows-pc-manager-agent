@@ -54,6 +54,8 @@ class AppSettings(BaseModel):
     vendor_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
     vendor_monitor_poll_seconds: float = Field(default=0.25, ge=0.05, le=5.0)
     vendor_long_running_seconds: float = Field(default=900.0, ge=30.0, le=7_200.0)
+    winget_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
+    winget_monitor_poll_seconds: float = Field(default=0.25, ge=0.05, le=5.0)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -150,6 +152,12 @@ class AppSettings(BaseModel):
             ),
             "vendor_long_running_seconds": os.getenv(
                 "PC_MANAGER_VENDOR_LONG_RUNNING_SECONDS", "900"
+            ),
+            "winget_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_WINGET_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
+            "winget_monitor_poll_seconds": os.getenv(
+                "PC_MANAGER_WINGET_MONITOR_POLL_SECONDS", "0.25"
             ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")

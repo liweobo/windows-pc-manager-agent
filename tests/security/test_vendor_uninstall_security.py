@@ -154,7 +154,7 @@ def test_active_vendor_transaction_blocks_msi_mechanism(tmp_path: Path) -> None:
         )
         assert prepared.plan_confirmation is not None
         msi = build_msi_environment(database)
-        with pytest.raises(RuntimeError, match="MSI or Vendor"):
+        with pytest.raises(RuntimeError, match="MSI, Vendor, or winget"):
             msi.services.service.prepare(
                 "卸载 Example App",
                 SoftwareTargetQuery(display_name="Example App"),

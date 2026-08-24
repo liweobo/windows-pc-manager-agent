@@ -1,5 +1,22 @@
 # Rollback design
 
+## Stage 4D2C1 winget removal: NONE
+
+`software.uninstall.winget` has `RollbackLevel.NONE`. Windows Package Manager does not provide this
+application with a reliable transaction-level inverse that restores the exact prior program version,
+settings, license, plug-ins, local databases and user data. Therefore:
+
+- no Undo button or automatic reinstall is offered;
+- reinstall guidance is manual recovery, not rollback;
+- the Agent never downloads an installer, restores a Source, selects a replacement version or claims
+  that reinstall will restore user state;
+- stopping monitoring does not undo or cancel a launched installer;
+- `INTERRUPTED` means inspect the visible installer and refresh both inventories, not retry;
+- residual paths are report-only and are never deleted during recovery.
+
+代码回滚使用 `git revert <Stage-4D2C1-commit>`。它只撤销应用代码，不会恢复已卸载软件；如果
+真实卸载已经发生，必须从可信的发布者/官方源人工重新安装，并自行核对数据备份。
+
 ## Stage 4D2B Vendor uninstall
 
 `software.uninstall.vendor` has `RollbackLevel.NONE`. A vendor's interactive uninstaller may remove

@@ -49,6 +49,7 @@ from pc_manager_agent.ui.software_uninstall_router_worker import (
 )
 from pc_manager_agent.ui.system_workers import DiagnosticWorker, require_diagnostic_report
 from pc_manager_agent.ui.vendor_uninstall_dialog import VendorUninstallDialog
+from pc_manager_agent.ui.winget_uninstall_dialog import WingetUninstallDialog
 
 
 def _bytes_text(value: int) -> str:
@@ -79,6 +80,7 @@ class SystemDiagnosticsTab(QWidget):
         self._software_dialogs: set[SoftwareAnalysisDialog] = set()
         self._software_uninstall_dialogs: set[SoftwareUninstallDialog] = set()
         self._vendor_uninstall_dialogs: set[VendorUninstallDialog] = set()
+        self._winget_uninstall_dialogs: set[WingetUninstallDialog] = set()
         self._uninstall_route_workers: set[SoftwareUninstallRouteWorker] = set()
         self._build_ui()
 
@@ -681,13 +683,28 @@ class SystemDiagnosticsTab(QWidget):
         dialog.show()
         self.status_message.emit("正在验证厂商卸载器可信身份；尚未授权或启动卸载")
 
+    def open_winget_uninstall(
+        self,
+        user_goal: str,
+        *,
+        query: SoftwareTargetQuery,
+    ) -> None:
+        """Open the official-source Stage 4D2C1 workflow with cancellation as default."""
+        dialog = WingetUninstallDialog(self._runtime, user_goal, query=query, parent=self)
+        self._winget_uninstall_dialogs.add(dialog)
+        dialog.finished.connect(
+            lambda _result, value=dialog: self._winget_uninstall_dialogs.discard(value)
+        )
+        dialog.show()
+        self.status_message.emit("正在验证 winget Package 与软件身份；尚未授权或启动卸载")
+
     def open_routed_uninstall(
         self,
         user_goal: str,
         *,
         query: SoftwareTargetQuery,
     ) -> None:
-        """Resolve MSI versus Vendor off the UI thread, then open only that workflow."""
+        """Resolve MSI, Vendor, or winget off the UI thread and open only that workflow."""
         worker = SoftwareUninstallRouteWorker(self._runtime, query)
         self._uninstall_route_workers.add(worker)
         worker.signals.completed.connect(
@@ -700,7 +717,7 @@ class SystemDiagnosticsTab(QWidget):
         worker.signals.failed.connect(
             lambda message, current=worker: self._route_failed(current, message)
         )
-        self.status_message.emit("正在只读识别 MSI 或厂商卸载机制；尚未创建写操作确认")
+        self.status_message.emit("正在只读识别 MSI、厂商或 winget 机制；尚未创建写操作确认")
         QThreadPool.globalInstance().start(worker)
 
     def _route_completed(
@@ -725,6 +742,8 @@ class SystemDiagnosticsTab(QWidget):
             self.open_msi_uninstall(user_goal, query=query)
         elif route.mechanism is SoftwareUninstallMechanism.VENDOR:
             self.open_vendor_uninstall(user_goal, query=query)
+        elif route.mechanism is SoftwareUninstallMechanism.WINGET:
+            self.open_winget_uninstall(user_goal, query=query)
         else:
             self._show_error(route.reason)
 

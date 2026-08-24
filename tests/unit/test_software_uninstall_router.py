@@ -8,6 +8,7 @@ from pc_manager_agent.domain.software_uninstall_analysis import (
     RawInstalledSoftwareEntry,
     SoftwareTargetQuery,
 )
+from pc_manager_agent.domain.system_diagnostics import SoftwareScope
 from pc_manager_agent.orchestration.software_capability import UninstallCapabilityResolver
 from pc_manager_agent.orchestration.software_inventory import SoftwareInventoryService
 from pc_manager_agent.orchestration.software_target_resolver import SoftwareTargetResolver
@@ -17,6 +18,7 @@ from pc_manager_agent.orchestration.software_uninstall_router import (
 )
 from tests.fixtures.software_analysis import FakeSoftwareInventoryPlatform, msi_entry
 from tests.fixtures.vendor_uninstall import vendor_entry
+from tests.fixtures.winget_uninstall import winget_entry
 
 
 def _router(*entries: RawInstalledSoftwareEntry) -> SoftwareUninstallRouter:
@@ -62,3 +64,18 @@ def test_router_keeps_duplicate_display_names_ambiguous(tmp_path: Path) -> None:
     route = _router(first, second).route(SoftwareTargetQuery(display_name="Example App"))
     assert route.mechanism is SoftwareUninstallMechanism.AMBIGUOUS
     assert route.resolution.ambiguous
+
+
+def test_router_selects_winget_only_from_structured_current_user_metadata(
+    tmp_path: Path,
+) -> None:
+    route = _router(winget_entry(tmp_path)).route(
+        SoftwareTargetQuery(display_name="Example Clean App")
+    )
+    assert route.mechanism is SoftwareUninstallMechanism.WINGET
+
+
+def test_router_does_not_route_machine_winget_metadata(tmp_path: Path) -> None:
+    entry = winget_entry(tmp_path).model_copy(update={"scope": SoftwareScope.LOCAL_MACHINE})
+    route = _router(entry).route(SoftwareTargetQuery(display_name="Example Clean App"))
+    assert route.mechanism is SoftwareUninstallMechanism.UNSUPPORTED
