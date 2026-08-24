@@ -70,6 +70,10 @@ jobs:
           tests/unit/test_msix_uninstall.py
           tests/unit/test_msix_preflight.py
           tests/unit/test_software_residual_policies.py
+          tests/unit/test_residual_cleanup_policy_branches.py
+          tests/unit/test_residual_cleanup_safety_branches.py
+          tests/unit/test_residual_cleanup_confirmation.py
+          tests/unit/test_residual_cleanup_revalidation_branches.py
           tests/integration/test_file_operations_flow.py
           tests/integration/test_operation_transactions.py
           tests/integration/test_trash_flow.py
