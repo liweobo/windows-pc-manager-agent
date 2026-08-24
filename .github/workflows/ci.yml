@@ -69,6 +69,7 @@ jobs:
           tests/unit/test_winget_uninstall_safety_gates.py
           tests/unit/test_msix_uninstall.py
           tests/unit/test_msix_preflight.py
+          tests/unit/test_software_residual_policies.py
           tests/integration/test_file_operations_flow.py
           tests/integration/test_operation_transactions.py
           tests/integration/test_trash_flow.py
