@@ -251,6 +251,10 @@ def test_obsolete_shortcut_requires_exact_pre_uninstall_target_evidence(
 ) -> None:
     shortcut = tmp_path / "Synthetic Product.lnk"
     shortcut.write_bytes(b"synthetic-shortcut-metadata")
+    # Keep the synthetic evidence deterministically older than the uninstall
+    # context; hosted NTFS timestamp rounding must not turn this into a recent
+    # activity-policy test by accident.
+    os.utime(shortcut, (1_700_000_000, 1_700_000_000))
     removed_target = tmp_path / "removed" / "app.exe"
     base = residual_context(
         shortcut,
