@@ -24,7 +24,7 @@ from pc_manager_agent.ui.residual_analysis_dialog import ResidualAnalysisDialog
 
 
 @pytest.mark.gui
-def test_residual_dialog_reports_filters_exports_and_has_no_cleanup_control(
+def test_residual_dialog_reports_filters_exports_and_exposes_only_cleanup_intent(
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -54,6 +54,8 @@ def test_residual_dialog_reports_filters_exports_and_has_no_cleanup_control(
         assert dialog.cancel.isDefault()
         button_texts = {button.text() for button in dialog.findChildren(QPushButton)}
         assert not button_texts.intersection({"删除", "清理", "全部清理", "移入回收站"})
+        assert "重新验证所选项" in button_texts
+        assert not dialog.prepare_cleanup.isEnabled()
         dialog.primary.click()
         qtbot.waitUntil(lambda: dialog._stage == "DONE", timeout=10_000)
         assert dialog._report is not None
@@ -79,7 +81,9 @@ def test_residual_dialog_reports_filters_exports_and_has_no_cleanup_control(
 
         for row in range(dialog.table.rowCount()):
             if not dialog.table.isRowHidden(row):
-                dialog.table.setCurrentCell(row, 0)
+                # Column 0 may intentionally be disabled for non-cleanable rows.
+                # Location selection remains available from the path column.
+                dialog.table.setCurrentCell(row, 1)
                 break
         dialog._open_selected_location()
         explorer.select_candidate.assert_called_once()
@@ -100,8 +104,8 @@ def test_residual_dialog_reports_filters_exports_and_has_no_cleanup_control(
         environment.close()
 
 
-def test_residual_dialog_source_does_not_expose_stage4d4_authority() -> None:
-    """The Stage 4D3 UI can explain a future flow but has no cleanup handler."""
+def test_residual_dialog_source_does_not_expose_direct_mutation_authority() -> None:
+    """The Stage 4D3 UI may open Fresh review but has no destructive handler."""
     assert not hasattr(ResidualAnalysisDialog, "_delete")
     assert not hasattr(ResidualAnalysisDialog, "_cleanup")
     assert not hasattr(ResidualAnalysisDialog, "_trash")

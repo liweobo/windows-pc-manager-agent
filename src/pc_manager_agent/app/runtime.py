@@ -14,6 +14,7 @@ from pc_manager_agent.audit.models import AuditEvent
 from pc_manager_agent.audit.msix_uninstall import MsixUninstallAuditLogger
 from pc_manager_agent.audit.process_actions import ProcessActionAuditLogger
 from pc_manager_agent.audit.repository import AuditRepository
+from pc_manager_agent.audit.residual_cleanup import ResidualCleanupAuditLogger
 from pc_manager_agent.audit.service_actions import ServiceActionAuditLogger
 from pc_manager_agent.audit.service_startup_actions import ServiceStartupActionAuditLogger
 from pc_manager_agent.audit.software_residuals import SoftwareResidualAuditLogger
@@ -39,6 +40,9 @@ from pc_manager_agent.confirmation.file_operations import (
 )
 from pc_manager_agent.confirmation.msix_uninstall import MsixConfirmationService
 from pc_manager_agent.confirmation.process_actions import ProcessActionConfirmationService
+from pc_manager_agent.confirmation.residual_cleanup import (
+    ResidualCleanupConfirmationService,
+)
 from pc_manager_agent.confirmation.service_actions import ServiceActionConfirmationService
 from pc_manager_agent.confirmation.service_startup_actions import (
     ServiceStartupActionConfirmationService,
@@ -82,6 +86,7 @@ from pc_manager_agent.orchestration.msix_uninstall_execution import MsixUninstal
 from pc_manager_agent.orchestration.process_action_planner import ProcessActionPlanCompiler
 from pc_manager_agent.orchestration.process_actions import ProcessActionService
 from pc_manager_agent.orchestration.process_target_resolver import ProcessTargetResolver
+from pc_manager_agent.orchestration.residual_cleanup import ResidualCleanupService
 from pc_manager_agent.orchestration.residual_collectors import (
     InstallLocationResidualCollector,
     KnownAppDataResidualCollector,
@@ -159,6 +164,10 @@ from pc_manager_agent.persistence.msix_uninstall import (
 from pc_manager_agent.persistence.process_actions import (
     ProcessActionRepository,
     ProcessExecutionGuard,
+)
+from pc_manager_agent.persistence.residual_cleanup import (
+    ResidualCleanupExecutionGuard,
+    ResidualCleanupRepository,
 )
 from pc_manager_agent.persistence.service_actions import (
     ServiceActionRepository,
@@ -255,6 +264,17 @@ from pc_manager_agent.safety.process_policy import ProcessSafetyPolicy
 from pc_manager_agent.safety.process_preview import ProcessPreviewEngine
 from pc_manager_agent.safety.process_validator import ProcessActionSafetyValidator
 from pc_manager_agent.safety.residual_classification import ResidualClassifier
+from pc_manager_agent.safety.residual_cleanup_policy import (
+    CleanupEligibilityPolicy,
+    CleanupRiskPolicy,
+    ResidualCleanupPathPolicy,
+    ResidualRecentModificationPolicy,
+)
+from pc_manager_agent.safety.residual_cleanup_preview import ResidualCleanupPreviewEngine
+from pc_manager_agent.safety.residual_cleanup_revalidation import FreshResidualRevalidator
+from pc_manager_agent.safety.residual_cleanup_validator import (
+    ResidualCleanupSafetyValidator,
+)
 from pc_manager_agent.safety.residual_ownership import ResidualOwnershipEvaluator
 from pc_manager_agent.safety.residual_scope_policy import ResidualScanScopePolicy
 from pc_manager_agent.safety.service_policy import ServiceSafetyPolicy
@@ -322,6 +342,10 @@ from pc_manager_agent.tools.system_tools.msix_uninstall import MsixUninstallTool
 from pc_manager_agent.tools.system_tools.process_actions import (
     ForceTerminateProcessTool,
     RequestProcessExitTool,
+)
+from pc_manager_agent.tools.system_tools.residual_cleanup import (
+    SoftwareResidualPrepareCleanupTool,
+    SoftwareResidualTrashTool,
 )
 from pc_manager_agent.tools.system_tools.service_actions import (
     StartServiceTool,
@@ -458,6 +482,15 @@ class ResidualAnalysisServices:
 
 
 @dataclass(frozen=True, slots=True)
+class ResidualCleanupServices:
+    """Dependency bundle for fresh Stage 4D4 planning and controlled recycling."""
+
+    registry: ToolRegistry
+    repository: ResidualCleanupRepository
+    service: ResidualCleanupService
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessActionServices:
     """Dependency bundle for controlled Stage 4A process actions."""
 
@@ -578,6 +611,8 @@ class ApplicationRuntime:
         self.interrupted_msix_uninstall_ids = self.msix_uninstall_repository.initialize()
         self.software_residual_repository = SoftwareResidualRepository(settings.database_path)
         self.software_residual_repository.initialize()
+        self.residual_cleanup_repository = ResidualCleanupRepository(settings.database_path)
+        self.interrupted_residual_cleanup_ids = self.residual_cleanup_repository.initialize()
         self.uninstall_context_recorder = UninstallContextRecorder(
             self.software_residual_repository
         )
@@ -1261,6 +1296,83 @@ class ApplicationRuntime:
             explorer=self.residual_explorer,
         )
 
+    def create_residual_cleanup_services(self) -> ResidualCleanupServices:
+        """Build the independent Stage 4D4 fresh validation and Recycle Bin boundary."""
+        scope = ResidualScanScopePolicy(
+            max_roots=self.settings.residual_max_roots,
+            network_path_detector=is_network_path,
+        )
+        classifier = ResidualClassifier()
+        ownership = ResidualOwnershipEvaluator()
+        protection = UserDataProtectionPolicy()
+        path_policy = ResidualCleanupPathPolicy(
+            scope,
+            network_path_detector=is_network_path,
+        )
+        revalidator = FreshResidualRevalidator(
+            self.software_residual_repository,
+            path_policy,
+            classifier,
+            ownership,
+            protection,
+            CleanupEligibilityPolicy(),
+            ResidualRecentModificationPolicy(),
+            self.file_operation_platform,
+            self.recycle_bin_platform,
+            max_selected=self.settings.residual_cleanup_max_selected,
+            max_contained_objects=self.settings.residual_cleanup_max_contained_objects,
+            max_total_bytes=self.settings.residual_cleanup_max_total_bytes,
+        )
+        preview = ResidualCleanupPreviewEngine(
+            revalidator,
+            CleanupRiskPolicy(
+                max_normal_item_count=self.settings.residual_cleanup_normal_item_count,
+                max_normal_object_count=self.settings.residual_cleanup_normal_object_count,
+                max_normal_total_size=self.settings.residual_cleanup_normal_total_bytes,
+                max_normal_single_item_size=(
+                    self.settings.residual_cleanup_normal_single_item_bytes
+                ),
+            ),
+            plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            preview_ttl_seconds=self.settings.confirmation_ttl_seconds,
+        )
+        registry = ToolRegistry(
+            write_guard=ResidualCleanupExecutionGuard(self.residual_cleanup_repository)
+        )
+        registry.register(SoftwareResidualPrepareCleanupTool(revalidator))
+        registry.register(
+            SoftwareResidualTrashTool(
+                self.residual_cleanup_repository,
+                revalidator,
+                self.file_operation_platform,
+                self.recycle_bin_platform,
+            )
+        )
+        confirmations = ResidualCleanupConfirmationService(
+            self.residual_cleanup_repository,
+            preview,
+            plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            runtime_ttl_seconds=(self.settings.residual_cleanup_runtime_confirmation_ttl_seconds),
+        )
+        service = ResidualCleanupService(
+            registry,
+            preview,
+            ResidualCleanupSafetyValidator(registry),
+            confirmations,
+            self.residual_cleanup_repository,
+            self.file_operation_platform,
+            ResidualCleanupAuditLogger(
+                self.audit,
+                app_version=__version__,
+                git_commit=os.getenv("GITHUB_SHA"),
+            ),
+        )
+        return ResidualCleanupServices(
+            registry=registry,
+            repository=self.residual_cleanup_repository,
+            service=service,
+        )
+
     def create_process_action_services(self) -> ProcessActionServices:
         """Build the Stage 4A resolver, policy, confirmations, registry, and executor."""
         platform = self.process_management_platform
@@ -1470,6 +1582,7 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.residual_cleanup_repository.close()
         self.software_residual_repository.close()
         self.msix_uninstall_repository.close()
         self.winget_uninstall_repository.close()

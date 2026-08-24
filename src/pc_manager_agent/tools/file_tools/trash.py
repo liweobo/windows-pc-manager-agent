@@ -12,6 +12,7 @@ from pc_manager_agent.domain.risk import RiskLevel, RollbackLevel
 from pc_manager_agent.domain.trash import RecycleBinResult, TrashObjectSnapshot
 from pc_manager_agent.platform_support.base import FileOperationPlatform, RecycleBinPlatform
 from pc_manager_agent.safety.trash_policy import TrashPathPolicy
+from pc_manager_agent.tools.file_tools.recycle_executor import VerifiedRecycleBinExecutor
 from pc_manager_agent.tools.manifest import CancellationToken, ToolManifest
 
 
@@ -44,9 +45,8 @@ class TrashTool:
         snapshotter: Callable[[Path, FileObjectKind], TrashObjectSnapshot],
     ) -> None:
         self._policy = policy
-        self._identity = identity_platform
-        self._recycle = recycle_platform
         self._snapshotter = snapshotter
+        self._executor = VerifiedRecycleBinExecutor(identity_platform, recycle_platform)
 
     @property
     def manifest(self) -> ToolManifest:
@@ -81,14 +81,12 @@ class TrashTool:
     def execute(self, request: BaseModel, cancellation: CancellationToken) -> BaseModel:
         """Stop before the atomic Shell call, then require exact source identity."""
         typed = TrashRequest.model_validate(request)
-        if cancellation.is_cancelled:
-            raise RuntimeError("Recycle operation cancelled before Windows Shell call")
         source = self._policy.validate_source(typed.source)
-        current = self._identity.inspect(source)
-        if not current.unchanged_since(typed.expected_source_state):
-            raise PermissionError("Recycle source identity or metadata changed")
-        current_snapshot = self._snapshotter(source, current.kind)
-        if current_snapshot.canonical_digest() != typed.expected_snapshot.canonical_digest():
-            raise PermissionError("Recycle source tree changed after runtime confirmation")
-        outcome = self._recycle.recycle(source)
+        outcome = self._executor.recycle(
+            source,
+            typed.expected_source_state,
+            typed.expected_snapshot,
+            self._snapshotter,
+            cancellation,
+        )
         return TrashResult(outcome=outcome)

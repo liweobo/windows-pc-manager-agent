@@ -231,6 +231,20 @@ class SoftwareResidualRepository:
         except (SQLAlchemyError, ValueError, TypeError) as exc:
             raise SoftwareResidualStoreError("Residual report could not be loaded") from exc
 
+    def get_report(self, report_id: UUID) -> ResidualReport:
+        """Load one exact immutable report by ID for Stage 4D4 intent resolution."""
+        self._require_initialized()
+        try:
+            with self._sessions() as session:
+                row = session.get(ResidualReportRow, str(report_id))
+                if row is None:
+                    raise SoftwareResidualStoreError("Unknown residual report")
+                return self._report_from_row(session, row)
+        except SoftwareResidualStoreError:
+            raise
+        except (SQLAlchemyError, ValueError, TypeError) as exc:
+            raise SoftwareResidualStoreError("Residual report could not be validated") from exc
+
     def get_candidate(self, context_id: UUID, candidate_id: UUID) -> ResidualCandidate | None:
         """Return one candidate only when its report belongs to the requested context."""
         self._require_initialized()

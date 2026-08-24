@@ -22,6 +22,8 @@ def test_settings_load_and_normalize_environment(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("OPENAI_API_KEY", "key")
     monkeypatch.setenv("PC_MANAGER_SCAN_MAX_FILES", "12")
     monkeypatch.setenv("PC_MANAGER_SCAN_TIMEOUT_SECONDS", "4")
+    monkeypatch.setenv("PC_MANAGER_RESIDUAL_CLEANUP_MAX_SELECTED", "7")
+    monkeypatch.setenv("PC_MANAGER_RESIDUAL_CLEANUP_NORMAL_TOTAL_BYTES", "4096")
     settings = AppSettings.from_environment()
     assert settings.llm_provider == "openai"
     assert settings.openai_model == "model-id"
@@ -29,6 +31,9 @@ def test_settings_load_and_normalize_environment(monkeypatch: pytest.MonkeyPatch
     assert settings.scan_timeout_seconds == 4
     assert settings.trash_runtime_confirmation_ttl_seconds == 60
     assert settings.process_runtime_confirmation_ttl_seconds == 60
+    assert settings.residual_cleanup_max_selected == 7
+    assert settings.residual_cleanup_normal_total_bytes == 4096
+    assert settings.residual_cleanup_runtime_confirmation_ttl_seconds == 60
 
 
 def test_settings_reject_unknown_provider_and_invalid_limit() -> None:
@@ -42,6 +47,8 @@ def test_settings_reject_unknown_provider_and_invalid_limit() -> None:
         AppSettings(process_action_max_processes=0)
     with pytest.raises(ValidationError):
         AppSettings(process_graceful_timeout_seconds=31)
+    with pytest.raises(ValidationError):
+        AppSettings(residual_cleanup_max_contained_objects=0)
 
 
 def test_empty_model_becomes_none() -> None:

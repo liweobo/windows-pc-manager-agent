@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased — Stage 4D4
+
+### Added
+
+- Fresh selected-only residual identity/material/classification/ownership/protection/path/activity/
+  recoverability revalidation and deterministic `CleanupEligibilityPolicy`.
+- `ResidualCleanupPlan`, exact reference-only item requests, dynamic R2/R2_HIGH_IMPACT thresholds,
+  all-or-nothing mixed-batch policy, independent durable plan/runtime confirmations and replay guard.
+- Shared Stage 2B identity/tree checked Recycle Bin executor, final TOCTOU scan, per-item verification,
+  MANUAL recovery records, fail-stop cancellation/partial results and non-resumable crash recovery.
+- PySide6 Fresh Preview flow with explicit plan and immediate confirmations, blocked reason table,
+  truthful recovery/partial completion messaging, plus detailed Stage 4D4 API documentation.
+- Synthetic unit, integration, security, GUI and selected-tree performance coverage.
+
+### Security
+
+- Only HIGH-confidence Program Residual, app-specific Cache/Log, and exact obsolete Shortcut evidence
+  can become eligible. Configuration, User Data, Database, Package User Data, Plugin/Extension,
+  License/Application State, Unknown, shared, recent, protected, reparse, network and unsupported-volume
+  candidates remain blocked regardless of user wording.
+- Stage 4D3 reports and confirmations cannot authorize writes. The sole write input contains internal
+  transaction/plan/Preview/item references and cannot accept a path, action, command or model argument.
+- Every real mutation is Windows Recycle Bin placement. There is no permanent-delete, registry-cleanup,
+  shell, elevation, sibling/parent widening or automatic restore path.
+- Audit uses candidate IDs and path/evidence digests; source paths, file contents, Recycle Bin identifiers
+  and raw Shell result text are excluded from Stage 4D4 audit payloads.
+
+### Changed
+
+- Stage 2B and Stage 4D4 now share `VerifiedRecycleBinExecutor`, preserving the existing Stage 2B public
+  contract while preventing duplicate mutation logic.
+- `ToolManifest` supports a finite dynamic risk set so the D4 write manifest advertises maximum
+  R2_HIGH_IMPACT while accepting only R2 or R2_HIGH_IMPACT plans.
+
 ## Unreleased — Stage 4D3
 
 ### Added

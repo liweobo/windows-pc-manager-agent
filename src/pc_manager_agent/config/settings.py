@@ -59,6 +59,14 @@ class AppSettings(BaseModel):
     residual_max_roots: int = Field(default=16, ge=1, le=32)
     residual_max_objects: int = Field(default=25_000, ge=1, le=25_000)
     residual_timeout_seconds: float = Field(default=60.0, gt=0, le=600.0)
+    residual_cleanup_max_selected: int = Field(default=20, ge=1, le=100)
+    residual_cleanup_max_contained_objects: int = Field(default=10_000, ge=1, le=100_000)
+    residual_cleanup_max_total_bytes: int = Field(default=50 * 1024**3, ge=1)
+    residual_cleanup_normal_item_count: int = Field(default=5, ge=1, le=100)
+    residual_cleanup_normal_object_count: int = Field(default=100, ge=1)
+    residual_cleanup_normal_total_bytes: int = Field(default=1 * 1024**3, ge=1)
+    residual_cleanup_normal_single_item_bytes: int = Field(default=512 * 1024**2, ge=1)
+    residual_cleanup_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -165,6 +173,30 @@ class AppSettings(BaseModel):
             "residual_max_roots": os.getenv("PC_MANAGER_RESIDUAL_MAX_ROOTS", "16"),
             "residual_max_objects": os.getenv("PC_MANAGER_RESIDUAL_MAX_OBJECTS", "25000"),
             "residual_timeout_seconds": os.getenv("PC_MANAGER_RESIDUAL_TIMEOUT_SECONDS", "60"),
+            "residual_cleanup_max_selected": os.getenv(
+                "PC_MANAGER_RESIDUAL_CLEANUP_MAX_SELECTED", "20"
+            ),
+            "residual_cleanup_max_contained_objects": os.getenv(
+                "PC_MANAGER_RESIDUAL_CLEANUP_MAX_CONTAINED_OBJECTS", "10000"
+            ),
+            "residual_cleanup_max_total_bytes": os.getenv(
+                "PC_MANAGER_RESIDUAL_CLEANUP_MAX_TOTAL_BYTES", str(50 * 1024**3)
+            ),
+            "residual_cleanup_normal_item_count": os.getenv(
+                "PC_MANAGER_RESIDUAL_CLEANUP_NORMAL_ITEM_COUNT", "5"
+            ),
+            "residual_cleanup_normal_object_count": os.getenv(
+                "PC_MANAGER_RESIDUAL_CLEANUP_NORMAL_OBJECT_COUNT", "100"
+            ),
+            "residual_cleanup_normal_total_bytes": os.getenv(
+                "PC_MANAGER_RESIDUAL_CLEANUP_NORMAL_TOTAL_BYTES", str(1 * 1024**3)
+            ),
+            "residual_cleanup_normal_single_item_bytes": os.getenv(
+                "PC_MANAGER_RESIDUAL_CLEANUP_NORMAL_SINGLE_ITEM_BYTES", str(512 * 1024**2)
+            ),
+            "residual_cleanup_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_RESIDUAL_CLEANUP_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
         if data_directory:

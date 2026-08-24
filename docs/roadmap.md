@@ -134,12 +134,29 @@ identity, deterministic classification, structured ownership evidence/confidence
 data protection, bounded/cancellable scanning, three R0 tools, persistence, audit, local export and a
 report-only GUI are complete. The implementation performs no full-disk/name search or content read.
 
-Stage 4D4 remains planned/optional. It would require a fresh scan, identity revalidation, a separate
-safety policy, Preview and new R1/R2 confirmations; no Stage 4D3 plan/report/selection is reusable.
+## Stage 4D4 — safe residual cleanup (complete)
+
+Selected Stage 4D3 UUIDs are intent only. Stage 4D4 adds selected-only Fresh identity/material/
+classification/ownership/protection/path/activity/recoverability validation, a deterministic allow-list,
+all-or-nothing mixed batches, R2/R2_HIGH_IMPACT Preview, separate durable plan/runtime confirmations,
+final TOCTOU checks, shared Stage 2B Recycle Bin execution, identity-aware verification, MANUAL recovery,
+audit, cancellation/partial results and non-resumable crash handling.
+
+Only HIGH-confidence Program Residual, app-specific Cache/Log and exact obsolete Shortcut can pass every
+gate. User/config/database/package/plugin/license/application-state/unknown/shared/recent/reparse/network/
+unsupported-volume cleanup, permanent deletion, registry cleanup, automatic restore, shell and elevation
+remain absent.
+
+## Stage 4X — Privileged Action Broker (planned)
+
+The next safety phase is a standard-user main application plus authenticated, short-lived, allow-listed
+elevated broker over structured IPC. It must receive a separately reviewed and confirmed typed request,
+perform exactly one narrow privileged operation, return verifiable evidence and exit. The main application
+must never remain elevated. No Stage 4X implementation is included in Stage 4D4.
 
 ## Stage 4C3+ / other controlled system operations (not started)
 
-Broader service changes, unsupported uninstall mechanisms, firewall changes, cleanup and other system
+Broader service changes, unsupported uninstall mechanisms, firewall changes, broader cleanup and other system
 operations remain design-only. Each capability requires its own threat model, confirmation,
 recovery plan, Windows API experiment, and isolated test/review before implementation.
 

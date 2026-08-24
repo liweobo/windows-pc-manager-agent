@@ -1,5 +1,28 @@
 # Rollback design
 
+## Stage 4D4 residual-cleanup recovery
+
+Every eligible D4 plan declares `RollbackLevel.MANUAL`. Immediately before each Windows Shell call, the
+transaction saves a `TrashRecoveryRecord` with operation order, exact original path, pre-operation identity,
+PREPARED state and integrity digest. A result is exposed as recoverable only after Shell evidence and an
+independent identity check prove the original residual identity is gone; then the record becomes AVAILABLE
+and includes the opaque Recycle Bin item identifier. Failed, changed or skipped items are not presented as
+recoverable successes.
+
+Recovery means opening Windows Recycle Bin and manually restoring the item. Stage 4D4 has no automatic
+`rollback()`/Restore button and never claims FULL recovery. If the original path is now occupied, the Agent
+does not overwrite, merge, rename or remove the new object; the user must resolve the conflict manually in
+Windows. Reinstalling software is also not Undo and may not restore application state.
+
+Cancellation is not rollback. It stops future planned items; already verified items remain in Recycle Bin
+and keep their MANUAL records. Partial completion is reported with separate completed/failed/skipped counts.
+After a crash, all active transactions become `INTERRUPTED`, pending/approved confirmations expire, and no
+item is redispatched. Prepared/available records remain available for truthful reconciliation, but uncertain
+Shell outcomes require manual inspection.
+
+Code rollback for the complete Stage 4D4 change should use `git revert <stage4d4-commit>` on a clean branch.
+Reverting code does not restore items already moved to Windows Recycle Bin; restore those manually first.
+
 ## Stage 4D3 residual reports: scanned data NONE, exported report MANUAL
 
 Residual analysis is R0 and never changes a scanned file, directory, shortcut, Package data or

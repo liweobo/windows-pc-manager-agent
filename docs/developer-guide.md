@@ -1,5 +1,49 @@
 # Developer guide
 
+## Stage 4D4 development
+
+The D4 production graph is composed in `ApplicationRuntime.create_residual_cleanup_services()`. Keep the
+following modules independent: immutable models in `domain.residual_cleanup`, finite policy in
+`safety.residual_cleanup_policy`, selected-only scan in `safety.residual_cleanup_revalidation`, plan/Preview
+and reviewer, durable confirmations, isolated persistence/write guard, orchestration/audit, and Qt workers.
+Do not move path resolution into UI, a provider, or `ResidualCleanupTrashRequest`.
+
+The allow-list is intentionally small: HIGH ownership Program Residual, app-specific Cache/Log and exact
+obsolete Shortcut. Additions require a new threat-model matrix and tests; do not weaken protection because a
+user confirms. TEMPORARY_DATA remains deferred. Complete tree metadata is mandatory—budget exhaustion blocks
+rather than sampling. Classification must use the selected root and relative children, never parent/sibling
+enumeration and never file contents.
+
+Stage 2B and D4 share `VerifiedRecycleBinExecutor`. New mutation adapters, permanent APIs, registry cleanup,
+shell commands and auto-restore are prohibited. The D4 tool manifest advertises maximum R2_HIGH_IMPACT and
+uses `allowed_risk_levels=(R2, R2_HIGH_IMPACT)`; the independent validator must still prove the exact plan
+risk. Every write request remains reference-only and the guard must atomically prove consumed approvals.
+
+Defaults are 20 selected items, 10,000 contained objects and 50 GiB hard total. The R2 ceiling is 5 selected
+items, 100 contained objects, 1 GiB total and 512 MiB per selected item; larger permitted batches are
+R2_HIGH_IMPACT. Configure these through the validated `PC_MANAGER_RESIDUAL_CLEANUP_MAX_*` and
+`PC_MANAGER_RESIDUAL_CLEANUP_NORMAL_*` environment variables documented in the API reference. Runtime
+confirmation defaults to 60 seconds (`PC_MANAGER_RESIDUAL_CLEANUP_RUNTIME_CONFIRMATION_TTL_SECONDS`).
+
+Run focused D4 checks with:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_residual_cleanup_models.py tests/unit/test_residual_cleanup_persistence.py `
+  tests/integration/test_residual_cleanup_workflow.py tests/security/test_residual_cleanup_security.py `
+  tests/gui/test_residual_cleanup_dialog.py -q
+uv run pytest tests/performance/test_residual_cleanup_performance.py -q -s
+uv run ruff check .
+uv run mypy src
+```
+
+Synthetic mutation tests may only move objects into a temporary quarantine adapter; they must never delete
+real user data. Static security tests must continue rejecting permanent deletion, registry, shell and force
+tool paths. Test identity replacement, material/classification/protection/capability changes, replay,
+failure-stop, partial cancellation, crash interruption and privacy-minimized audit. A failed item may retain
+internal PREPARED evidence for reconciliation, but the public service exposes recovery guidance only for
+AVAILABLE verified records.
+
 ## Stage 4D3 development
 
 The Stage 4D3 graph begins in `UninstallContextRecorder`, which is optionally injected into each D2

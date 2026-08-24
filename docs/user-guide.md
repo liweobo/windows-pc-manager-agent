@@ -1,5 +1,31 @@
 # User guide
 
+## 使用 Stage 4D4 安全清理少量卸载残留
+
+1. 先完成一次由 Agent 控制的软件卸载，再运行 Stage 4D3“分析可能残留”。
+2. 在报告第一列勾选候选，然后点击“重新验证所选项”。这一步只是申请安全复核，不是删除确认。
+3. 等待 Fresh Revalidation。窗口会逐项显示分类、Ownership、保护等级、文件/目录数、大小、
+   回收能力和允许/阻止原因。任一项被阻止时，整批不执行；请关闭后重新选择。
+4. 全部符合条件时阅读第一次“计划确认”。它说明 exact item set、R2/R2_HIGH_IMPACT、影响和
+   `MANUAL` 恢复。确认后应用会再次扫描，但仍不会立即移动文件。
+5. 阅读第二次“立即确认”。只有再次点击“移入 Windows 回收站”才会执行。默认按钮始终是取消。
+6. 查看结果中的成功、失败和未执行数量。成功只表示 Windows 回收证据与原 identity 消失均已
+   验证；失败/变化会停止后续项。
+
+目前可能通过的类别只有 HIGH-confidence Program Residual、明确 app-specific Cache/Log，以及
+卸载前已记录精确路径和 target、且 target 已不存在的 Shortcut。Owned 不等于 Eligible：配置、
+数据库、用户数据、插件、License/Application State、MSIX Package User Data、Unknown、共享目录、
+近期修改、link/junction/reparse、网络/不可靠卷等都会被阻止；没有“仍然强制”按钮。
+
+所有真实处理都使用 Windows 回收站，没有永久删除后备方式。恢复等级为 MANUAL：打开 Windows
+回收站，找到对象并选择“还原”。如果原位置已被新对象占用，Agent 不会覆盖它，请先人工判断。
+取消只停止未来项；已完成项仍在回收站。应用异常退出后不会自动继续，必须查看审计/回收站并
+重新生成 Fresh 计划。
+
+默认最多选择 20 项、合计最多包含 10,000 个对象且不超过 50 GiB，超过即整批阻止。最多 5 项、
+100 个对象、总量 1 GiB 且每项不超过 512 MiB 的批次为 R2；再大但仍在硬上限内时显示为
+R2_HIGH_IMPACT。请以确认窗口显示的当前阈值和实际统计为准。
+
 ## 使用 Stage 4D3 卸载后残留分析
 
 当 Agent 完成一次 MSI、Vendor、winget 或 MSIX 卸载，并且保存了可用的卸载上下文时，结果页会

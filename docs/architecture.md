@@ -1,5 +1,52 @@
 # Architecture
 
+## Stage 4D4 controlled residual-cleanup boundary
+
+Stage 4D4 is an independent R2 workflow layered after, not inside, Stage 4D3:
+
+```text
+Stage 4D3 report UUID + explicitly checked candidate UUIDs (intent only)
+  -> software.residuals.prepare_cleanup (R0 Fresh Revalidation)
+  -> CleanupEligibilityPolicy (deterministic, all rows retained)
+  -> all-eligible ResidualCleanupPlan + Fresh Preview
+  -> durable PLAN confirmation
+  -> second complete Fresh Revalidation + runtime Preview
+  -> durable object-specific RUNTIME confirmation
+  -> third whole-batch TOCTOU Revalidation
+  -> atomic confirmation consumption + reference-only WriteExecutionGuard
+  -> per item: PREPARED recovery + mandatory audit
+  -> shared VerifiedRecycleBinExecutor -> Windows IFileOperation
+  -> original-identity verification -> result/recovery/audit
+```
+
+The UI passes only `source_report_id` and candidate UUIDs. `FreshResidualRevalidator` resolves paths from
+the local Stage 4D3 repository and never widens to a parent or sibling. It checks the old `lstat` identity,
+then creates a new Windows file identity and a complete bounded metadata tree digest. Classification is
+based only on the selected root and relative descendants, so unrelated ancestor names cannot authorize or
+misclassify content. Any forbidden descendant, budget truncation, identity/material change or unavailable
+evidence blocks the entire selected candidate.
+
+`CleanupEligibilityPolicy` is separate from ownership. It combines exact uninstall context, HIGH ownership,
+finite classification allow-list, independent protection, shared/recent/path/reparse signals and current
+Recycle Bin capability. `ResidualCleanupPreviewEngine` refuses mixed and overlapping batches. Risk is R2 or
+R2_HIGH_IMPACT using configured item/object/total/single-item thresholds.
+
+Stage 4D4 has independent additive SQLite tables for plans, items and two confirmation tiers. The write
+tool schema has only transaction, plan, Preview and item references; the repository resolves the path only
+after the guard proves both approvals were atomically consumed. Restart turns every active transaction into
+`INTERRUPTED` and approvals into `EXPIRED`; no code path redispatches work.
+
+Mutation logic is not duplicated. Stage 2B `TrashTool` and Stage 4D4 `SoftwareResidualTrashTool` delegate to
+the same `VerifiedRecycleBinExecutor`, which compares exact identity and full tree snapshot immediately
+before one `RecycleBinPlatform.recycle` call. There is no delete adapter or fallback. Shell evidence is then
+combined with a fresh original-path identity check; a new object at the same path is distinguished from the
+removed original.
+
+Audit remains independent and mandatory before dispatch. D4 events store UUIDs, counts and digests; local
+paths, file contents, Recycle Bin item identifiers and raw Shell text are excluded. Public recovery output
+contains only successful `AVAILABLE` MANUAL records. Manual Windows Recycle Bin restore is outside the
+Agent write boundary, so the Agent cannot overwrite a restore conflict.
+
 ## Stage 4D3 report-only residual-analysis boundary
 
 ```text

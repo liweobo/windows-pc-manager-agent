@@ -1,5 +1,25 @@
 # Threat model
 
+## Stage 4D4 threats and mitigations
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Old report/acknowledgement is treated as deletion authority | D4 request is UUID intent only; new Fresh models, new plan and independent durable confirmations | User can select the wrong report row, so the Preview must remain specific |
+| LLM or UI injects a path, command or force-delete action | Write schema is reference-only; local repository resolves exact path; finite action enum has only Recycle Bin | Same-process compromise is outside this boundary |
+| Owned configuration/database/user data is removed | Eligibility is separate from ownership; protected class matrix blocks regardless of HIGH confidence or user wording | Classification rules may be conservative and block safe items |
+| Old path is recreated with new content | Old `lstat` identity plus fresh File ID/type/size/mtime and complete tree digest compared on three scans | A kernel-level race after the last check is out of scope |
+| Parent/sibling scope is silently added | Request contains explicit candidate UUIDs; selected path must remain under exact evidence root; plan paths equal selected rows only | Selecting a directory intentionally includes its scanned descendants |
+| Forbidden data is hidden inside an eligible directory | Every descendant is metadata-classified/protected; any forbidden class/protection/reparse blocks the whole tree | Classification cannot prove semantic value without reading content, so unknown blocks |
+| Shared/recent/network/removable data is treated as recoverable | Independent path/activity/capability policies fail closed | Windows/filesystem capability reporting remains a platform dependency |
+| Mixed batch silently cleans the eligible subset | Assessment retains all rows and Preview compiler requires `all_eligible` | User must deliberately create a new reduced selection |
+| Confirmation replay/double click or evidence drift | Expiring parent+runtime records bind all evidence digests and are atomically consumed once | Corrupt audit/transaction storage disables execution rather than recovering authority |
+| Recycle Bin failure falls back to permanent delete | Shared executor has one RecycleBinPlatform dependency; AST/source tests reject permanent/registry/shell APIs | Windows may fail after partial internal work; verification reports UNKNOWN/FAILED |
+| Shell success is falsely reported as cleanup success | Post-call identity inspection distinguishes old identity, absent path and new object at same path | A post-verification concurrent recreation may occur later and is not the removed residual |
+| Cancellation is described as Undo | Per-item durable state reports completed/failed/skipped; cancellation checks only before future calls | An in-flight Windows Shell operation cannot be recalled |
+| Crash replays remaining work | Startup marks active transactions INTERRUPTED and approvals EXPIRED; no resume edge | Outcome of an abrupt crash during Shell activity may require manual inspection |
+| Audit leaks local paths or Recycle Bin identifiers | D4 audit stores UUIDs, counts, path/evidence digests and booleans; raw paths/contents/Shell text excluded | Local software names and aggregate sizes remain sensitive metadata |
+| Restore overwrites a new object | D4 provides no automatic restore API; MANUAL Windows Recycle Bin recovery is explicit | Windows/user must resolve restore conflicts manually |
+
 ## Stage 4D3 additions
 
 | Threat | Control | Residual risk |

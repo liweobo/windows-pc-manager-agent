@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from pc_manager_agent.app.runtime import ApplicationRuntime, ResidualAnalysisServices
 from pc_manager_agent.confirmation.models import ConfirmationRequest
 from pc_manager_agent.domain.plans import TaskPlan
+from pc_manager_agent.domain.residual_cleanup import ResidualCleanupRequest
 from pc_manager_agent.domain.software_residuals import (
     ResidualCandidate,
     ResidualClassification,
@@ -49,6 +50,7 @@ from pc_manager_agent.ui.residual_analysis_workers import (
     require_residual_export,
     require_residual_report,
 )
+from pc_manager_agent.ui.residual_cleanup_dialog import ResidualCleanupDialog
 
 _LOG = logging.getLogger(__name__)
 
@@ -104,9 +106,10 @@ class ResidualAnalysisDialog(QDialog):
         filters.addWidget(self.search, 2)
         filters.addWidget(self.classification_filter, 1)
         filters.addWidget(self.protection_filter, 1)
-        self.table = QTableWidget(0, 9)
+        self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels(
             (
+                "申请安全复核",
                 "路径",
                 "对象",
                 "大小",
@@ -134,7 +137,13 @@ class ResidualAnalysisDialog(QDialog):
         self.export_json = QPushButton("导出 JSON")
         self.export_csv = QPushButton("导出 CSV")
         self.open_location = QPushButton("打开所在位置")
-        for button in (self.export_json, self.export_csv, self.open_location):
+        self.prepare_cleanup = QPushButton("重新验证所选项")
+        for button in (
+            self.export_json,
+            self.export_csv,
+            self.open_location,
+            self.prepare_cleanup,
+        ):
             button.setEnabled(False)
             action_buttons.addWidget(button)
         action_buttons.addStretch(1)
@@ -159,6 +168,8 @@ class ResidualAnalysisDialog(QDialog):
         self.export_json.clicked.connect(lambda: self._export(ResidualReportFormat.JSON))
         self.export_csv.clicked.connect(lambda: self._export(ResidualReportFormat.CSV))
         self.open_location.clicked.connect(self._open_selected_location)
+        self.prepare_cleanup.clicked.connect(self._open_cleanup)
+        self.table.itemChanged.connect(lambda _item: self._update_cleanup_button())
 
     def _start_prepare(self) -> None:
         worker = ResidualPrepareWorker(self._runtime, self._user_goal, self._transaction_id)
@@ -282,6 +293,7 @@ class ResidualAnalysisDialog(QDialog):
         )
         for row, candidate in enumerate(ordered):
             values = (
+                "复核",
                 str(candidate.path),
                 candidate.object_type.value,
                 _format_size(candidate.size_bytes),
@@ -295,10 +307,19 @@ class ResidualAnalysisDialog(QDialog):
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setData(Qt.ItemDataRole.UserRole, str(candidate.candidate_id))
+                if column == 0:
+                    item.setFlags(
+                        item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled
+                    )
+                    item.setCheckState(Qt.CheckState.Unchecked)
+                    if not _potential_cleanup_intent(candidate):
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                        item.setToolTip("当前报告已显示受保护或证据不足；不能申请通用残留清理。")
                 self.table.setItem(row, column, item)
         self.table.setSortingEnabled(True)
         self.table.resizeColumnsToContents()
         self._apply_filters()
+        self._update_cleanup_button()
 
     @Slot()
     def _apply_filters(self) -> None:
@@ -306,9 +327,9 @@ class ResidualAnalysisDialog(QDialog):
         classification = self.classification_filter.currentData()
         protection = self.protection_filter.currentData()
         for row in range(self.table.rowCount()):
-            path_item = self.table.item(row, 0)
-            classification_item = self.table.item(row, 3)
-            protection_item = self.table.item(row, 5)
+            path_item = self.table.item(row, 1)
+            classification_item = self.table.item(row, 4)
+            protection_item = self.table.item(row, 6)
             if path_item is None or classification_item is None or protection_item is None:
                 self.table.setRowHidden(row, True)
                 continue
@@ -356,7 +377,7 @@ class ResidualAnalysisDialog(QDialog):
         row = self.table.currentRow()
         if report is None or row < 0:
             return None
-        item = self.table.item(row, 0)
+        item = self.table.item(row, 1)
         if item is None:
             return None
         candidate_id = item.data(Qt.ItemDataRole.UserRole)
@@ -431,6 +452,38 @@ class ResidualAnalysisDialog(QDialog):
         except Exception as exc:
             QMessageBox.warning(self, "无法打开位置", f"{type(exc).__name__}: {exc}")
 
+    @Slot()
+    def _update_cleanup_button(self) -> None:
+        """Enable Fresh Revalidation only when the user explicitly checked rows."""
+        self.prepare_cleanup.setEnabled(bool(self._selected_cleanup_ids()))
+
+    def _selected_cleanup_ids(self) -> tuple[UUID, ...]:
+        """Return checked report IDs as intent only; paths never leave the local resolver."""
+        selected: list[UUID] = []
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None or item.checkState() is not Qt.CheckState.Checked:
+                continue
+            selected.append(UUID(str(item.data(Qt.ItemDataRole.UserRole))))
+        return tuple(selected)
+
+    @Slot()
+    def _open_cleanup(self) -> None:
+        """Open an independent Fresh Revalidation and double-confirmation workflow."""
+        report = self._report
+        selected = self._selected_cleanup_ids()
+        if report is None or not selected:
+            return
+        dialog = ResidualCleanupDialog(
+            self._runtime,
+            ResidualCleanupRequest(
+                source_report_id=report.report_id,
+                selected_residual_ids=selected,
+            ),
+            self,
+        )
+        dialog.exec()
+
     @Slot(str)
     def _failed(self, message: str) -> None:
         self._worker = None
@@ -501,3 +554,23 @@ def _format_size(value: int) -> str:
             return f"{size:.1f} {unit}"
         size /= 1024
     return f"{value} B"
+
+
+def _potential_cleanup_intent(candidate: ResidualCandidate) -> bool:
+    """Filter obvious blocks without claiming the stale report proves eligibility."""
+    return (
+        candidate.classification
+        in {
+            ResidualClassification.PROGRAM_RESIDUAL,
+            ResidualClassification.CACHE,
+            ResidualClassification.LOG,
+            ResidualClassification.SHORTCUT,
+        }
+        and candidate.ownership_confidence.value == "high"
+        and not candidate.reparse_or_symlink
+        and (
+            candidate.protection_level
+            in {UserDataProtectionLevel.NONE, UserDataProtectionLevel.CAUTION}
+            or candidate.classification is ResidualClassification.SHORTCUT
+        )
+    )

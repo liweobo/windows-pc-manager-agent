@@ -104,6 +104,26 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4D4 retains Stage 4D3 report-only analysis and adds exactly one independent write tool:
+`software.residuals.trash`. A Stage 4D3 report, candidate selection or R0 confirmation is intent only.
+Stage 4D4 resolves selected UUIDs locally, performs a full Fresh identity/material/ownership/
+classification/protection/path/activity/recoverability scan, builds a new R2/R2_HIGH_IMPACT Preview,
+requires separate durable plan and immediate confirmations, repeats final TOCTOU validation, and only
+then delegates one item at a time to the shared Stage 2B Windows Recycle Bin primitive.
+
+V1 eligibility is limited to HIGH-confidence ordinary `PROGRAM_RESIDUAL`, app-specific `CACHE`/`LOG`,
+and exact pre-uninstall obsolete `SHORTCUT` evidence. Configuration, User Data, Database, Package User
+Data, Plugin/Extension, License/Application State, Unknown, shared, recent, protected, reparse,
+network/unsupported-volume or ambiguous candidates are blocked regardless of confirmation. Mixed batches
+are blocked as a whole. Confirmations bind exact item, identity, material, classification, eligibility,
+risk and recovery digests, expire and are single-use. Recovery is MANUAL; success needs Shell evidence
+plus original-identity disappearance. Cancellation stops future items only; restart marks active work
+INTERRUPTED and never resumes it.
+
+There is no permanent-delete fallback, registry cleanup, user/config/database/MSIX data cleanup,
+parent/sibling widening, shell, elevation or automatic restore. A restore conflict therefore cannot be
+overwritten by this stage: restoration remains a manual Windows Recycle Bin operation.
+
 Stage 4D3 retains all Stage 4D2 mechanisms and adds exactly three R0 tools:
 `software.residuals.analyze`, `software.residuals.report`, and `software.residuals.inspect`. They
 operate only on an eligible durable `UninstallContext` captured before an Agent-controlled MSI,

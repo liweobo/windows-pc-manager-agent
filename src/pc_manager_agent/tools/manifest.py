@@ -59,6 +59,7 @@ class ToolManifest:
     supports_preview: bool = False
     irreversible: bool = False
     scope_argument_names: tuple[str, ...] = ()
+    allowed_risk_levels: tuple[RiskLevel, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject incomplete or contradictory manifests at registration time."""
@@ -103,6 +104,24 @@ class ToolManifest:
             )
         if self.irreversible and self.rollback_level is not RollbackLevel.NONE:
             raise ValueError("Irreversible tools must truthfully declare rollback NONE")
+        if self.allowed_risk_levels:
+            if len(self.allowed_risk_levels) != len(set(self.allowed_risk_levels)):
+                raise ValueError("Dynamic tool risk levels must be unique")
+            if self.risk_level not in self.allowed_risk_levels:
+                raise ValueError("Manifest maximum risk must appear in allowed risk levels")
+            maximum = max(self.allowed_risk_levels, key=lambda item: item.severity)
+            if maximum is not self.risk_level:
+                raise ValueError("Manifest risk_level must be the maximum dynamic risk")
+            if any(
+                level not in {RiskLevel.R2, RiskLevel.R2_HIGH_IMPACT}
+                for level in self.allowed_risk_levels
+            ):
+                raise ValueError("Dynamic risk is limited to R2 and R2_HIGH_IMPACT")
+
+    def supports_risk(self, risk_level: RiskLevel) -> bool:
+        """Return whether a plan may bind this manifest to one exact risk level."""
+        allowed = self.allowed_risk_levels or (self.risk_level,)
+        return risk_level in allowed
 
 
 class RegisteredTool(Protocol):

@@ -1,5 +1,32 @@
 # Windows PC Manager Agent
 
+## Stage 4D4：安全残留清理（Windows 回收站限定）
+
+Stage 4D4 允许用户从 Stage 4D3 报告中勾选少量候选，但旧报告、旧勾选和旧 R0 确认都没有
+执行权限。应用只按候选 UUID 在本地重新解析精确路径，完整重验对象身份、目录内容摘要、
+Ownership、分类、用户数据保护、共享/近期活动、路径边界和目标卷回收站能力；原选择中只要有一项
+被阻止，整批都不会执行，也不会静默只处理“看起来安全”的子集。
+
+V1 仅允许 HIGH ownership 的 `PROGRAM_RESIDUAL`、app-specific `CACHE`、app-specific `LOG` 和
+有卸载前精确 target 证据的 obsolete `SHORTCUT`。Configuration、User Data、Database、Plugin/
+Extension、License/Application State、MSIX Package User Data、Unknown、共享路径、近期修改、
+reparse/junction/symlink、网络/不可靠卷和证据不足对象始终阻止。Owned 不等于 Eligible，用户确认
+不能覆盖确定性安全策略。
+
+可执行批次会显示 exact item set、文件/目录数、总大小、隐藏/重解析统计、R2 或
+R2_HIGH_IMPACT、`MOVE_TO_RECYCLE_BIN` 和 `MANUAL` 恢复。计划确认后再次完整扫描，临执行即时确认
+后还要做最终 TOCTOU 重验；两级确认绑定 identity、material、classification、protection、
+eligibility、risk 和 recovery capability，并且持久化、过期、只能消费一次。
+
+默认硬上限为 20 个所选项、10,000 个包含对象和 50 GiB；超过任一上限直接阻止。批次不超过
+5 个所选项、100 个包含对象、1 GiB 总量且单项不超过 512 MiB 时为 R2，超过普通阈值但仍在
+硬上限内时提升为 R2_HIGH_IMPACT。阈值可由受校验的本地设置收紧或调整，确认页始终显示实值。
+
+真实执行只调用复用的 Windows `IFileOperation` 回收站层。Shell 返回成功不等于最终成功；应用还
+要确认原文件系统 identity 已消失，并为成功项保存 RecoveryRecord。取消只停止未来项，崩溃后的
+active transaction 标记 `INTERRUPTED` 且绝不自动继续。没有永久删除 fallback、注册表清理、
+自动 Restore、配置/数据库/用户数据/MSIX LocalState/RoamingState 清理、管理员提权或 Shell 命令。
+
 ## Stage 4D3：卸载后可能残留的只读分析
 
 Stage 4D3 在 MSI、Vendor、winget 和 MSIX 受控卸载真正派发前，保存一份不含命令和文件内容的

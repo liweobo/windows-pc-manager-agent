@@ -1,5 +1,50 @@
 # Security model
 
+## Stage 4D4 residual cleanup policy
+
+Stage 4D4 uses default denial. HIGH ownership proves only that a path probably belongs to an uninstalled
+application; it does not prove the data is safe to remove. Eligibility is recomputed locally from fresh
+identity, complete bounded material metadata, classification, protection, path safety, post-uninstall
+activity and recovery capability.
+
+| Classification | Ownership required | Protection required | Additional V1 conditions | Execution | Risk |
+|---|---|---|---|---|---|
+| PROGRAM_RESIDUAL | HIGH | NONE/CAUTION | Exact original install/equally strong path; not shared/recent/reparse; full snapshot; Recycle Bin available | Conditional | R2/R2_HIGH_IMPACT |
+| CACHE | HIGH | NONE/CAUTION | Exact app-specific install/known-data evidence; no user-data descendant | Conditional | R2/R2_HIGH_IMPACT |
+| LOG | HIGH | NONE/CAUTION | Exact app-specific evidence; not a user library/shared log root | Conditional | R2/R2_HIGH_IMPACT |
+| SHORTCUT | HIGH | CAUTION | Exact shortcut path and target captured before uninstall; target now absent | Conditional | R2/R2_HIGH_IMPACT |
+| TEMPORARY_DATA | Any | Any | Deferred in V1 because temporary roots may be shared | Block | — |
+| CONFIGURATION | Any | Any | Dedicated future purge design required | Block | — |
+| USER_DATA / DATABASE | Any | Any | Residual cleanup is never a user-data deletion shortcut | Block | — |
+| PLUGIN_OR_EXTENSION / LICENSE_DATA / APPLICATION_STATE | Any | Any | May contain separately installed or valuable state | Block | — |
+| PACKAGE_USER_DATA | Any | Any | Includes MSIX LocalState/RoamingState/Settings | Block | — |
+| UNKNOWN | Any | Any | Missing evidence is not guessed | Block | — |
+
+Independent hard blockers include MEDIUM/LOW/UNKNOWN ownership, PROTECTED/STRONGLY_PROTECTED/UNKNOWN
+protection, shared or system location, post-uninstall modification, another user, sensitive/protected root,
+network/unsupported/removable capability, symlink/junction/reparse, incomplete snapshot, budget excess and
+identity/material change. A user's “force” wording cannot override them.
+
+The only action is `MOVE_TO_RECYCLE_BIN`. The manifest advertises maximum R2_HIGH_IMPACT and accepts only
+R2/R2_HIGH_IMPACT plans. Both confirmations bind plan, Preview, exact item set, identity, material,
+classification, ownership/protection, eligibility/path/activity, counts/bytes, risk and recovery capability.
+They expire and are atomically single-use. Any change requires a new selection, plan and both confirmations.
+
+Default hard limits are 20 selected items, 10,000 contained objects and 50 GiB. A batch remains R2 only at
+or below 5 selected items, 100 contained objects, 1 GiB total and 512 MiB for every single selected item;
+otherwise it is R2_HIGH_IMPACT while still inside the hard limits. Exceeding a hard limit blocks the whole
+batch. Validated local configuration may change these values, and the exact effective values enter Preview.
+
+The final write boundary accepts no path or command. It resolves an internal item reference after durable
+authorization, writes recovery evidence and mandatory audit, repeats identity/tree checks and calls the
+Windows Recycle Bin once. Failure never falls back to permanent deletion. Verification requires original
+identity disappearance plus a non-aborted, successful, explicitly recycled and VERIFIED_RECYCLED Shell
+result with a Recycle Bin item identifier.
+
+Cancellation before dispatch terminates the transaction; during a batch it stops future items only. A crash
+marks active work `INTERRUPTED` and expires approvals. Automatic restore is intentionally absent; recovery is
+MANUAL, so occupied original paths must be handled by Windows/the user and are never overwritten by Agent code.
+
 ## Stage 4D3 residual-analysis controls
 
 - Exactly three tools exist: `software.residuals.analyze`, `software.residuals.report` and

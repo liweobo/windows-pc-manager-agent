@@ -1,5 +1,179 @@
 # API reference
 
+## Stage 4D4 安全残留清理 API
+
+本节逐一说明 Stage 4D4 新增或改变的生产对象、函数和方法。旧 `ResidualReport`、旧候选勾选和
+Stage 4D3 R0 确认都只是用户意图；只有本节的 Fresh Revalidation、独立持久化计划、两级确认和
+reference-only 写工具能产生 Windows 回收站操作。所有真实清理的恢复等级均为 `MANUAL`，没有
+永久删除、注册表清理、自动 Restore 或 Shell 命令后备路径。
+
+### 领域模型 `domain.residual_cleanup`
+
+| 对象 / 函数 | 详细作用、输入输出和安全约束 |
+|---|---|
+| `CleanupEligibilityDecision` | 有限决策 `ELIGIBLE/BLOCKED/MANUAL_REVIEW`；只有 `ELIGIBLE` 能进入计划，用户确认不能覆盖另外两种结果。 |
+| `ResidualCleanupAction` | 只有 `MOVE_TO_RECYCLE_BIN`；模型中不存在 DELETE、PURGE 或 permanent action。 |
+| `ResidualCleanupTransactionState` | 表示 PREVIEW、两级确认、dispatch、逐项执行、验证和终态；`INTERRUPTED/BLOCKED/CANCELLED` 都没有自动继续边。 |
+| `ResidualCleanupItemState` | 单项 `PLANNED→VALIDATING→TRASHING→VERIFYING` 及 VERIFIED/FAILED/BLOCKED_CHANGED/SKIPPED；用于真实呈现部分完成。 |
+| `ResidualVerificationStatus` | 区分原 identity 消失、原 identity 消失但同路径出现新对象、原 identity 仍在和 UNKNOWN；不把 Shell 返回值直接当成功。 |
+| `ResidualCleanupRequest` | 只接受一个 `source_report_id` 与显式、唯一的 candidate UUID 集合；没有 path/action 字段，因此 UI/LLM 不能提供最终执行路径。 |
+| `ResidualCleanupRequest.require_unique_selection()` | Pydantic 构造期拒绝重复 UUID，防止同一对象重复进入批次。 |
+| `ResidualClassificationCount` / `ResidualProtectionCount` | 对完整 Fresh tree 中分类与保护等级做隐私最小化计数。 |
+| `ResidualMaterialSnapshot` | 保存 Stage 2B tree snapshot、文件/目录数、mtime 范围、分类/保护计数和禁止子项数；不读取内容。 |
+| `ResidualMaterialSnapshot.validate_counts()` | 强制文件+目录数、分类计数和保护计数都等于 tree object count，并拒绝倒置时间范围。 |
+| `ResidualMaterialSnapshot.canonical_digest()` | 哈希完整 material evidence，供 Preview、确认和最终 TOCTOU 对比。 |
+| `ResidualPathSafetyDecision` | 记录 exact context path、普通用户访问、shared/reparse/network 等独立路径结论。 |
+| `ResidualPathSafetyDecision.canonical_digest()` | 把所有 path gate 和 reason code 绑定到确认。 |
+| `ResidualRecentActivityDecision` | 保存卸载完成时间、tree 最新 mtime、是否在卸载后更新以及原因。 |
+| `ResidualRecentActivityDecision.canonical_digest()` | 绑定 recent-activity 事实；变化使确认失效。 |
+| `ResidualRecoverabilityDecision` | 包装 Stage 2B volume capability，恢复固定 `MANUAL`；capability 不确定即不可执行。 |
+| `ResidualRecoverabilityDecision.require_manual_recycle_bin()` | 拒绝把回收站恢复谎称 FULL 自动回滚。 |
+| `ResidualRecoverabilityDecision.canonical_digest()` | 哈希文件系统/卷/回收站能力和恢复声明。 |
+| `FreshResidualCandidate` | 从本地旧 UUID 解析后重新获得 identity、完整 material、分类、ownership、protection、path、activity 和 recoverability；旧 candidate 不能直接构造执行项。 |
+| `FreshResidualCandidate.validate_authority()` | ELIGIBLE 时要求所有 fresh evidence 完整、路径一致、ownership HIGH、保护 NONE/CAUTION、路径安全、无近期活动、回收站可用且无禁止子项。 |
+| `FreshResidualCandidate.invariant_digest()` | 排除观察时间，哈希全部执行相关事实，供多次扫描比较。 |
+| `ResidualCleanupAssessment` | 保留原选择中每一行及其 decision；mixed batch 不会静默丢弃 blocked 项。 |
+| `ResidualCleanupAssessment.validate_totals()` | 校验 selected/eligible/blocked/manual 数与实际 rows 完全一致。 |
+| `ResidualCleanupAssessment.all_eligible` | 仅当原选择全为 ELIGIBLE 时返回 true。 |
+| `ResidualCleanupAssessment.canonical_digest()` | 哈希包括临时 ID/时间的本次完整 assessment。 |
+| `ResidualCleanupAssessment.invariant_digest()` | 排除 assessment ID/生成时间，保留 request 和每项 fresh evidence，供 plan revalidation。 |
+| `PlannedResidualCleanupItem` | 为一个 Fresh candidate 分配内部 item/operation reference、顺序、固定 tool/action 和 MANUAL recovery。 |
+| `PlannedResidualCleanupItem.require_eligible_candidate()` | 拒绝 blocked/manual candidate、错误工具名、错误 action 或虚假回滚级别。 |
+| `PlannedResidualCleanupItem.canonical_digest()` | 哈希单项完整执行契约。 |
+| `ResidualCleanupPlan` | all-eligible、无重叠、显式选择的有序 batch；保存影响总数、大小、动态 R2 风险和有效期。 |
+| `ResidualCleanupPlan.validate_plan()` | 强制 R2/R2_HIGH、两级确认、MANUAL recovery、连续顺序、唯一 path/ref 和准确 material totals。 |
+| `ResidualCleanupPlan.canonical_digest()` | 生成持久化、确认与写守卫使用的 canonical plan hash。 |
+| `ResidualCleanupPreview` | 用户可见的短时 exact item set、identity/material 影响、风险和恢复摘要；只为可执行 batch 建立。 |
+| `ResidualCleanupPreview.validate_preview()` | 校验有效期、item count、MANUAL recovery 和 executable=true。 |
+| `ResidualCleanupPreview.canonical_digest()` | 哈希该次具体 Preview ID、内容和期限。 |
+| `ResidualCleanupTrashRequest` | 写工具唯一输入：transaction/plan/Preview/item reference；没有本地路径、命令或自由参数。 |
+| `ResidualCleanupTrashResult` | 低层返回原始 `FileState` 与 Windows Recycle Bin 证据，交给 service 独立验证。 |
+| `ResidualCleanupItemResult` | 保存每项真实终态、identity-aware verification、可选回收证据/recovery ID 和用户消息。 |
+| `ResidualCleanupExecutionReport` | 保存 batch 终态及 completed/failed/skipped 分项，防止把部分执行说成全成功或全取消。 |
+
+### Eligibility、Fresh Revalidation 与 Preview
+
+| 函数 / 方法 | 详细作用、输入输出和失败语义 |
+|---|---|
+| `ResidualCleanupPathPolicy.__init__(scope, ...)` | 注入 Stage 4D3 scope、网络检测、普通用户访问检测和测试 profile；不授予新 root。 |
+| `validate_candidate(candidate, evidence)` | 只把 old UUID 映射到完全相同的 context root/selected path，再执行语法、protected root、reparse component、network、shared/system/access 检查；返回 normalized path + decision。 |
+| `entry_rejection_reason(path, selected_root)` | 对 tree 每个后代检查 scope escape、保护路径、network 和 reparse；任一原因阻止整个候选。 |
+| `is_shared(path, evidence)` | 识别显式 shared signal、Common Files/Public/Shared 和过宽 ProgramData/Program Files root。 |
+| `ResidualRecentModificationPolicy.evaluate(context, material)` | 比较完整 tree 最新 mtime 与 durable uninstall completion；V1 对卸载后活动 fail closed。 |
+| `CleanupEligibilityPolicy.evaluate(...)` | 纯 Python 有限矩阵：仅 HIGH 的 PROGRAM_RESIDUAL/CACHE/LOG/SHORTCUT 且所有独立 gate 通过才 ELIGIBLE；配置、用户数据、数据库、插件、MSIX 数据、未知、shared/recent/reparse/unsupported volume 全部阻止。 |
+| `CleanupRiskPolicy.__init__(...)` | 接受可配置的普通 item/object/total/single-size 阈值，非法或非正配置直接拒绝。 |
+| `CleanupRiskPolicy.classify(...)` | 任一阈值超出即 `R2_HIGH_IMPACT`，否则 R2；分类不降低 Eligibility 要求。 |
+| `FreshResidualRevalidator.__init__(...)` | 注入 report repository、所有本地安全策略、identity/recycle adapters 和 hard batch/object/byte budgets。 |
+| `assess(request, cancellation)` | 只读取指定 report 的 selected UUID，拒绝跨报告/未知项，逐项做完整 metadata scan，保留 blocked rows 并审计前返回 Assessment。 |
+| `require_unchanged(expected, cancellation)` | 对一个内部 planned candidate 再做完整 scan，要求仍 ELIGIBLE 且 invariant digest 完全相同；最终 Shell 调用前使用。 |
+| `_assess_candidate(...)` | 顺序执行 old identity、path、fresh identity、material、classification、ownership、protection、activity、capability 和 eligibility；可预期异常转换为 blocked row，不猜测。 |
+| `_snapshot(source, evidence, cancellation)` | 使用显式 stack + `scandir/lstat` 完整遍历 selected tree，按路径排序构建稳定 digest，统计 hidden/system/reparse/offline/大小/mtime/分类/保护；不跟链接、不读内容、超限即阻止。 |
+| `_classify(path, evidence)` | 只按 selected root 及其相对 descendants 分类，避免外部父目录名错误影响候选，也不观察 sibling/parent。 |
+| `_protect(path, classification, evidence)` | 默认复用 UserDataProtectionPolicy；唯一窄例外是卸载前记录了 exact path+target 的 shortcut，仍仅降到 CAUTION，后续还要求 target 已不存在。 |
+| `_evidence_for(candidate, context)` | 要求 candidate scan root/source 在 context 中有且只有一条 exact evidence。 |
+| `_old_identity_matches(candidate)` | 用 `lstat` 比对 normalized path、device/inode、类型、大小和 mtime，并拒绝 reparse/symlink，阻止同路径新对象继承旧授权。 |
+| `_blocked(...)` | 构造不携带 fresh execution capability 的 BLOCKED row，分类/ownership/protection 均采用保守 UNKNOWN。 |
+| `ResidualCleanupPreviewEngine.__init__(...)` | 注入 revalidator、risk policy 以及 plan/Preview TTL。 |
+| `compile(assessment)` | mixed/blocked 或 parent-child overlap 直接拒绝；仅从全 eligible rows 生成固定 MOVE_TO_RECYCLE_BIN plan/Preview。 |
+| `revalidate(plan, request, cancellation)` | 第二/第三次完整扫描，逐 UUID 与 invariant digest 比较；identity/material/classification/protection/capability/risk 变化全部拒绝。 |
+| `require_current(plan, preview)` | 校验 plan/Preview 有效期、IDs、canonical digest、exact item-set digest 和 risk。 |
+| `_preview_for_plan(plan)` | 生成受 plan expiry 限制的新短时 Preview。 |
+| `_item_set_digest(items)` | 哈希 item/operation refs、顺序、candidate UUID/invariant、action/tool，防止增删换序。 |
+| `_reject_overlapping_items(assessment)` | 拒绝同时选择目录及其 child，避免重复/模糊 Shell 操作。 |
+| `ResidualCleanupSafetyValidator.review(plan)` | 独立检查 risk/recovery/action/evidence，以及 registry manifest 必须是唯一 residual trash 工具、max R2_HIGH、支持当前 risk、Preview 和两级确认。 |
+
+### 两级确认与持久化
+
+| 函数 / 方法 | 详细作用、输入输出和失败语义 |
+|---|---|
+| `ResidualCleanupConfirmationTier/State` | 区分 PLAN/RUNTIME 和 PENDING/APPROVED/REJECTED/EXPIRED/CONSUMED；两级是独立 durable records。 |
+| `ResidualCleanupConfirmation` | 绑定 transaction/plan/Preview/item set、identity、material、classification、eligibility、recovery capability、数量/大小/risk/object summary 和 expiry。 |
+| `ResidualCleanupConfirmationStore.save/get/update/consume_confirmation_pair` | Protocol：持久保存、精确读取、状态更新并原子消费 parent+runtime approval。 |
+| `ResidualCleanupConfirmationService.__init__(...)` | 注入 store、Preview engine、两种 TTL 和可测试时钟。 |
+| `request_plan(plan, preview)` | 先要求 current Preview，再创建第一级 pending approval。 |
+| `resolve(id, approved, plan, preview)` | 只解析 PENDING、未过期、全 binding 相同的确认；重复点击、changed plan/Preview 会拒绝。 |
+| `request_runtime(plan_confirmation_id, plan, runtime_preview)` | 只有仍有效且 APPROVED 的 parent 才能为新 Fresh Preview 创建短时即时确认。 |
+| `consume_runtime(runtime_id, plan, preview)` | 最后检查 parent/runtime bindings 与 expiry，再通过 store 原子消费两条记录；只能成功一次。 |
+| `_create(...)` | 计算所有证据 digest、具体对象/大小/MANUAL 文案和受 Preview 限制的 expiry。 |
+| `_require_binding(...)` | 比较所有 ID/digest/count/size/risk；PLAN 可接受 invariant 相同的新 runtime Preview，但不能接受 item/evidence 变化。 |
+| `_require_not_expired(...)` | 到期时先 durable 标记 EXPIRED 再抛确认错误。 |
+| `_identity_digest/_material_digest/_classification_digest/_eligibility_digest/_recovery_digest` | 分别哈希五组安全事实，使任何独立维度变化都能失效确认。 |
+| `ResidualCleanupRepository.__init__(database_path)` | 建立与 Stage 4D3 report、Stage 2B transaction 隔离的 engine/session；尚未建表。 |
+| `initialize()` | 创建 transaction/item/confirmation 表；重启时把所有非终态 batch 标记 INTERRUPTED、PENDING/APPROVED 确认标记 EXPIRED，并返回 interrupted IDs。 |
+| `create(plan, preview)` | 一个事务内保存 immutable plan、Preview 与全部 reference-only items；已有 active batch 时拒绝。 |
+| `bind_runtime_preview(plan, preview)` | 仅 PLAN_CONFIRMED 状态可替换为第二次 Fresh Preview，并重新计算每项 reference request digest。 |
+| `save_confirmation/get_confirmation/update_confirmation` | 持久化、读取和解析确认决定；PLAN approval 推进状态，reject/expiry 终止 batch。 |
+| `consume_confirmation_pair(plan_confirmation, runtime_confirmation)` | 在一个 SQLite transaction 中检查两者仍 APPROVED、同时改 CONSUMED 并把 batch 预留为 DISPATCHING。 |
+| `begin_item_validation(transaction_id, item_ref)` | 只允许当前 batch 的下一个 PLANNED item 进入最终验证。 |
+| `prepare_recovery(item_ref, recovery)` | Shell 前写入 PREPARED MANUAL recovery evidence 和 integrity digest。 |
+| `ResidualCleanupExecutionGuard.require(...)` | ToolRegistry 写边界：原子比较 authorization、plan/Preview/operation/item refs、argument digest、consumed runtime confirmation 和 item state，再标记 TRASHING/EXECUTING。 |
+| `mark_item_verifying(item_ref)` | 仅 Shell 已派发的 TRASHING item 能进入 VERIFYING。 |
+| `complete_item(result, recovery)` | 保存 terminal result 和可选 recovery evidence；非 terminal state 拒绝。 |
+| `skip_pending(transaction_id, message)` | failure/cancel 后只把未来 PLANNED rows 标为 SKIPPED，不改写已执行事实。 |
+| `transition(transaction_id, state, error_message)` | 推进 batch；终态不能重新打开为另一个状态。 |
+| `state/load_plan/load_preview/load_item` | 精确加载 durable typed state；cross-transaction item ref 拒绝。 |
+| `list_results(transaction_id)` | 按顺序返回已有 terminal rows，不为未触及 interrupted item 伪造结果。 |
+| `list_recovery(transaction_id)` | 校验 recovery payload digest 后返回内部全部记录；公开 service 只显示 AVAILABLE 且有 recycle identifier 的记录。 |
+| `request_for_item(plan, preview_id, item)` | 生成唯一 reference-only tool request，不暴露 path。 |
+| `_item_row/_confirmation_row` | 把 typed model 转成带 digest/state 的 SQL rows。 |
+| `_transaction/_item/_require_initialized` | 内部精确 lookup 和 fail-closed repository health gate。 |
+| `close()` | dispose engine 并禁用后续访问。 |
+
+### Recycle Bin 工具、编排、验证与审计
+
+| 函数 / 方法 | 详细作用、输入输出和失败语义 |
+|---|---|
+| `VerifiedRecycleBinExecutor.__init__(identity_platform, recycle_platform)` | Stage 2B 与 4D4 共用的 identity-aware Recycle Bin primitive；没有 permanent API dependency。 |
+| `recycle(source, expected_state, expected_snapshot, snapshotter, cancellation)` | Shell 前检查取消、identity、完整 tree digest，再检查取消并调用一次 `RecycleBinPlatform.recycle`；失败直接上抛，无 unlink/rmtree fallback。 |
+| `SoftwareResidualPrepareCleanupTool.manifest` | `software.residuals.prepare_cleanup`：R0、read-only、可取消，只接受 report/candidate references。 |
+| `SoftwareResidualPrepareCleanupTool.execute(...)` | 强校验 request 后调用 Fresh assessment。 |
+| `SoftwareResidualTrashTool.manifest` | `software.residuals.trash`：manifest 最大 R2_HIGH、允许实际 R2/R2_HIGH、双确认、Preview、MANUAL、batch 1。 |
+| `SoftwareResidualTrashTool.execute(...)` | 从 durable item ref 内部解析 path/evidence，调用 `require_unchanged` 和 shared executor，返回 Shell 证据；调用者不能改 path。 |
+| `PreparedResidualCleanup` | 把 request/assessment/plan/review/Preview/第一级 pending confirmation 作为不可变 UI state。 |
+| `RuntimeResidualCleanup` | 把第二次 Fresh Preview 与 pending immediate confirmation 组合。 |
+| `ResidualCleanupService.__init__(...)` | 组合 registry、Preview、独立 reviewer、confirmation、transaction repository、identity verifier 与 mandatory audit。 |
+| `assess(request, cancellation)` | 只经 registered R0 tool 做 Fresh scan 并记录 aggregate audit。 |
+| `prepare(assessment)` | 编译 all-eligible plan、独立 review、durable create、创建 PLAN confirmation 并审计；尚不调用 Recycle Bin。 |
+| `resolve_plan_confirmation(prepared, approved)` | 持久解析第一级决定并审计。 |
+| `request_runtime_confirmation(prepared, cancellation)` | 要求 PLAN_CONFIRMED，做第二次 Fresh scan；变化时把 batch BLOCKED 并审计，不允许旧 active plan 卡住或重用。 |
+| `resolve_runtime_confirmation(runtime, approved)` | 持久解析对象级即时决定并审计；仍不执行。 |
+| `execute(runtime, cancellation)` | 要求 exact awaiting-runtime state；第三次 whole-batch revalidation 后原子消费两级确认，再逐项 write-ahead recovery→mandatory audit→guarded tool→identity verify；failure/change/cancel 停止未来 items。 |
+| `recovery_records(transaction_id)` | 只返回 VERIFIED 成功项的 AVAILABLE MANUAL recovery records；失败项不会显示虚假恢复能力。 |
+| `_verify_result(...)` | 结合 non-aborted HRESULT、recycle identifier 与原 path fresh identity；区分同 identity、不同新 identity、已不存在和 inspect unknown。 |
+| `_complete_pre_dispatch_failure(...)` | 对缺失 fresh evidence 的 item 保存 BLOCKED_CHANGED 并审计，不派发 Shell。 |
+| `_finalize(...)` | 从 durable per-item rows 计算 COMPLETED/PARTIALLY_COMPLETED/CANCELLED/FAILED，保存终态并返回 truthful report。 |
+| `ResidualCleanupAuditLogger.assessed/previewed/confirmation_resolved` | 记录 selected UUID、aggregates、plan/Preview/证据 digests 和确认状态；不存内容或明文路径。 |
+| `workflow_blocked(...)` | 记录 runtime/final revalidation fail-closed phase 和异常类型，不记录可能含本地数据的错误文本。 |
+| `item_started(...)` | mandatory pre-dispatch audit；记录 path digest、identity metadata 和 PREPARED recovery，写失败会阻止 Shell。 |
+| `item_completed(...)` | 保存脱敏 per-item terminal evidence；排除 source path、Recycle Bin identifier 和 Shell text。 |
+| `transaction_completed(...)` | 保存 batch totals 与脱敏 item summaries。 |
+| `_path_digest(path)` | 对 normcase+abspath 做 SHA-256，仅用于本地审计关联，不作为授权。 |
+| `_item_result_payload(result)` | 生成无 path/identifier/Shell text 的 audit JSON。 |
+
+### Qt UI、Runtime 与配置
+
+| 函数 / 方法 | 详细作用、输入输出和失败语义 |
+|---|---|
+| `ResidualCleanupPrepareWorker.run/cancel` | 后台做第一次 Fresh assessment/plan；mixed batch 返回 blocked rows，取消协作停止 metadata traversal。 |
+| `ResidualCleanupRuntimeWorker.run/cancel` | 后台做第二次 Fresh scan 并创建即时确认；不写文件。 |
+| `ResidualCleanupExecuteWorker.run/cancel` | 后台运行逐项 transaction；取消只停止未来项，不强行打断正在进行的 Shell 调用。 |
+| `require_cleanup_prepared/require_cleanup_runtime/require_cleanup_report` | Qt signal payload type guards；错误 worker payload 显式失败。 |
+| `ResidualCleanupDialog.__init__()` | 以 old report UUID selection 启动独立 Fresh workflow，默认取消，窗口不直接调用工具。 |
+| `_build_ui()` | 构建 eligibility 表、影响/风险/MANUAL 文案和两个阶段复用的显式按钮；不存在 permanent delete。 |
+| `_start_prepare/_prepared_completed` | 启动后台扫描；blocked/mixed 显示逐项原因并停止，all-eligible 才显示第一次确认。 |
+| `_show_plan_confirmation/_primary_clicked` | 先处理 PLAN approval+第二次扫描，再处理 RUNTIME approval+后台 execution；一次点击不能跨越两级。 |
+| `_runtime_prepared/_execution_completed` | 显示即时对象数量/大小/风险/手动恢复，以及真实 success/failure/skipped 结果。 |
+| `_populate_assessment` | 展示 Fresh classification、ownership、protection、file/dir/size、recoverability 和 reason codes。 |
+| `_failed/_cancel_clicked` | 默认安全停止；执行中 cancel 只标记后续 item，确认阶段 cancel durable 记录 reject。 |
+| `_require_prepared/closeEvent` | 检查内部 state；关闭时协作取消 worker，不后台自动继续。 |
+| `_format_size/_completion_html` | 只负责显示；completion 明确 MANUAL recovery 和“没有永久删除”。 |
+| `ResidualAnalysisDialog._update_cleanup_button/_selected_cleanup_ids/_open_cleanup` | Stage 4D3 页面只把用户勾选转换成 UUID intent 并打开独立 D4 dialog；不传 path、不产生 R2 token。 |
+| `_potential_cleanup_intent(candidate)` | 只隐藏旧报告中明显受保护项；结果不声称 eligible，Fresh policy 仍是唯一 authority。 |
+| `ApplicationRuntime.create_residual_cleanup_services()` | 组合独立 repository、Fresh policies、两个 registered tools、write guard、confirmation、audit 与 Windows identity/recycle adapters。 |
+| `ApplicationRuntime.close()` | 同时关闭 D4 repository；restart initialization 已先把 active work标为 INTERRUPTED。 |
+| `Settings.residual_cleanup_*` | 配置 hard selected/object/byte budgets、R2 normal thresholds 和 runtime confirmation TTL；变更会影响新计划，不会修改既有 confirmed plan。 |
+| `ToolManifest.allowed_risk_levels` / `supports_risk(risk)` | 支持一个 manifest 声明安全最大风险并有限允许 R2/R2_HIGH dynamic plan risk；R0/R1/R3/R4 混用在模型校验期拒绝。 |
+
 ## Stage 4D2C1 受控 winget Package 卸载 API
 
 本节逐一说明 Stage 4D2C1 新增的生产对象、函数和方法。执行边界只有
