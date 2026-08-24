@@ -40,6 +40,7 @@ from pc_manager_agent.orchestration.software_msi_validation import MsiProductVal
 from pc_manager_agent.orchestration.software_residual_analyzer import SoftwareResidualAnalyzer
 from pc_manager_agent.orchestration.software_target_resolver import SoftwareTargetResolver
 from pc_manager_agent.orchestration.software_uninstall_verifier import MsiUninstallVerifier
+from pc_manager_agent.orchestration.uninstall_context import UninstallContextRecorder
 from pc_manager_agent.persistence.software_uninstall_execution import MsiUninstallRepository
 from pc_manager_agent.safety.software_uninstall_execution_policy import (
     SoftwareUninstallExecutionPolicy,
@@ -118,6 +119,7 @@ class MsiUninstallService:
         *,
         process_is_elevated: Callable[[], bool],
         max_items: int = 5_000,
+        context_recorder: UninstallContextRecorder | None = None,
     ) -> None:
         self._resolver = resolver
         self._capability = capability
@@ -135,6 +137,7 @@ class MsiUninstallService:
         self._audit = audit
         self._process_is_elevated = process_is_elevated
         self._max_items = max_items
+        self._context_recorder = context_recorder
 
     def prepare(
         self,
@@ -343,6 +346,11 @@ class MsiUninstallService:
             arguments_digest=arguments_digest(request_arguments),
             runtime_confirmation_id=runtime_confirmation_id,
         )
+        context_id = (
+            self._context_recorder.capture_msi(preview)
+            if self._context_recorder is not None
+            else None
+        )
         try:
             result = self._registry.execute(
                 plan.tool_name,
@@ -370,6 +378,12 @@ class MsiUninstallService:
                 error_code=type(exc).__name__,
                 mutation_may_have_started=state is MsiUninstallTransactionState.EXECUTING,
             )
+            if self._context_recorder is not None:
+                self._context_recorder.finalize(
+                    context_id,
+                    verification_state="failed",
+                    verified_removed=False,
+                )
             raise
         if result.installer.category is MsiInstallerResultCategory.MONITORING_DETACHED:
             self._repository.transition(
@@ -424,6 +438,13 @@ class MsiUninstallService:
                             }
                         )
                     }
+                )
+            if self._context_recorder is not None:
+                self._context_recorder.finalize(
+                    context_id,
+                    verification_state=MsiVerificationState.INTERRUPTED.value,
+                    verified_removed=False,
+                    completed_at=result.installer.finished_at,
                 )
             return report
         self._repository.transition(
@@ -485,6 +506,20 @@ class MsiUninstallService:
                         }
                     )
                 }
+            )
+        if self._context_recorder is not None:
+            self._context_recorder.finalize(
+                context_id,
+                verification_state=verification.state.value,
+                verified_removed=verification.state
+                in {
+                    MsiVerificationState.VERIFIED_REMOVED,
+                    MsiVerificationState.REMOVED_WITH_UNEXPECTED_INSTALLER_RESULT,
+                },
+                completed_unverified=(
+                    verification.state is MsiVerificationState.COMPLETED_UNVERIFIED
+                ),
+                completed_at=result.installer.finished_at,
             )
         return report
 

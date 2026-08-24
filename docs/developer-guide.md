@@ -1,5 +1,43 @@
 # Developer guide
 
+## Stage 4D3 development
+
+The Stage 4D3 graph begins in `UninstallContextRecorder`, which is optionally injected into each D2
+service. Capture occurs immediately before the already-authorized adapter dispatch; finalization
+records the verification outcome. Do not add commands, raw uninstall metadata, file contents or
+guessed paths to this context.
+
+`ResidualAnalysisPlanCompiler` accepts one transaction and derives scope only through
+`ResidualScanScopePolicy`. `ResidualSafetyReviewer` must keep the exact three-tool order and verify
+manifest risk/read-only/rollback, context/scope/plan digests and zero estimated modifications. A model
+or UI must never inject a path or tool name.
+
+Add a collector only when it owns one finite `ResidualSource`, accepts exact `ContextPathEvidence`,
+shares `ResidualCollectionBudget`, uses metadata-only no-follow APIs and returns fail-soft issues.
+Classification, ownership and protection belong in their separate deterministic safety modules.
+Ownership evidence must never emit a cleanup recommendation, and new user-data classes must default
+to at least PROTECTED.
+
+Useful focused commands:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_software_residual_models.py tests/unit/test_software_residual_policies.py
+uv run pytest tests/integration/test_software_residual_analysis.py tests/security/test_software_residual_safety.py
+uv run pytest tests/gui/test_residual_analysis_dialog.py
+uv run pytest tests/performance/test_software_residual_performance.py -q -s
+```
+
+The zero-destructive test must continue to monitor Python delete APIs and the registry must expose no
+cleanup/trash tool. Export is the only Stage 4D3-created file and must remain exclusive-create,
+local-only and separately audited. Update the API reference whenever any public/private Stage 4D3
+function changes because safety depends on the exact call boundary.
+
+Optional bounded settings are `PC_MANAGER_RESIDUAL_MAX_ROOTS` (default 16, maximum 32),
+`PC_MANAGER_RESIDUAL_MAX_OBJECTS` (default/maximum 25,000) and
+`PC_MANAGER_RESIDUAL_TIMEOUT_SECONDS` (default 60, maximum 600). Lower values are valid safety
+choices; values beyond model bounds prevent application configuration from loading.
+
 ## Stage 4D2C1 development
 
 实现位于 `domain/winget_uninstall.py`、`orchestration/winget_*`、`safety/winget_*`、

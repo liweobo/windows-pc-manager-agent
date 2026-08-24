@@ -1,5 +1,24 @@
 # Windows PC Manager Agent
 
+## Stage 4D3：卸载后可能残留的只读分析
+
+Stage 4D3 在 MSI、Vendor、winget 和 MSIX 受控卸载真正派发前，保存一份不含命令和文件内容的
+`UninstallContext`。卸载结束后，用户可点击“分析可能残留”，确认一个 R0 计划，并只检查该事务
+已经可靠记录的精确安装目录、应用数据、快捷方式、服务工件或 MSIX Package Family 路径。它不
+会扫描整个磁盘，也不会根据软件名搜索 Documents、Desktop、Downloads、ProgramData 或 AppData。
+
+报告按 Program Residual、Cache、Log、Configuration、User Data、Database、Plugin、Shortcut、
+Package User Data、Unknown 等确定性类别展示大小、稳定身份、Ownership Evidence、Confidence、
+保护等级、风险标志与修改时间。名称相似永远不是强归属证据；即使 Ownership 为 HIGH，也不表示
+数据可以删除。Documents、项目/虚拟环境、数据库、配置、插件、Roaming 和 MSIX LocalState 默认
+受保护或强保护。
+
+本阶段只注册三个 R0 工具：`software.residuals.analyze`、`software.residuals.report` 和
+`software.residuals.inspect`。扫描只读元数据，不打开文件/数据库/配置/日志内容；遇到 symlink、
+junction 或 reparse point 会记录并跳过。用户可在本地导出新的 JSON/CSV 报告或安全打开 Explorer
+定位对象，但没有删除、清理、移动、回收站或注册表写入口。Stage 4D3 的确认和报告不能在未来
+复用为清理授权。
+
 ## Stage 4D2C1：受控 winget Package 卸载
 
 Stage 4D2C1 新增且只新增一个写工具：`software.uninstall.winget`。它只处理一个精确的
@@ -211,7 +230,7 @@ restore claim.
 
 ## 当前版本
 
-Stage 4D2B / `0.1.0` 开发版本在此前阶段基础上包含：
+Stage 4D3 / `0.1.0` 开发版本在此前阶段基础上包含：
 
 - PySide6 主窗口和系统托盘；
 - 基础聊天、计划、风险提示与确认界面；
@@ -226,6 +245,9 @@ Stage 4D2B / `0.1.0` 开发版本在此前阶段基础上包含：
 - 双重一次性确认、SQLite 卸载事务、固定 `msiexec` 参数适配器和退出码分类；
 - 对高可信 current-user Vendor `.exe` 的严格解析、身份/签名/参数验证和 shell-free 启动；
 - MSI/Vendor 互斥事务、机制路由、厂商 UI 监控、fresh inventory 验证和只报告残留；
+- 官方源 current-user winget 与 current-user ordinary MSIX/Store App 的窄受控卸载；
+- 四种卸载机制的统一 `UninstallContext`、精确路径残留元数据报告、Ownership Evidence、
+  Confidence 与独立用户数据保护；
 - 无进程终止/服务停止/提权/重启/残留删除的 preflight、监控和后置验证；
 - 用户管理的授权目录、常用目录与自定义禁止目录；
 - 不跟随符号链接/联接点/重解析点的流式只读目录元数据扫描；
@@ -243,8 +265,9 @@ Stage 4D2B / `0.1.0` 开发版本在此前阶段基础上包含：
 
 它不会覆盖或永久删除，不会执行跨卷移动、管理员提权或 Shell。Stage 2A 只允许
 已授权本地目录内的 R1 可逆操作，Stage 2B 仅支持回收站，Stage 4A 仅支持上述受控进程生命
-周期操作，Stage 4B/4C1/4C2 也只开放各节列出的窄工具；Stage 4D2A 与 4D2B 各自只有一个
-专用卸载工具，不存在通用软件、注册表、服务、包管理器或命令接口。
+周期操作，Stage 4B/4C1/4C2 也只开放各节列出的窄工具；Stage 4D2A/B/C1/C2 各自只有一个
+专用卸载工具，Stage 4D3 只有三个只读报告工具；不存在通用软件、注册表、服务、包管理器、
+残留清理或命令接口。
 
 ## 安装
 

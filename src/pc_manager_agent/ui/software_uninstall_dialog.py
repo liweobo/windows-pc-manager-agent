@@ -32,7 +32,9 @@ from pc_manager_agent.domain.software_uninstall_execution import (
     MsiUninstallExecutionReport,
     MsiUninstallPlan,
     MsiUninstallPreview,
+    MsiVerificationState,
 )
+from pc_manager_agent.ui.residual_analysis_dialog import ResidualAnalysisDialog
 from pc_manager_agent.ui.software_uninstall_workers import (
     MsiRuntimePrepareWorker,
     MsiUninstallExecuteWorker,
@@ -66,6 +68,7 @@ class SoftwareUninstallDialog(QDialog):
         self._cancellable_worker: object | None = None
         self._stage = "PREPARING"
         self._close_when_safe = False
+        self._residual_dialog: ResidualAnalysisDialog | None = None
         self.setWindowTitle("受控 MSI 软件卸载 — Stage 4D2A")
         self.resize(960, 760)
         self.setModal(False)
@@ -91,13 +94,17 @@ class SoftwareUninstallDialog(QDialog):
         buttons = QHBoxLayout()
         self.primary_button = QPushButton("等待安全审查")
         self.cancel_button = QPushButton("取消（默认）")
+        self.residual_button = QPushButton("分析可能残留")
+        self.residual_button.setVisible(False)
         self.primary_button.setEnabled(False)
         self.primary_button.setAutoDefault(False)
         self.cancel_button.setDefault(True)
         self.cancel_button.setAutoDefault(True)
         self.primary_button.clicked.connect(self._primary_clicked)
         self.cancel_button.clicked.connect(self._cancel_clicked)
+        self.residual_button.clicked.connect(self._open_residual_analysis)
         buttons.addStretch(1)
+        buttons.addWidget(self.residual_button)
         buttons.addWidget(self.primary_button)
         buttons.addWidget(self.cancel_button)
         layout.addWidget(self.risk_label)
@@ -307,6 +314,28 @@ class SoftwareUninstallDialog(QDialog):
         self.primary_button.setText("关闭")
         self.primary_button.setEnabled(True)
         self.cancel_button.setText("关闭")
+        self.residual_button.setVisible(
+            report.verification.state
+            in {
+                MsiVerificationState.VERIFIED_REMOVED,
+                MsiVerificationState.COMPLETED_UNVERIFIED,
+                MsiVerificationState.REMOVED_WITH_UNEXPECTED_INSTALLER_RESULT,
+            }
+        )
+
+    @Slot()
+    def _open_residual_analysis(self) -> None:
+        """Open a fresh R0 plan; the uninstall confirmation is never reused."""
+        plan = self._plan
+        if plan is None:
+            return
+        dialog = ResidualAnalysisDialog(
+            self._runtime,
+            plan.transaction_id,
+            parent=self,
+        )
+        self._residual_dialog = dialog
+        dialog.show()
         self.cancel_button.setEnabled(True)
 
     def _show_preview(self, preview: MsiUninstallPreview, *, immediate: bool) -> None:

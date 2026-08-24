@@ -56,6 +56,9 @@ class AppSettings(BaseModel):
     vendor_long_running_seconds: float = Field(default=900.0, ge=30.0, le=7_200.0)
     winget_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
     winget_monitor_poll_seconds: float = Field(default=0.25, ge=0.05, le=5.0)
+    residual_max_roots: int = Field(default=16, ge=1, le=32)
+    residual_max_objects: int = Field(default=25_000, ge=1, le=25_000)
+    residual_timeout_seconds: float = Field(default=60.0, gt=0, le=600.0)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -159,6 +162,9 @@ class AppSettings(BaseModel):
             "winget_monitor_poll_seconds": os.getenv(
                 "PC_MANAGER_WINGET_MONITOR_POLL_SECONDS", "0.25"
             ),
+            "residual_max_roots": os.getenv("PC_MANAGER_RESIDUAL_MAX_ROOTS", "16"),
+            "residual_max_objects": os.getenv("PC_MANAGER_RESIDUAL_MAX_OBJECTS", "25000"),
+            "residual_timeout_seconds": os.getenv("PC_MANAGER_RESIDUAL_TIMEOUT_SECONDS", "60"),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
         if data_directory:

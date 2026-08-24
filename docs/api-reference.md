@@ -5396,3 +5396,181 @@ FileOperationPlanner.plan_intent (可选)
 | `_show_preview` | 两次明确展示 PFN、Family、版本、范围、类型、LocalState/依赖/Roamable 和 NONE 回滚。 |
 | `_busy/_failed/_cancel_clicked/_required/closeEvent` | 管理忙碌/失败/取消/状态完整性/窗口关闭；不把关闭解释为强杀。 |
 | `_result_html(result)` | 输出净化的部署类别、验证状态、理由和无额外数据删除声明。 |
+
+## Stage 4D3 卸载后残留分析 API
+
+本节覆盖 Stage 4D3 新增的每个函数和方法。所有“扫描”都只读取文件系统元数据；除用户主动
+选择的本地报告导出外，没有函数会创建、修改、移动、回收或删除候选对象。
+
+### Domain、身份与模型脱敏
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `ContextPathEvidence.validate_related_target()` | Pydantic 后置校验。仅允许 `SHORTCUT` 来源携带卸载前已记录的 target 路径；其他来源伪造 target 时抛 `ValueError`。无 I/O。 |
+| `UninstallContext.validate_path_evidence()` | 拒绝重复的 path/source 证据和“没有完成时间却声称完成/已验证”的矛盾上下文。失败抛 `ValueError`，防止不可信上下文进入扫描。 |
+| `UninstallContext.canonical_digest()` | 对软件身份、卸载机制、精确路径、验证状态和警告生成 SHA-256；用于计划/报告陈旧性绑定，不读取磁盘。 |
+| `UninstallContext.eligible_for_analysis` | 只在事务完整且为 `verified_removed` 或精确 `completed_unverified` 时返回 `True`；失败/中断/草稿返回 `False`。 |
+| `ResidualIdentity.canonical_digest()` | 对规范化路径、device/file ID、对象类型、大小和 mtime-ns 生成稳定摘要；不使用文件内容哈希。 |
+| `ResidualReport.enforce_report_only()` | 强制 `deletion_performed=false`，校验所有 Candidate 属于本 Report 且摘要计数一致；破坏性/串报数据抛 `ValueError`。 |
+| `ResidualReport.to_model_payload()` | 把本地完整报告转换为 provider-neutral、路径脱敏、metadata-only 的解释载荷；只保留分类、大小、confidence、evidence code、protection 和 risk flag。 |
+| `ResidualModelPayload.enforce_read_only_payload()` | 防止模型载荷声称执行过删除；`deletion_performed=true` 抛 `ValueError`。 |
+| `_redacted_model_path(path)` | 按最长已知环境根将路径转为 `%LOCALAPPDATA%`、`%APPDATA%`、`%USERPROFILE%`、`%PROGRAMDATA%` 或 `%PROGRAMFILES%`；无法映射时只保留 `<LOCAL_PATH>/<leaf>`。无磁盘 I/O。 |
+
+主要不可变模型还包括 `UninstallMechanism`、`ResidualSource`、`ResidualClassification`、
+`OwnershipConfidence`、`OwnershipEvidenceStrength`、`UserDataProtectionLevel`、
+`ResidualObjectType`、`ResidualRecommendation`、`ResidualAnalysisStatus`、`OwnershipEvidence`、
+`ResidualIssue`、`ResidualCandidate`、`ResidualReportSummary`、三组工具 Request/Result，以及只供模型
+解释的 `ResidualModelCandidate`/`ResidualModelPayload`。这些模型本身不持有执行器。
+
+### 卸载上下文记录
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `UninstallContextRecorder.__init__(repository)` | 注入独立 SQLite 残留仓库；构造时不查询卸载器、不访问文件内容。 |
+| `capture_msi(preview)` | 在 MSI 真正派发前复制 transaction、Software identity、ProductCode、Publisher、scope/architecture 和精确 InstallLocation；保存失败记录净化警告并返回 `None`，不会改变 MSI 授权。 |
+| `capture_vendor(preview)` | 复制 Vendor 软件身份和精确 InstallLocation；明确不读取/存储 raw/quiet uninstall string 或 argv。失败返回 `None`。 |
+| `capture_winget(preview)` | 复制官方 source Package ID、映射后的 Software identity/version/scope 和精确 InstallLocation；不存 `winget` 命令。 |
+| `capture_msix(preview)` | 复制 Package Family/Full Name/版本/架构/current-user scope、InstalledPath，并从安全 leaf Family 构造精确 `%LOCALAPPDATA%/Packages/<family>` 强保护路径。 |
+| `finalize(context_id, verification_state, verified_removed, completed_unverified, completed_at)` | 卸载验证后把草稿原子更新为真实终态；仓库不可用返回 `False`，不伪造残留可用性。 |
+| `_store_draft(context)` | Best-effort 持久化一个预派发上下文并返回 UUID；只记录错误类型和 transaction UUID。 |
+| `_install_location_evidence(path, publisher, display_name)` | 把一个非空精确安装路径变成 `INSTALL_LOCATION` 强证据；不会推测相邻目录。 |
+| `_looks_like_shared_publisher_root(path, publisher, display_name)` | 规范化 leaf/publisher/product 文本；若精确路径只是 publisher 根而非产品根，标为 shared，降低 confidence。无 I/O。 |
+| `_missing_path_warning(known)` | 没有精确路径时生成“不按名称搜索”的警告；不尝试补猜。 |
+| `_msix_package_data_path(family_name)` | 仅接受不含分隔符、`.`/`..` 的单一 Family leaf；从本地环境构造当前用户 Package 路径，非法或缺环境返回 `None`。 |
+
+MSI、Vendor、winget、MSIX 四个 `execute()` 现在仅多出 recorder hook：适配器调用前 capture，
+验证/异常后 finalize。四个卸载对话框的 `_completed()` 只在合格终态显示入口；
+`_open_residual_analysis()` 仅把真实 transaction UUID 交给 Stage 4D3 对话框。
+
+### Scope、分类、Ownership 与保护
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `ResidualScanScopePolicy.__init__(max_roots, network_path_detector, extra_forbidden)` | 配置 1–32 个精确根、网络路径探针和附加禁区；错误上限抛 `ValueError`。 |
+| `validated_roots(context)` | 要求 eligible context、非空且有界的 exact evidence；规范化、去重，并拒绝 drive/profile/Program Files/ProgramData/AppData/用户库等宽根、traversal、UNC/network、敏感/禁止根。失败抛 `ResidualScopeError` 且扫描尚未开始。 |
+| `validate_existing_root(root)` | 枚举前重新检查语法、禁区、网络、父链 reparse、`lstat` 可用性和 identity 合法性；任何不确定 fail-closed。 |
+| `entry_rejection_reason(path, root)` | 对每个发现项返回 `unsafe-path-syntax`、`scope-escape`、`protected-path`、`network-path`、`reparse-point` 或 `None`；不跟随链接。 |
+| `scope_digest(context)` | 对已验证根及 source/depth 约束生成 SHA-256，供 Plan Reviewer 比对。 |
+| `_is_forbidden(path)` | 通过共享 `PathPolicy` 判断一个候选是否命中默认/自定义禁区。 |
+| `_is_broad_root(path)` | 精确比较 drive、profile、Windows、Program Files、ProgramData、AppData、Desktop/Documents/Downloads 根；只允许更窄的 app-specific 证据。 |
+| `_validate_syntax(path)` | 要求绝对、本地、无 `..`、无尾随空格/点的路径并做 lexical normalization；不调用 `resolve()` 跟随链接。 |
+| `_reject_reparse_components(path)` | 从最接近的现存祖先向上检查每个组件；发现 symlink/junction/reparse 抛 `ResidualScopeError`。 |
+| `ResidualClassifier.classify(path, source, expected)` | 只用有限 source/component/suffix 规则确定分类和 reason codes；Package/shortcut/database/user-data 规则优先，绝不返回删除建议。 |
+| `ResidualOwnershipEvaluator.evaluate(root_evidence, shared_location)` | 从 exact pre-uninstall path、Package/shortcut target 等结构证据产生 confidence/evidence；shared location 降为 MEDIUM。 |
+| `ResidualOwnershipEvaluator.weak_name_only()` | 显式构造 LOW + `name-similarity-only`，保证名称相似不能升级为 HIGH。 |
+| `UserDataProtectionPolicy.__init__(user_profile)` | 建立 Documents/Desktop/Downloads/Pictures/Music/Videos/Saved Games、Roaming 等保护根；可注入合成 profile 测试。 |
+| `UserDataProtectionPolicy.protect(path, classification)` | 独立于 Ownership 应用最高保护：用户数据/数据库/Package data/开发环境等为 STRONGLY_PROTECTED，配置/插件/Unknown 至少 PROTECTED，其余至少 CAUTION。 |
+
+### 有界 Collector
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `ResidualCollectionBudget.__post_init__()` | 校验 1–25,000 对象和 0–600 秒上限，记录单调起点。 |
+| `ResidualCollectionBudget.consume()` | 在每个被报告对象前消费一个名额；取消/超时/达到上限时设置真实终态并返回 `False`。 |
+| `ResidualCollectionBudget.can_continue()` | 动态检查协作取消、超时和既有 stop status；无阻塞等待。 |
+| `ResidualCollector.supports(source)` | Collector 协议：声明唯一负责的 source。 |
+| `ResidualCollector.collect(evidence, report_id, budget, uninstall_verified)` | Collector 协议：在共享预算内返回 Candidate/Issue，不得写系统。 |
+| `SourceResidualCollector.__init__(sources, scope, classifier, ownership, protection)` | 注入固定 source 集和四个确定性安全组件。 |
+| `SourceResidualCollector.supports(source)` | 对 source 做有限集合判断。 |
+| `SourceResidualCollector.collect(...)` | 对 exact root 执行 `lstat`、root identity revalidation、bounded `scandir`；目录/文件只读元数据，AccessDenied 等记 Issue，reparse 只报告不遍历。 |
+| `SourceResidualCollector._candidate(...)` | 从一份 `stat_result` 构造 `ResidualIdentity`、分类、evidence/confidence、protection、recent/shared/unverified flags 和非删除 recommendation。 |
+| `SourceResidualCollector._record_issue(issues, issue)` | 把 fail-soft issue 限制在 5,000 条，防止错误风暴耗尽内存。 |
+| `InstallLocationResidualCollector.__init__(...)` | 只绑定 classic/MSIX exact install location source。 |
+| `KnownAppDataResidualCollector.__init__(...)` | 只绑定卸载前已知的 app-specific data source。 |
+| `ShortcutResidualCollector.__init__(...)` | 只绑定已知 `.lnk` 路径；不执行、也不深读快捷方式。 |
+| `MsixDataResidualCollector.__init__(...)` | 只绑定 Package Family 映射的 exact Package data，后续统一强保护。 |
+| `KnownServiceArtifactCollector.__init__(...)` | 只绑定先前已知的 service artifact path，不查询/修改服务。 |
+| `KnownConfigurationResidualCollector.__init__(...)` | 只绑定明确 configuration path，并让保护策略优先。 |
+
+### Plan、审查、分析与应用服务
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `ResidualAnalysisPlanCompiler.__init__(scope, max_objects, timeout_seconds)` | 注入本地 scope policy 和有界资源配置；非法配置由模型/预算校验拒绝。 |
+| `compile(user_goal, context)` | 从 eligible context 构造固定 analyze→report→inspect R0 Plan；scope 只能来自 policy，预计修改/删除恒为 0。 |
+| `ResidualSafetyReviewer.__init__(registry, scope)` | 注入当前 ToolRegistry 和独立 scope policy。 |
+| `review(plan, context)` | 验证工具恰为三个固定名称、均已注册/R0/read-only/NONE、无 runtime confirmation，且 plan/context/scope/argument digest 与零影响一致；返回结构化 issues，不执行。 |
+| `ResidualAnalyzer.__init__(repository, scope, collectors)` | 注入持久层、scope 和固定 collector 集；构造时无扫描。 |
+| `analyze(request, cancellation)` | 重取 context/比对 digest，创建共享预算，逐 exact source 找唯一 Collector，聚合大小/保护/issue/reparse 计数，保存 `deletion_performed=false` Report。 |
+| `ResidualAnalysisService.__init__(repository, compiler, reviewer, confirmation, registry, audit)` | 组合计划、审查、确认、执行、持久化和审计边界。 |
+| `prepare(user_goal, transaction_id)` | 从真实 transaction 读取 context、编译计划、独立审查并记录 aggregate audit；返回 Plan/Context/Review。 |
+| `request_plan_confirmation(plan, context)` | Fresh re-review 后创建短时 R0 plan confirmation，具体说明 exact path 数量、修改 0、删除 0。 |
+| `resolve_plan_confirmation(confirmation_id, approved, plan, context)` | 解析 digest-bound decision 并审计；拒绝/过期/错误绑定由 ConfirmationService 抛错。 |
+| `analyze(plan, context, cancellation)` | 再审查并要求 plan 已批准，只通过 Registry 调用固定 analyze tool，检查返回类型，记录 aggregate completion audit。 |
+| `latest_report(plan, context)` | 要求仍为当前已批准 plan，再调用 report tool；返回最新 Report 或 `None`。 |
+| `inspect_candidate(plan, context, candidate_id)` | 要求当前 plan，再通过 opaque UUID 调 inspect tool；跨 context 候选返回 `None`。 |
+| `export_report(plan, context, report, target, format, exporter)` | 重新检查 plan/context/report digest，exclusive-create 本地报告并写路径摘要审计；stale/cross-plan 抛 `ResidualAnalysisError`。 |
+| `_require_current_plan(plan, context)` | 供 read/export 操作复用 reviewer + approved confirmation Gate。 |
+| `_normalized(path)` | 生成 `abspath + normcase` 的 lexical comparison 字符串；不解析链接。 |
+| `_append_issue(issues, issue)` | 全局把 issue 聚合限制在 5,000 条。 |
+| `_utc_from_timestamp(value)` | 把 POSIX timestamp 转为带 UTC timezone 的 `datetime`。 |
+
+### SQLite persistence
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `SoftwareResidualRepository.__init__(database_path)` | 为 additive Stage 4D3 tables 创建独立 engine/session factory；尚不建表。 |
+| `initialize()` | 建立 context/report/candidate 表并启用仓库；SQLAlchemy 失败转换为 `SoftwareResidualStoreError`。 |
+| `upsert_context(context)` | 按 context UUID 插入或更新完整 JSON；transaction UUID 唯一，不存命令/内容。 |
+| `get_context(context_id)` | 返回强类型 Context；缺失、损坏或未初始化抛 `SoftwareResidualStoreError`。 |
+| `get_context_for_transaction(transaction_id)` | 通过真实卸载 transaction 唯一查 context；不做 display-name fallback。 |
+| `list_eligible_contexts(limit)` | 返回最多 500 个符合模型 eligibility 的最近 context；供未来 referent UI 使用，不执行扫描。 |
+| `save_report(report)` | 在一个事务中先 flush parent Report 再写 Candidate rows，避免 FK 顺序问题；报告不可变替换，删除标志已由模型阻止。 |
+| `latest_report(context_id)` | 按完成时间读取一个 context 的最新 Report 并重建 Candidates。 |
+| `get_candidate(context_id, candidate_id)` | 同时绑定 context 和 opaque candidate UUID，防止跨报告枚举。 |
+| `close()` | dispose engine 并重置 initialized 状态。 |
+| `_report_from_row(session, row)` | 从 JSON parent 与排序 candidate rows 重建 Pydantic Report；损坏数据抛 store error。 |
+| `_require_initialized()` | 每次读写前 fail-closed 检查；未初始化抛 `SoftwareResidualStoreError`。 |
+
+### Tool、audit、export 与 Windows Explorer
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `_manifest(name, description, input_model, output_model)` | 构造固定 Windows R0/read-only/NONE manifest，最大批量 1，不需要 runtime confirmation。 |
+| `SoftwareResidualAnalyzeTool.__init__(analyzer)` | 注入唯一 analyzer 并创建 `software.residuals.analyze` manifest。 |
+| `SoftwareResidualAnalyzeTool.manifest` | 返回固定 manifest。 |
+| `SoftwareResidualAnalyzeTool.execute(request, cancellation)` | 强校验 `ResidualAnalyzeRequest` 后调用 analyzer；返回 typed result。 |
+| `SoftwareResidualReportTool.__init__(repository)` / `manifest` / `execute(...)` | 创建 report tool；只按 context UUID读取最新持久报告，cancellation 不改变数据。 |
+| `SoftwareResidualInspectTool.__init__(repository)` / `manifest` / `execute(...)` | 创建 inspect tool；只按 context + candidate UUID 读取单项元数据。 |
+| `SoftwareResidualAuditLogger.__init__(repository, app_version, git_commit)` | 注入 append-only audit 与版本证据。 |
+| `plan_reviewed(...)` | 记录 request、plan/tool/digest、context/mechanism、path count 和审查结果；不存 path。 |
+| `confirmation_resolved(...)` | 记录 confirmation UUID、plan/context digest 和 APPROVED/REJECTED/EXPIRED。 |
+| `analysis_completed(...)` | 记录分类/confidence/protection aggregate、大小、issue/reparse/skipped、policy version、时间和 deletion/content-read=false。 |
+| `report_exported(...)` | 记录 report/context、format、target SHA-256 和 no-overwrite/no-delete；不存完整目标路径。 |
+| `_path_digest(path)` | 对 `abspath + normcase` 目标做 SHA-256，用于审计关联而非授权。 |
+| `ResidualReportExporter.export(report, target, format)` | 用户主动创建新 JSON/CSV；使用 `open('x')`，完整路径仅写入本地报告；现存/网络/错误 suffix/目录不可用抛 `ResidualExportError`。 |
+| `ResidualReportExporter._validate_target(target, format)` | 要求绝对、本地、无 traversal/歧义、父目录存在、suffix 匹配且 target 不存在。 |
+| `WindowsResidualExplorerService.select_candidate(candidate)` | 重新确认 path 在 scan root 内、存在且非 reparse，然后以固定 `explorer.exe /select,<path>`、参数数组和 `shell=False` 打开；不执行候选。 |
+| `_explorer_path()` | 从 Windows 目录构造固定 `explorer.exe` 并要求普通文件；缺失抛 `ResidualExplorerError`。 |
+| `ApplicationRuntime.create_residual_analysis_services()` | 组合六 Collector、三 Tool、Repository、Compiler/Reviewer/Confirmation/Audit、Exporter 与 Explorer；UI 不自行执行系统工具。 |
+
+### Qt worker 与 ResidualAnalysisDialog
+
+| 函数 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `ResidualPrepareWorker.__init__(runtime, user_goal, transaction_id)` | 保存依赖和真实 transaction UUID，构造 terminal signals；不在 UI thread 查询 DB。 |
+| `ResidualPrepareWorker.run()` | 在线程池创建服务并 prepare；成功发 `PreparedResidualAnalysis`，异常发类型+消息。 |
+| `ResidualAnalyzeWorker.__init__(services, plan, context)` | 保存审查后的对象并创建独立 `CancellationToken`。 |
+| `ResidualAnalyzeWorker.run()` | 后台调用 service analyze，发 Report 或安全失败文本。 |
+| `ResidualAnalyzeWorker.cancel()` | 只设置协作取消，不终止线程、不修改候选。 |
+| `ResidualExportWorker.__init__(services, plan, context, report, target, format)` | 保存 exact export binding；不立即写文件。 |
+| `ResidualExportWorker.run()` | 后台调用 service export + audit，发 `ResidualExportResult` 或失败。 |
+| `require_prepared_residual(value)` / `require_residual_report(value)` / `require_residual_export(value)` | 收窄 Qt `Signal(object)`；类型错误抛 `TypeError`，防止错误 payload 推进 UI。 |
+| `ResidualAnalysisDialog.__init__(runtime, transaction_id, user_goal, parent)` | 建立状态、默认取消和只读窗口，然后异步准备真实 transaction 计划。 |
+| `_build_ui()` | 创建风险说明、搜索/分类/保护筛选、九列表格、详情、进度、JSON/CSV/Explorer/确认/取消；没有 delete/cleanup/trash 控件。 |
+| `_start_prepare()` | 创建并提交 prepare worker。 |
+| `_prepared(value)` | 收窄结果、拒绝 failed review、申请 plan confirmation，展示 exact scope、0 修改/删除和 NONE rollback。 |
+| `_primary_clicked()` | PLAN 状态批准并启动 analyze；DONE/FAILED 只关闭，其他状态无派发。 |
+| `_completed(value)` | 收窄并显示真实 status/count/size/protected size/issues，填表并开放本地导出。 |
+| `_populate_table(candidates)` | 强保护优先排序，填充 path/type/size/classification/confidence/protection/evidence/mtime/recommendation，再应用筛选。 |
+| `_apply_filters()` | 组合本地路径 substring、classification 和 protection 条件；不触发新扫描。 |
+| `_show_selected_details()` | 显示完整本地 path、identity digest、source、reason/evidence/risk 和“未来必须 fresh flow”说明。 |
+| `_selected_candidate()` | 从当前 row 的 opaque UUID 映射回当前 Report Candidate；不存在返回 `None`。 |
+| `_export(format)` | 让用户选择目标，创建 background export worker；取消文件对话框即停止。 |
+| `_export_completed(value)` / `_export_failed(message)` | 恢复按钮并显示成功/失败；不把失败伪装成导出完成。 |
+| `_open_selected_location()` | 只把当前 Candidate 交给安全 Explorer 服务；失败显示友好警告。 |
+| `_failed(message)` | 进入 FAILED、停止进度并明确“没有删除/移动/回收/修改”。 |
+| `_cancel_clicked()` | 请求 worker 协作取消；若仍在 PLAN，尽力记录 REJECTED confirmation，再关闭。 |
+| `_required_state()` | 要求 services/plan/context/confirmation 全部存在；缺失 fail-closed。 |
+| `closeEvent(event)` | 关闭窗口前复用取消路径，避免遗留失控扫描。 |
+| `_format_size(value)` | 把非负字节转为 B/KiB/MiB/GiB/TiB 文本；无 I/O。 |

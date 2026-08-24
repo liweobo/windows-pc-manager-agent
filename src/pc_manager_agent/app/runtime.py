@@ -16,6 +16,7 @@ from pc_manager_agent.audit.process_actions import ProcessActionAuditLogger
 from pc_manager_agent.audit.repository import AuditRepository
 from pc_manager_agent.audit.service_actions import ServiceActionAuditLogger
 from pc_manager_agent.audit.service_startup_actions import ServiceStartupActionAuditLogger
+from pc_manager_agent.audit.software_residuals import SoftwareResidualAuditLogger
 from pc_manager_agent.audit.software_uninstall_analysis import (
     SoftwareUninstallAnalysisAuditLogger,
 )
@@ -81,6 +82,14 @@ from pc_manager_agent.orchestration.msix_uninstall_execution import MsixUninstal
 from pc_manager_agent.orchestration.process_action_planner import ProcessActionPlanCompiler
 from pc_manager_agent.orchestration.process_actions import ProcessActionService
 from pc_manager_agent.orchestration.process_target_resolver import ProcessTargetResolver
+from pc_manager_agent.orchestration.residual_collectors import (
+    InstallLocationResidualCollector,
+    KnownAppDataResidualCollector,
+    KnownConfigurationResidualCollector,
+    KnownServiceArtifactCollector,
+    MsixDataResidualCollector,
+    ShortcutResidualCollector,
+)
 from pc_manager_agent.orchestration.service import ScanOrchestrator
 from pc_manager_agent.orchestration.service_action_planner import ServiceActionPlanCompiler
 from pc_manager_agent.orchestration.service_actions import ServiceActionService
@@ -94,6 +103,12 @@ from pc_manager_agent.orchestration.software_execution_preflight import (
 from pc_manager_agent.orchestration.software_impact_analyzer import SoftwareImpactAnalyzer
 from pc_manager_agent.orchestration.software_inventory import SoftwareInventoryService
 from pc_manager_agent.orchestration.software_msi_validation import MsiProductValidator
+from pc_manager_agent.orchestration.software_residual_analysis import (
+    ResidualAnalysisPlanCompiler,
+    ResidualAnalysisService,
+    ResidualAnalyzer,
+    ResidualSafetyReviewer,
+)
 from pc_manager_agent.orchestration.software_residual_analyzer import SoftwareResidualAnalyzer
 from pc_manager_agent.orchestration.software_target_resolver import SoftwareTargetResolver
 from pc_manager_agent.orchestration.software_uninstall_analysis import (
@@ -113,6 +128,7 @@ from pc_manager_agent.orchestration.system_diagnostics import (
 from pc_manager_agent.orchestration.transaction_executor import TransactionExecutor
 from pc_manager_agent.orchestration.trash_planner import TrashPlanCompiler
 from pc_manager_agent.orchestration.trash_service import TrashService
+from pc_manager_agent.orchestration.uninstall_context import UninstallContextRecorder
 from pc_manager_agent.orchestration.vendor_execution_preflight import VendorExecutionPreflight
 from pc_manager_agent.orchestration.vendor_residual_analyzer import VendorResidualAnalyzer
 from pc_manager_agent.orchestration.vendor_uninstall_execution import VendorUninstallService
@@ -153,6 +169,7 @@ from pc_manager_agent.persistence.service_startup_actions import (
     ServiceStartupBackupVault,
     ServiceStartupExecutionGuard,
 )
+from pc_manager_agent.persistence.software_residuals import SoftwareResidualRepository
 from pc_manager_agent.persistence.software_uninstall_execution import (
     MsiUninstallExecutionGuard,
     MsiUninstallRepository,
@@ -195,6 +212,9 @@ from pc_manager_agent.platform_support.windows.process_management import (
     WindowsProcessManagementPlatform,
 )
 from pc_manager_agent.platform_support.windows.recycle_bin import WindowsRecycleBinPlatform
+from pc_manager_agent.platform_support.windows.residual_explorer import (
+    WindowsResidualExplorerService,
+)
 from pc_manager_agent.platform_support.windows.service_control import (
     WindowsServiceControlPlatform,
     current_windows_username,
@@ -224,6 +244,7 @@ from pc_manager_agent.platform_support.windows.winget_uninstall import (
 from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
 from pc_manager_agent.reporting.exporter import ReportExporter, ReportExportResult
+from pc_manager_agent.reporting.residual_exporter import ResidualReportExporter
 from pc_manager_agent.rollback.manager import RollbackManager
 from pc_manager_agent.safety.file_analysis_validator import FileAnalysisSafetyValidator
 from pc_manager_agent.safety.file_operation_validator import FileOperationSafetyValidator
@@ -233,6 +254,9 @@ from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
 from pc_manager_agent.safety.process_policy import ProcessSafetyPolicy
 from pc_manager_agent.safety.process_preview import ProcessPreviewEngine
 from pc_manager_agent.safety.process_validator import ProcessActionSafetyValidator
+from pc_manager_agent.safety.residual_classification import ResidualClassifier
+from pc_manager_agent.safety.residual_ownership import ResidualOwnershipEvaluator
+from pc_manager_agent.safety.residual_scope_policy import ResidualScanScopePolicy
 from pc_manager_agent.safety.service_policy import ServiceSafetyPolicy
 from pc_manager_agent.safety.service_preview import ServicePreviewEngine
 from pc_manager_agent.safety.service_startup_policy import ServiceStartupSafetyPolicy
@@ -261,6 +285,7 @@ from pc_manager_agent.safety.system_diagnostics import DiagnosticSafetyValidator
 from pc_manager_agent.safety.trash_policy import TrashPathPolicy
 from pc_manager_agent.safety.trash_preview import TrashPreviewEngine
 from pc_manager_agent.safety.trash_validator import TrashSafetyValidator
+from pc_manager_agent.safety.user_data_protection import UserDataProtectionPolicy
 from pc_manager_agent.safety.vendor_argument_policy import VendorArgumentPolicy
 from pc_manager_agent.safety.vendor_executable_trust import VendorExecutableTrustValidator
 from pc_manager_agent.safety.vendor_uninstall_policy import VendorUninstallExecutionPolicy
@@ -313,6 +338,11 @@ from pc_manager_agent.tools.system_tools.software_analysis import (
     SoftwareResolveTool,
     SoftwareUninstallCapabilityTool,
     SoftwareUninstallPreviewTool,
+)
+from pc_manager_agent.tools.system_tools.software_residuals import (
+    SoftwareResidualAnalyzeTool,
+    SoftwareResidualInspectTool,
+    SoftwareResidualReportTool,
 )
 from pc_manager_agent.tools.system_tools.software_uninstall import MsiUninstallTool
 from pc_manager_agent.tools.system_tools.startup_actions import (
@@ -414,6 +444,17 @@ class MsixUninstallServices:
 
     registry: ToolRegistry
     service: MsixUninstallService
+
+
+@dataclass(frozen=True, slots=True)
+class ResidualAnalysisServices:
+    """Dependency bundle for Stage 4D3 report-only residual analysis."""
+
+    registry: ToolRegistry
+    repository: SoftwareResidualRepository
+    service: ResidualAnalysisService
+    exporter: ResidualReportExporter
+    explorer: WindowsResidualExplorerService
 
 
 @dataclass(frozen=True, slots=True)
@@ -535,6 +576,13 @@ class ApplicationRuntime:
         self.interrupted_winget_uninstall_ids = self.winget_uninstall_repository.initialize()
         self.msix_uninstall_repository = MsixUninstallRepository(settings.database_path)
         self.interrupted_msix_uninstall_ids = self.msix_uninstall_repository.initialize()
+        self.software_residual_repository = SoftwareResidualRepository(settings.database_path)
+        self.software_residual_repository.initialize()
+        self.uninstall_context_recorder = UninstallContextRecorder(
+            self.software_residual_repository
+        )
+        self.residual_report_exporter = ResidualReportExporter()
+        self.residual_explorer = WindowsResidualExplorerService()
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
         self.process_management_platform = WindowsProcessManagementPlatform()
@@ -996,6 +1044,7 @@ class ApplicationRuntime:
             audit,
             process_is_elevated=current_process_is_elevated,
             max_items=self.settings.diagnostic_max_items,
+            context_recorder=self.uninstall_context_recorder,
         )
         return MsiUninstallServices(registry=registry, resolver=resolver, service=service)
 
@@ -1055,6 +1104,7 @@ class ApplicationRuntime:
             audit,
             process_is_elevated=current_process_is_elevated,
             max_items=self.settings.diagnostic_max_items,
+            context_recorder=self.uninstall_context_recorder,
         )
         return VendorUninstallServices(registry=registry, resolver=resolver, service=service)
 
@@ -1118,6 +1168,7 @@ class ApplicationRuntime:
             ),
             max_items=self.settings.diagnostic_max_items,
             process_is_elevated=current_process_is_elevated,
+            context_recorder=self.uninstall_context_recorder,
         )
         return WingetUninstallServices(
             registry=registry,
@@ -1154,8 +1205,61 @@ class ApplicationRuntime:
             process_is_elevated=current_process_is_elevated,
             max_items=self.settings.diagnostic_max_items,
             preview_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            context_recorder=self.uninstall_context_recorder,
         )
         return MsixUninstallServices(registry=registry, service=service)
+
+    def create_residual_analysis_services(self) -> ResidualAnalysisServices:
+        """Build the fixed three-tool Stage 4D3 read-only analysis boundary."""
+        scope = ResidualScanScopePolicy(
+            max_roots=self.settings.residual_max_roots,
+            network_path_detector=is_network_path,
+        )
+        classifier = ResidualClassifier()
+        ownership = ResidualOwnershipEvaluator()
+        protection = UserDataProtectionPolicy()
+        dependencies = (scope, classifier, ownership, protection)
+        collectors = (
+            InstallLocationResidualCollector(*dependencies),
+            KnownAppDataResidualCollector(*dependencies),
+            ShortcutResidualCollector(*dependencies),
+            MsixDataResidualCollector(*dependencies),
+            KnownServiceArtifactCollector(*dependencies),
+            KnownConfigurationResidualCollector(*dependencies),
+        )
+        analyzer = ResidualAnalyzer(
+            self.software_residual_repository,
+            scope,
+            collectors,
+        )
+        registry = ToolRegistry()
+        registry.register(SoftwareResidualAnalyzeTool(analyzer))
+        registry.register(SoftwareResidualReportTool(self.software_residual_repository))
+        registry.register(SoftwareResidualInspectTool(self.software_residual_repository))
+        reviewer = ResidualSafetyReviewer(registry, scope)
+        service = ResidualAnalysisService(
+            self.software_residual_repository,
+            ResidualAnalysisPlanCompiler(
+                scope,
+                self.settings.residual_max_objects,
+                self.settings.residual_timeout_seconds,
+            ),
+            reviewer,
+            self.confirmation,
+            registry,
+            SoftwareResidualAuditLogger(
+                self.audit,
+                app_version=__version__,
+                git_commit=os.getenv("GITHUB_SHA"),
+            ),
+        )
+        return ResidualAnalysisServices(
+            registry=registry,
+            repository=self.software_residual_repository,
+            service=service,
+            exporter=self.residual_report_exporter,
+            explorer=self.residual_explorer,
+        )
 
     def create_process_action_services(self) -> ProcessActionServices:
         """Build the Stage 4A resolver, policy, confirmations, registry, and executor."""
@@ -1366,6 +1470,7 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.software_residual_repository.close()
         self.msix_uninstall_repository.close()
         self.winget_uninstall_repository.close()
         self.vendor_uninstall_repository.close()

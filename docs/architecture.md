@@ -1,5 +1,45 @@
 # Architecture
 
+## Stage 4D3 report-only residual-analysis boundary
+
+```text
+controlled MSI / Vendor / winget / MSIX pre-dispatch Preview
+  -> UninstallContextRecorder (exact identity + exact known paths; no command/content)
+  -> durable context finalized with verified or completed-unverified result
+  -> local ResidualAnalysisPlanCompiler (scope is not chosen by the LLM)
+  -> independent ResidualSafetyReviewer + expiring R0 plan confirmation
+  -> ToolRegistry[software.residuals.analyze]
+  -> shared bounded budget
+  -> one source-specific metadata collector per exact ContextPathEvidence
+  -> lstat identity + reparse/TOCTOU checks
+  -> deterministic classification + ownership evidence/confidence
+  -> independent UserDataProtectionPolicy
+  -> SQLite ResidualReport + aggregate-only audit
+  -> report / inspect / local exclusive-create export / safe Explorer selection
+  -> STOP
+```
+
+The four uninstall executors only call `UninstallContextRecorder` immediately before their already
+authorized adapter dispatch and finalize that context after verification. Failure to store Stage 4D3
+evidence never expands or changes D2 execution authority. Raw uninstall strings, argv, package
+contents and file contents are not part of the context.
+
+`ResidualScanScopePolicy` is separate from ordinary user-file authorization because it handles a
+software-management scenario, but it reuses the protected-path and reparse principles. Only exact
+pre-uninstall paths are accepted; Program Files, ProgramData, AppData, Desktop or a drive root is
+never broadened into a name search. Six collectors own fixed source types instead of one universal
+scanner. A shared 25,000-object/default 60-second budget and cancellation token span every collector.
+
+`ResidualIdentity` records normalized path, device/file ID, object type, size and modification time
+from `lstat`. Ownership classification and cleanup safety are separate models: exact install/package/
+shortcut evidence may produce HIGH ownership, while a database, configuration, plug-in or package
+user-data candidate remains protected. All classification is deterministic; an LLM may receive only
+the redacted metadata payload for explanation.
+
+There is deliberately no Stage 4D3 Preview or authorization that a future cleanup can consume. A
+future Stage 4D4 must start with fresh discovery, identity revalidation, safety review and new R1/R2
+confirmations.
+
 ## Stage 4D2C1 controlled winget Package execution boundary
 
 ```text

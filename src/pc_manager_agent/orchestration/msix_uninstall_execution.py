@@ -21,6 +21,7 @@ from pc_manager_agent.domain.msix_uninstall import (
     MsixUninstallPreview,
     MsixUninstallRequest,
     MsixUninstallResult,
+    MsixVerificationState,
     NormalizedMsixPackage,
     ValidatedMsixRemovalAction,
 )
@@ -32,6 +33,7 @@ from pc_manager_agent.orchestration.msix_uninstall import (
     MsixRemovalPolicy,
     MsixTargetResolver,
 )
+from pc_manager_agent.orchestration.uninstall_context import UninstallContextRecorder
 from pc_manager_agent.persistence.msix_uninstall import MsixUninstallRepository
 from pc_manager_agent.platform_support.msix_packages import MsixPackagePlatform
 from pc_manager_agent.tools.execution import ExecutionAuthorization, arguments_digest
@@ -76,6 +78,7 @@ class MsixUninstallService:
         process_is_elevated: Callable[[], bool],
         max_items: int = 5_000,
         preview_ttl_seconds: int = 300,
+        context_recorder: UninstallContextRecorder | None = None,
     ) -> None:
         self._platform = platform
         self._inventory = MsixInventoryService(platform, max_items)
@@ -89,6 +92,7 @@ class MsixUninstallService:
         self._audit = audit
         self._preflight = preflight
         self._process_is_elevated = process_is_elevated
+        self._context_recorder = context_recorder
 
     def prepare(
         self,
@@ -198,12 +202,26 @@ class MsixUninstallService:
             runtime_confirmation_id=confirmation.confirmation_id,
         )
         self._audit.started(plan, preview, str(confirmation.confirmation_id))
-        result = self._registry.execute(
-            plan.tool_name,
-            arguments,
-            token,
-            authorization,
+        context_id = (
+            self._context_recorder.capture_msix(preview)
+            if self._context_recorder is not None
+            else None
         )
+        try:
+            result = self._registry.execute(
+                plan.tool_name,
+                arguments,
+                token,
+                authorization,
+            )
+        except Exception:
+            if self._context_recorder is not None:
+                self._context_recorder.finalize(
+                    context_id,
+                    verification_state="failed",
+                    verified_removed=False,
+                )
+            raise
         if not isinstance(result, MsixUninstallResult):
             raise MsixUninstallExecutionError("MSIX tool returned an unexpected result")
         final_state = (
@@ -213,6 +231,19 @@ class MsixUninstallService:
         )
         self._repository.transition(plan.transaction_id, final_state)
         self._audit.completed(plan, result)
+        if self._context_recorder is not None:
+            self._context_recorder.finalize(
+                context_id,
+                verification_state=result.verification.state.value,
+                verified_removed=result.verification.state
+                in {
+                    MsixVerificationState.VERIFIED_REMOVED,
+                    MsixVerificationState.ALREADY_REMOVED,
+                },
+                completed_unverified=(
+                    result.verification.state is MsixVerificationState.COMPLETED_UNVERIFIED
+                ),
+            )
         return result
 
     def _validated_action(

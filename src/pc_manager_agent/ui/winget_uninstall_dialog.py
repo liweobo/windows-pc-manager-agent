@@ -24,7 +24,9 @@ from pc_manager_agent.domain.winget_uninstall import (
     WingetUninstallExecutionReport,
     WingetUninstallPlan,
     WingetUninstallPreview,
+    WingetVerificationState,
 )
+from pc_manager_agent.ui.residual_analysis_dialog import ResidualAnalysisDialog
 from pc_manager_agent.ui.winget_uninstall_workers import (
     WingetRuntimePrepareWorker,
     WingetUninstallExecuteWorker,
@@ -56,6 +58,7 @@ class WingetUninstallDialog(QDialog):
         self._confirmation: WingetUninstallConfirmation | None = None
         self._worker: object | None = None
         self._stage = "PREPARING"
+        self._residual_dialog: ResidualAnalysisDialog | None = None
         self.setWindowTitle("winget 安全卸载 — 双重确认")
         self.resize(780, 620)
         self.setModal(False)
@@ -75,13 +78,17 @@ class WingetUninstallDialog(QDialog):
         buttons = QHBoxLayout()
         self.primary_button = QPushButton("正在验证")
         self.cancel_button = QPushButton("取消（默认）")
+        self.residual_button = QPushButton("分析可能残留")
+        self.residual_button.setVisible(False)
         self.primary_button.setEnabled(False)
         self.cancel_button.setDefault(True)
         self.cancel_button.setAutoDefault(True)
         self.primary_button.setAutoDefault(False)
         self.primary_button.clicked.connect(self._primary_clicked)
         self.cancel_button.clicked.connect(self._cancel_clicked)
+        self.residual_button.clicked.connect(self._open_residual_analysis)
         buttons.addStretch(1)
+        buttons.addWidget(self.residual_button)
         buttons.addWidget(self.primary_button)
         buttons.addWidget(self.cancel_button)
         layout.addWidget(self.risk_label)
@@ -203,6 +210,23 @@ class WingetUninstallDialog(QDialog):
             "执行已结束；最终结论来自 Package 与软件清单双重刷新，不来自退出码。"
         )
         self.primary_button.setText("关闭")
+        self.residual_button.setVisible(
+            report.verification.state
+            in {
+                WingetVerificationState.VERIFIED_REMOVED,
+                WingetVerificationState.COMPLETED_UNVERIFIED,
+            }
+        )
+
+    @Slot()
+    def _open_residual_analysis(self) -> None:
+        """Open a new R0 analysis rather than reusing either uninstall approval."""
+        plan = self._plan
+        if plan is None:
+            return
+        dialog = ResidualAnalysisDialog(self._runtime, plan.transaction_id, parent=self)
+        self._residual_dialog = dialog
+        dialog.show()
         self.primary_button.setEnabled(True)
 
     def _show_preview(self, preview: WingetUninstallPreview, *, immediate: bool) -> None:

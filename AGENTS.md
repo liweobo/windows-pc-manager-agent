@@ -104,6 +104,27 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4D3 retains all Stage 4D2 mechanisms and adds exactly three R0 tools:
+`software.residuals.analyze`, `software.residuals.report`, and `software.residuals.inspect`. They
+operate only on an eligible durable `UninstallContext` captured before an Agent-controlled MSI,
+Vendor, winget, or MSIX dispatch. Scope consists only of exact pre-uninstall paths; the LLM, UI,
+display name, publisher and filename cannot add roots or trigger a full-disk/name search.
+
+All collectors are metadata-only, bounded and cancellable. Roots and entries are revalidated with
+`lstat`; symlink, junction and reparse targets are never followed. Protected/sensitive/network/
+other-user paths, traversal, stale identity and unknown tools fail closed. Access/missing/locked
+errors fail soft into a truthful partial report. File, database, configuration, log and Package data
+contents are never read or sent to a model.
+
+Ownership evidence/confidence and deletion safety are independent. User data, databases, Package
+data, configuration, plug-ins, developer environments, shared locations and Unknown objects remain
+protected regardless of ownership confidence. Every recommendation is REPORT, PROTECT or
+REVIEW_MANUALLY. `deletion_performed` is always false.
+
+Stage 4D3 has no delete/cleanup/move/rename/recycle-bin/registry-write tool or confirmation. Its
+plan, report, selection and export can never authorize Stage 4D4. A future cleanup requires a fresh
+scan, identity revalidation, safety review, Preview and independent R1/R2 confirmation.
+
 Stage 4D2C2 retains Stage 4D2C1 and adds exactly one independent write tool:
 `software.uninstall.msix`. It accepts only an internally built `ValidatedMsixRemovalAction` for one
 exact healthy ordinary current-user `USER_MSIX_APP`. Stable Package Family and version-sensitive

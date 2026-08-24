@@ -1,5 +1,25 @@
 # User guide
 
+## 使用 Stage 4D3 卸载后残留分析
+
+当 Agent 完成一次 MSI、Vendor、winget 或 MSIX 卸载，并且保存了可用的卸载上下文时，结果页会
+显示“分析可能残留”。按钮只会打开一个 R0 只读流程：先展示软件、精确扫描范围、修改 0、删除 0
+和回滚 NONE；默认按钮仍是取消。确认计划后，扫描在线程中进行，可以取消。
+
+页面展示路径、对象类型、大小、分类、Ownership Confidence、保护等级、证据摘要、修改时间和
+建议。默认先显示强保护数据；可按路径搜索，按分类和保护等级筛选，查看稳定身份/理由/风险，或
+选择一个对象让 Explorer 打开所在位置。JSON/CSV 导出需要用户主动选择一个不存在的本地文件；
+不会覆盖文件，也不会上传。
+
+请这样理解结果：HIGH Confidence 只表示“证据较强地关联到原软件”，不表示“可以删除”。
+Configuration、Documents/Downloads/Saved Games、Projects、数据库、插件、Roaming、MSIX
+LocalState/Package Data 和 Unknown 项会被保护。`completed_unverified` 报告还会提醒：卸载本身
+未被完全验证，因此可信度更低。
+
+本阶段不会扫描整个 C 盘，不读取文件/数据库/配置/日志内容，不跟随链接，也没有删除、清理、
+移动或回收站按钮。即使你提出删除请求，Stage 4D3 也只能生成报告。若将来实现 Stage 4D4，仍
+必须重新扫描、重新验证身份、重新生成 Preview，并重新确认。
+
 ## 使用 Stage 4D2C1 受控 winget 卸载
 
 1. 请以普通用户启动应用。在“系统诊断”刷新已安装软件，选择一行并启动“受控卸载”；路由器

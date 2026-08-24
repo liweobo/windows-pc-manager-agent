@@ -42,6 +42,7 @@ from pc_manager_agent.domain.vendor_uninstall import (
 )
 from pc_manager_agent.orchestration.software_capability import UninstallCapabilityResolver
 from pc_manager_agent.orchestration.software_target_resolver import SoftwareTargetResolver
+from pc_manager_agent.orchestration.uninstall_context import UninstallContextRecorder
 from pc_manager_agent.orchestration.vendor_execution_preflight import VendorExecutionPreflight
 from pc_manager_agent.orchestration.vendor_residual_analyzer import VendorResidualAnalyzer
 from pc_manager_agent.orchestration.vendor_uninstall_metadata import VendorUninstallMetadataParser
@@ -125,6 +126,7 @@ class VendorUninstallService:
         *,
         process_is_elevated: Callable[[], bool],
         max_items: int = 5_000,
+        context_recorder: UninstallContextRecorder | None = None,
     ) -> None:
         self._resolver = resolver
         self._capability = capability
@@ -144,6 +146,7 @@ class VendorUninstallService:
         self._audit = audit
         self._process_is_elevated = process_is_elevated
         self._max_items = max_items
+        self._context_recorder = context_recorder
 
     def prepare(
         self,
@@ -356,6 +359,11 @@ class VendorUninstallService:
             arguments_digest=arguments_digest(request_arguments),
             runtime_confirmation_id=runtime_confirmation_id,
         )
+        context_id = (
+            self._context_recorder.capture_vendor(preview)
+            if self._context_recorder is not None
+            else None
+        )
         try:
             result = self._registry.execute(
                 plan.tool_name,
@@ -383,11 +391,24 @@ class VendorUninstallService:
                 error_code=type(exc).__name__,
                 mutation_may_have_started=state is VendorUninstallTransactionState.EXECUTING,
             )
+            if self._context_recorder is not None:
+                self._context_recorder.finalize(
+                    context_id,
+                    verification_state="failed",
+                    verified_removed=False,
+                )
             raise
         if result.process.category in {
             VendorProcessResultCategory.MONITORING_DETACHED,
             VendorProcessResultCategory.STOPPED_MONITORING,
         }:
+            if self._context_recorder is not None:
+                self._context_recorder.finalize(
+                    context_id,
+                    verification_state=VendorVerificationState.INTERRUPTED.value,
+                    verified_removed=False,
+                    completed_at=result.process.finished_at,
+                )
             return self._monitoring_stopped_report(plan, preview, result)
         self._repository.transition(
             plan.transaction_id,
@@ -434,6 +455,20 @@ class VendorUninstallService:
                         }
                     )
                 }
+            )
+        if self._context_recorder is not None:
+            self._context_recorder.finalize(
+                context_id,
+                verification_state=verification.state.value,
+                verified_removed=verification.state
+                in {
+                    VendorVerificationState.VERIFIED_REMOVED,
+                    VendorVerificationState.REMOVED_WITH_UNEXPECTED_PROCESS_RESULT,
+                },
+                completed_unverified=(
+                    verification.state is VendorVerificationState.COMPLETED_UNVERIFIED
+                ),
+                completed_at=result.process.finished_at,
             )
         return report
 

@@ -23,3 +23,5 @@ def test_dialog_keeps_cancel_as_default_and_execution_disabled(
     assert not dialog.primary_button.isEnabled()
     assert "R2" in dialog.risk_label.text()
     assert "无法自动撤销" in dialog.risk_label.text()
+    assert dialog.residual_button.text() == "分析可能残留"
+    assert dialog.residual_button.isHidden()

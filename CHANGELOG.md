@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — Stage 4D3
+
+### Added
+
+- Unified durable `UninstallContext` capture for controlled MSI, Vendor, winget and MSIX transactions,
+  with exact pre-uninstall paths, identity digests and truthful verified/unverified completion states.
+- Stable metadata-only `ResidualIdentity`, deterministic classification, structured ownership evidence,
+  independent ownership confidence and user-data protection policy.
+- Six finite exact-source collectors, shared object/time/cancellation budget, fail-soft issue reporting,
+  reparse/identity revalidation and SQLite report persistence.
+- Three R0 tools (`software.residuals.analyze`, `.report`, `.inspect`), privacy-minimized audit, exclusive
+  local JSON/CSV export, safe Explorer selection and a cancellable PySide6 report UI.
+- Unit, integration, GUI, security, zero-destructive-call and 10,001-object performance tests.
+
+### Security
+
+- Stage 4D3 is report-only: no delete, cleanup, move, rename, Recycle Bin, registry write, shell or
+  content-reading path exists, and no cleanup tool is registered.
+- Scope comes only from exact durable uninstall evidence. Full-disk/name searches, protected roots,
+  network paths, traversal, symlink/junction/reparse traversal and stale identities fail closed.
+- User data, databases, package data, configurations, plug-ins, developer environments and unknown
+  items stay protected independently of ownership confidence. Provider payloads redact local paths.
+- Stage 4D3 plan approval is R0 and cannot be reused by a future Stage 4D4 cleanup flow.
+
 ## Unreleased — Stage 4D2C2
 
 ### Added

@@ -24,6 +24,7 @@ from pc_manager_agent.domain.msix_uninstall import (
     MsixUninstallPlan,
     MsixUninstallPreview,
     MsixUninstallResult,
+    MsixVerificationState,
 )
 from pc_manager_agent.ui.msix_uninstall_workers import (
     MsixExecuteWorker,
@@ -33,6 +34,7 @@ from pc_manager_agent.ui.msix_uninstall_workers import (
     require_msix_runtime,
     require_prepared_msix,
 )
+from pc_manager_agent.ui.residual_analysis_dialog import ResidualAnalysisDialog
 
 
 class MsixUninstallDialog(QDialog):
@@ -56,6 +58,7 @@ class MsixUninstallDialog(QDialog):
         self._confirmation: MsixUninstallConfirmation | None = None
         self._worker: object | None = None
         self._stage = "PREPARING"
+        self._residual_dialog: ResidualAnalysisDialog | None = None
         self.setWindowTitle("MSIX / Store App 安全卸载 — 双重确认")
         self.resize(820, 650)
         self._build_ui()
@@ -72,11 +75,15 @@ class MsixUninstallDialog(QDialog):
         buttons = QHBoxLayout()
         self.primary = QPushButton("正在验证")
         self.cancel = QPushButton("取消（默认）")
+        self.residual_button = QPushButton("分析可能残留")
+        self.residual_button.setVisible(False)
         self.primary.setEnabled(False)
         self.cancel.setDefault(True)
         self.primary.clicked.connect(self._primary_clicked)
         self.cancel.clicked.connect(self._cancel_clicked)
+        self.residual_button.clicked.connect(self._open_residual_analysis)
         buttons.addStretch(1)
+        buttons.addWidget(self.residual_button)
         buttons.addWidget(self.primary)
         buttons.addWidget(self.cancel)
         layout.addWidget(self.risk)
@@ -180,6 +187,24 @@ class MsixUninstallDialog(QDialog):
         self.risk.setText("执行结束；最终结论来自卸载后的当前用户 Package 清单。")
         self.primary.setText("关闭")
         self.primary.setEnabled(True)
+        self.residual_button.setVisible(
+            result.verification.state
+            in {
+                MsixVerificationState.VERIFIED_REMOVED,
+                MsixVerificationState.COMPLETED_UNVERIFIED,
+                MsixVerificationState.ALREADY_REMOVED,
+            }
+        )
+
+    @Slot()
+    def _open_residual_analysis(self) -> None:
+        """Open a fresh R0 report workflow with no inherited removal authority."""
+        plan = self._plan
+        if plan is None:
+            return
+        dialog = ResidualAnalysisDialog(self._runtime, plan.transaction_id, parent=self)
+        self._residual_dialog = dialog
+        dialog.show()
 
     def _show_preview(self, preview: MsixUninstallPreview, *, immediate: bool) -> None:
         identity = preview.package.identity

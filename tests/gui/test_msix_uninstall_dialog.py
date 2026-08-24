@@ -35,3 +35,4 @@ def test_msix_dialog_source_discloses_approved_data_semantics() -> None:
     assert "LocalState" in source
     assert "不额外删除" in source
     assert "不运行 PowerShell" in source
+    assert "分析可能残留" in source

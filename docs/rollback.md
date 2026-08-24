@@ -1,5 +1,19 @@
 # Rollback design
 
+## Stage 4D3 residual reports: scanned data NONE, exported report MANUAL
+
+Residual analysis is R0 and never changes a scanned file, directory, shortcut, Package data or
+registry entry, so there is no data operation to undo and its rollback level is `NONE`. The report's
+`deletion_performed` field is hard-coded and validated as false.
+
+A user-requested JSON/CSV export creates one new local file with exclusive-create semantics. The
+Agent never overwrites an existing report and does not automatically remove an export; therefore its
+recovery level is `MANUAL`—the user may delete that report themselves if no longer needed. This
+export does not change any residual candidate and cannot be used as a cleanup authorization.
+
+Code rollback for this work uses `git revert <stage-4d3-commit>` after the final commit is known.
+Reverting code does not remove already exported reports or rewrite local audit/context records.
+
 ## Stage 4D2C1 winget removal: NONE
 
 `software.uninstall.winget` has `RollbackLevel.NONE`. Windows Package Manager does not provide this

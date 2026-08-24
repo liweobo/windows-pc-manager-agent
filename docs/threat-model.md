@@ -1,5 +1,19 @@
 # Threat model
 
+## Stage 4D3 additions
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Model/user requests full-drive or name-based search | Scope is compiled only from durable exact uninstall evidence; reviewer rejects changed/unregistered tools | External uninstall without captured context cannot receive broad analysis |
+| Same/similar name is mistaken for ownership | Name-only evidence is LOW and is never used to discover new paths | Windows has no complete application-data ownership database |
+| HIGH ownership is mistaken for safe deletion | Protection is an independent deterministic policy; every recommendation is REPORT/PROTECT/REVIEW | A report still requires user judgment and may contain false positives |
+| Junction/symlink escapes into credentials or another profile | Root/component reparse checks, `lstat`, no-follow traversal and protected-root policy | Same-user races after the last identity observation remain possible, so this stage never writes |
+| File name contains prompt injection | Names remain local untrusted table data; no string becomes a tool or command | A user may still misunderstand a malicious-looking name |
+| File/database/config/log contents leak to model/audit | Collectors read metadata only; model payload paths are redacted; audit stores aggregates/digests | User-initiated local export intentionally contains full local paths |
+| Huge or inaccessible tree freezes UI | Worker thread, shared object/time/depth bounds, fail-soft issues and cooperative cancellation | Large reports can still take time up to the explicit budget |
+| Stale report is reused for cleanup | Report binds plan/context/identity digests; no cleanup tool/token exists; Stage 4D4 must use a fresh flow | Future Stage 4D4 requires a separate threat review |
+| Analysis silently calls delete/trash/registry cleanup | Registry has only three R0 tools; destructive-call and source-boundary tests verify zero paths | None inside the implemented Stage 4D3 graph |
+
 ## Stage 4D2C1 additions
 
 | Threat | Control | Residual risk |

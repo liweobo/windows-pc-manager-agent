@@ -1,5 +1,34 @@
 # Security model
 
+## Stage 4D3 residual-analysis controls
+
+- Exactly three tools exist: `software.residuals.analyze`, `software.residuals.report` and
+  `software.residuals.inspect`. All are R0, read-only, rollback `NONE`, cancellable where relevant,
+  and have no write guard or cleanup counterpart.
+- Analysis requires an eligible durable Agent uninstall context. Verified removal is preferred;
+  `completed_unverified` is allowed only with a persistent lower-confidence warning. Failed,
+  interrupted, missing or pathless contexts are blocked.
+- Scope is generated locally from no more than 16 exact known paths. Relative/traversal/UNC/network,
+  ambiguous, protected, other-user and sensitive roots are rejected before filesystem access.
+- Every root is revalidated immediately before enumeration. Directory identities are checked again;
+  symlink, junction and other reparse entries are reported but never traversed.
+- Collectors use `lstat`/`scandir` metadata only. They do not open file, database, configuration, log,
+  shortcut payload or Package user-data contents and do not read or write registry data.
+- Name similarity is LOW evidence only. Exact pre-uninstall location, Package Family mapping and a
+  captured shortcut target are structured evidence, but ownership never lowers protection.
+- User libraries, Downloads, Saved Games, project/repository/virtual-environment paths, databases,
+  Docker/WSL/browser/mail data, Roaming, configuration, plug-ins, LocalState and Unknown data are
+  protected conservatively.
+- A shared object/time limit and cooperative cancellation produce truthful PARTIAL/TRUNCATED/
+  TIMED_OUT/CANCELLED reports. Access errors fail soft; scope escape and safety errors fail closed.
+- Local JSON/CSV export uses exclusive creation, refuses overwrite and network targets, and is audited
+  with a target digest rather than the path. Explorer receives one revalidated candidate and never
+  executes it.
+- Audit stores counts, classifications, confidence/protection aggregates, policy version and digests;
+  it omits paths and contents. Model payloads use redacted path tokens.
+- `deletion_performed` is structurally fixed to false. Stage 4D3 produces no R2 token and cannot call
+  Stage 2B or authorize Stage 4D4.
+
 ## Stage 4D2C1 winget Package controls
 
 - Exactly one new tool exists: `software.uninstall.winget`, one object, R2/R2_HIGH plan, two

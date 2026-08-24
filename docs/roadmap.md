@@ -127,11 +127,15 @@ All-users and Provisioned removal, Framework/Resource/Bundle/Optional/Dependency
 Unknown removal, PowerShell, elevation, lifecycle control, automatic retry and extra data deletion
 remain absent. Windows may remove package-managed LocalState; V1 blocks known orphan dependency risk.
 
-## Stage 4D3 — residual analysis and user-data protection (planned)
+## Stage 4D3 — residual analysis and user-data protection (complete)
 
-Future work is report-only research into ownership-confidence classification for Program Files,
-AppData, ProgramData, shortcuts, cache, configuration, databases and user-generated content. It does
-not inherit deletion authority from Stage 4D2C2.
+Unified MSI/Vendor/winget/MSIX uninstall contexts, exact-source metadata collectors, stable residual
+identity, deterministic classification, structured ownership evidence/confidence, independent user-
+data protection, bounded/cancellable scanning, three R0 tools, persistence, audit, local export and a
+report-only GUI are complete. The implementation performs no full-disk/name search or content read.
+
+Stage 4D4 remains planned/optional. It would require a fresh scan, identity revalidation, a separate
+safety policy, Preview and new R1/R2 confirmations; no Stage 4D3 plan/report/selection is reusable.
 
 ## Stage 4C3+ / other controlled system operations (not started)
 

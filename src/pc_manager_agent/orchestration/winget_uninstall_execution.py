@@ -37,6 +37,7 @@ from pc_manager_agent.domain.winget_uninstall import (
     WingetVerificationState,
 )
 from pc_manager_agent.orchestration.software_target_resolver import SoftwareTargetResolver
+from pc_manager_agent.orchestration.uninstall_context import UninstallContextRecorder
 from pc_manager_agent.orchestration.winget_execution_preflight import (
     WingetExecutionPreflightService,
 )
@@ -105,6 +106,7 @@ class WingetUninstallService:
         audit: WingetUninstallAuditLogger,
         process_is_elevated: Callable[[], bool],
         max_items: int = 5_000,
+        context_recorder: UninstallContextRecorder | None = None,
     ) -> None:
         self._package_resolver = package_resolver
         self._software_resolver = software_resolver
@@ -124,6 +126,7 @@ class WingetUninstallService:
         self._audit = audit
         self._max_items = max_items
         self._process_is_elevated = process_is_elevated
+        self._context_recorder = context_recorder
 
     def prepare(
         self,
@@ -376,6 +379,11 @@ class WingetUninstallService:
             arguments_digest=arguments_digest(request_arguments),
             runtime_confirmation_id=runtime_confirmation_id,
         )
+        context_id = (
+            self._context_recorder.capture_winget(preview)
+            if self._context_recorder is not None
+            else None
+        )
         try:
             result = self._registry.execute(
                 plan.tool_name,
@@ -403,6 +411,12 @@ class WingetUninstallService:
                 error_code=type(exc).__name__,
                 mutation_may_have_started=state is WingetUninstallTransactionState.EXECUTING,
             )
+            if self._context_recorder is not None:
+                self._context_recorder.finalize(
+                    context_id,
+                    verification_state="failed",
+                    verified_removed=False,
+                )
             raise
         if result.process.category in {
             WingetProcessResultCategory.CANCELLED_BEFORE_LAUNCH,
@@ -505,6 +519,16 @@ class WingetUninstallService:
         )
         with suppress(AuditUnavailableError):
             self._audit.completed(plan, report)
+        if self._context_recorder is not None:
+            self._context_recorder.finalize(
+                context_id,
+                verification_state=verification.state.value,
+                verified_removed=verification.state is WingetVerificationState.VERIFIED_REMOVED,
+                completed_unverified=(
+                    verification.state is WingetVerificationState.COMPLETED_UNVERIFIED
+                ),
+                completed_at=result.process.finished_at,
+            )
         return report
 
     def _build_evidence(

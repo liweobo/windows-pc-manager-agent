@@ -44,6 +44,7 @@ def test_vendor_dialog_keeps_cancel_default_and_hides_full_command(
     dialog.primary_button.click()
     qtbot.waitUntil(lambda: dialog._stage == "COMPLETED", timeout=10_000)
     assert "verified_removed" in dialog.details.toPlainText()
+    assert not dialog.residual_button.isHidden()
     assert len(environment.adapter.calls) == 1
     environment.close()
 
