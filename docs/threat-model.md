@@ -1,5 +1,21 @@
 # Threat model
 
+## Stage 4X1 threats and mitigations
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Model/user injects a command or executable | Strict per-action payloads, `extra=forbid`, no generic fields, separate non-LLM registry | New action types still need separate review |
+| AccessDenied is mistaken for authority | Resolver requires completed action-specific evidence; otherwise UNKNOWN | Windows ACL interpretation remains platform-specific future work |
+| Request is changed in transit | Canonical request digest plus HMAC-SHA-256 over exact bytes | Ephemeral in-process key is not a production IPC trust model |
+| Duplicate JSON keys or parser ambiguity | Pre-parse size bound, strict UTF-8, duplicate-key rejection, exact version and schema | A future transport must preserve the same bytes |
+| Old confirmation reused after change | Plan/Preview/payload/target/risk/privilege digests, UTC expiry and single-use consumption | User comprehension still depends on clear Preview text |
+| Replay or concurrent double dispatch | Unique request digest/nonce fingerprint and atomic SQLite claim | Filesystem/SQLite availability can deny service, safely |
+| Target changes after approval | Fresh validation before consumption and a second final TOCTOU gate | Real Windows handles/ACL semantics are not implemented yet |
+| Main Agent or Broker crashes | Active work becomes INTERRUPTED and request becomes CONSUMED; no auto-resume | Manual diagnosis is required |
+| Audit or database is unavailable/corrupt | Typed fail-closed errors before authority/execution | Availability is sacrificed for integrity |
+| Defined future action accidentally executes | Mock registry contains only service Start/Stop; all other action types reject | Registry changes require security review and tests |
+| Stage 4X1 is mistaken for real elevation | Disabled default, Mock-only type/Preview/UI/result wording, no privileged OS adapter | A developer can still misunderstand a synthetic test without docs |
+
 ## Stage 4D4 threats and mitigations
 
 | Threat | Control | Residual risk |

@@ -1,5 +1,162 @@
 # API reference
 
+## Stage 4X1 Privileged Action Protocol API
+
+以下 API 只实现结构化协议与内存 Mock Broker。任何 `execute`/`dispatch` 描述都不代表真实
+Windows 管理员操作；Stage 4X1 没有 UAC、提权进程或 Windows 特权写适配器。
+
+### Domain models and validators
+
+| 函数 / 类型 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `PrivilegedBrokerMode` | 运行模式枚举，仅允许 `disabled` 和 `mock`；不存在 `real` 值。 |
+| `PrivilegedActionType` | 协议 v1 的七种有限 action。枚举成员本身不授予执行能力，仍需私有 registry manifest。 |
+| `PrivilegeResolutionStatus` / `PrivilegeRequirement` | 分别表达路由结论与所需 Windows 权限级别；SYSTEM/TrustedInstaller 永不执行。 |
+| `PrivilegeResolution.validate_resolution()` | Pydantic after-validator；阻止 safety=false 却非 BLOCKED、证据不完整却 REQUIRED、或把 SYSTEM/TI 标成可执行。失败抛 `ValidationError`，无 I/O。 |
+| `PrivilegeResolution.canonical_digest()` | 对完整权限结论和非秘密证据做 canonical SHA-256，返回 64 位小写 hex，用于 Preview/确认绑定。 |
+| `ServiceStartPayload` | 只表示一个精确服务身份、预期 STOPPED、启动配置与依赖摘要；不包含命令。 |
+| `ServiceStopPayload` | 只表示一个精确服务身份、预期 RUNNING、启动配置与依赖摘要。 |
+| `ServiceRestartPayload` | 定义未来 restart 的精确输入；Stage 4X1 registry 不注册，因此 Broker 拒绝。 |
+| `ServiceStartupTypeChangePayload.enforce_stage_4c2_transition()` | 只允许非 delayed Automatic 与 Manual 间的实际变化；Disabled/Boot/System/unknown/delayed/no-op 都触发 `ValidationError`。 |
+| `StartupMachineDisablePayload` | 定义 exact HKLM Run identity/state digest；没有 registry value 或写接口，Stage 4X1 不注册。 |
+| `StartupMachineRestorePayload` | 在 disable identity/state 外绑定 backup UUID/digest；仍是 defined-only。 |
+| `MachineMsiUninstallPayload.bind_product_code()` | 要求大写 GUID ProductCode 的 canonical digest 精确匹配，防止验证后替换；无命令行字段。 |
+| `PrivilegedActionPlan.bind_payload()` | 绑定 action/payload type、payload digest、固定 R3 和显式 UTC；任一漂移使模型无效。 |
+| `PrivilegedActionPlan.canonical_digest()` | 哈希 Plan 的所有权限相关字段，作为两级确认和 Request 的 plan hash。 |
+| `PrivilegedActionPreview.validate_preview()` | 要求 explicit UTC、R3、Mock-only，以及 safety-approved、Administrator-required 的完整 resolver 证据。 |
+| `PrivilegedActionPreview.canonical_digest()` | 哈希该次具体 Preview ID、Fresh state/safety/privilege 和警告文本。 |
+| `PrivilegedActionRequest.validate_capability()` | 校验 payload/action/digest、R3/Admin、UTC 正时长、最大 600 秒；禁止降级、过期倒置和非 UTC canonical ambiguity。 |
+| `RequestIntegrity` / `PrivilegedActionEnvelope` | 包装 HMAC algorithm/key ID/code 与 canonical request digest；字段使用 strict model 和 SHA-256 格式。 |
+| `PrivilegedCallerContext` | 保存由未来可信 transport 在带外提供的 context/Agent IDs 与 SID/session fingerprints；不来自 Request payload。 |
+| `PrivilegedReplayState` / `PrivilegedTransactionState` | 分别表达单次请求状态和端到端事务状态；INTERRUPTED 没有自动恢复路径。 |
+| `BrokerDecision` / `MockExecutionStatus` / `PrivilegedVerificationStatus` | 将 Broker 审批、假执行、Fresh 验证三个维度分开，避免把 process/handler 返回误报为成功。 |
+| `PrivilegedActionResult.validate_result()` | 拒绝 completed 但未 started、未开始却声称 outcome、未完成却验证、VERIFIED 无 post hash、或非 UTC 结果。 |
+| `PrivilegedActionResultEnvelope` | 用 protocol version、typed result、canonical digest 和 integrity 包装 Broker 返回。 |
+| `canonical_model_digest(value)` | 用 UTF-8、sorted compact JSON、`allow_nan=False` 后 SHA-256；非 JSON/NaN 抛序列化异常，无 I/O。 |
+| `_require_utc(value, label)` | 内部 validator helper；要求 timezone-aware 且 UTC offset 为 0，否则抛 `ValueError`。 |
+
+### Permission resolver, serialization and authentication
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `PrivilegeAssessmentInput` | 接收已完成的 action-specific safety/preflight/token evidence；它不自行检查 Windows ACL。 |
+| `PrivilegeRequirementResolver.resolve(evidence)` | 严格顺序解析：safety block → elevated-main block → SYSTEM/TI unsupported → standard access sufficient → complete Admin required → UNKNOWN。AccessDenied code 仅作证据，不能单独提权。 |
+| `PrivilegedRequestSerializer.__init__(max_request_bytes)` | 设置解析前 byte limit；只接受 1024–1048576，越界抛 `ValueError`。 |
+| `PrivilegedRequestSerializer.max_request_bytes` | 返回当前只读 transport byte limit。 |
+| `canonical_request_bytes(request)` | 把 strict Request 转为唯一 UTF-8 canonical bytes，供 digest/HMAC；不发送数据。 |
+| `canonical_result_bytes(result)` | 为 Broker result 生成相同规范的认证 bytes。 |
+| `serialize(envelope)` | canonical 编码完整 envelope，再检查大小；过大抛 `PrivilegedRequestTooLargeError`。 |
+| `deserialize(serialized)` | 先限长，再 strict UTF-8/JSON/duplicate-key/exact-version/Pydantic 验证；分别抛 size/version/serialization typed error。 |
+| `_require_size(serialized)` | 私有 pre-parse/serialize guard；只比较 bytes 长度，不分配大型 JSON 对象。 |
+| `_canonical_json(value)` | 私有 sorted/compact/no-NaN JSON encoder；TypeError/ValueError 转为 `PrivilegedSerializationError`。 |
+| `_reject_duplicate_keys(pairs)` | `json.loads` object hook；发现任意重复 key 立即抛 `DuplicateJsonKeyError`，不采用 last-value-wins。 |
+| `PrivilegedRequestAuthenticator.sign/verify` | Protocol：对 canonical bytes 产生/验证 `RequestIntegrity`；未来实现不得改变调用方语义。 |
+| `EphemeralHmacAuthenticator.__init__(secret, key_id)` | 复制至少 32-byte secret 并验证非空 key ID；key 仅在内存中，不持久化。 |
+| `EphemeralHmacAuthenticator.generate()` | 使用 `secrets.token_bytes(32)` 创建 process-local Mock key；不是 production IPC trust。 |
+| `EphemeralHmacAuthenticator.sign(message)` | 返回 HMAC-SHA-256 小写 hex 和 key ID；不记录 message/key。 |
+| `EphemeralHmacAuthenticator.verify(message, integrity)` | 先匹配 key ID，再用 `hmac.compare_digest` constant-time 验证；返回 bool，不抛认证细节。 |
+
+### Builder, registry and Fresh revalidation
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `PrivilegedActionBuilder.__init__(...)` | 注入 serializer/authenticator/confirmation service、可测时钟和 15–600 秒 Request TTL；无全局状态。 |
+| `PrivilegedActionBuilder.plan(...)` | 从确定性 upstream evidence 建立一个 exact R3 Plan；计算 payload/object summary digest，不扩充 action 或 target。 |
+| `PrivilegedActionBuilder.preview(...)` | 把 Fresh target/safety/privilege evidence 包成 Mock-only Preview；不创建确认或 Request。 |
+| `PrivilegedActionBuilder.build(...)` | 先要求 exact approved confirmation pair，再生成 32-byte URL-safe nonce、短时 Request、canonical digest 和 HMAC envelope；不消费确认。 |
+| `PrivilegedActionHandler.require/execute/verify` | 私有 handler Protocol：Fresh precondition、一个有限 Mock mutation、Fresh postcondition；不得实现通用 runner。 |
+| `PrivilegedActionManifest` | 不可变 manifest，绑定 action、payload model、R3 floor、Admin requirement、handler 和 audit policy。 |
+| `PrivilegedActionRegistry.__init__()` | 创建独立空 allow-list；不与 LLM `ToolRegistry` 共享。 |
+| `PrivilegedActionRegistry.register(manifest)` | 拒绝 duplicate、非 R3 或非 Admin manifest；成功只写入进程内 dict。 |
+| `PrivilegedActionRegistry.require(action_type)` | 返回 exact manifest；未注册抛 `PrivilegedActionRegistryError`，没有 fallback。 |
+| `PrivilegedActionRegistry.action_types` | 返回按 enum value 排序的确定性已注册 action tuple。 |
+| `build_stage4x1_registry(handler)` | 创建只含 `SERVICE_START` 和 `SERVICE_STOP` 的 Mock registry；所有其他定义 action 保持不可执行。 |
+| `PrivilegedRevalidationError.__init__(decision, message)` | 保存稳定 Broker decision code 和本地诊断消息，供 Broker fail-closed 映射。 |
+| `FakePrivilegedService.state_digest()` | 仅哈希 identity/runtime state/startup config/dependency；safety/risk/privilege 使用独立 digest/check，防止证据维度混淆。 |
+| `FakePrivilegedSystemState.__init__(services)` | 构建 case-insensitive、`RLock` 保护的合成服务 map；不查询 Windows SCM。 |
+| `inspect_service(name)` | 在线程锁内返回一个 fake immutable snapshot 或 `None`。 |
+| `replace_service(service)` | 只替换内存 fake evidence，用于 TOCTOU/安全测试。 |
+| `set_action_failure(name, enabled)` | 切换指定 fake target 的合成执行失败标志。 |
+| `set_service_state(name, state)` | 仅在 fake target 存在且未设失败时替换 immutable state，返回是否成功。 |
+| `ServicePrivilegedRevalidator.__init__(state)` | 注入唯一 fake state provider。 |
+| `ServicePrivilegedRevalidator.require(request)` | 仅接受 Start/Stop payload；Fresh 检查存在性、stable identity、safety、R3、Admin、预期 state/config/dependency；失败抛带精确 decision 的 `PrivilegedRevalidationError`。 |
+| `ServicePrivilegedRevalidator.execute(request)` | 仅把 fake Start 改 RUNNING 或 fake Stop 改 STOPPED；其他 payload 返回 false。 |
+| `ServicePrivilegedRevalidator.verify(request)` | Fresh 读取 fake state；只有 exact postcondition 成立才返回 snapshot，否则 `None`。 |
+
+### Durable confirmations and persistence
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `PrivilegedActionConfirmation.validate_confirmation()` | 要求 PLAN 无 parent、RUNTIME 有 parent，全部时间 explicit UTC 且 expiry 正向，固定 R3/Admin，APPROVED 必须有 confirmed time。 |
+| `PrivilegedConfirmationRepository.save/get/update/bind_runtime_preview` | confirmation service 所需持久化 Protocol；实现必须保持 transaction/confirmation 原子状态。 |
+| `PrivilegedActionConfirmationService.__init__(...)` | 注入 repository、两个正 TTL 和可测时钟；TTL 非正抛 `ValueError`。 |
+| `request_plan(plan, preview)` | 要求 current safe Admin Mock Preview，建立并持久化 PLAN/PENDING record。 |
+| `resolve_plan(id, approved, plan, preview)` | 解析一次 pending plan gate；changed/stale/expired/repeated 抛 `PrivilegedConfirmationError`。 |
+| `request_runtime(parent_id, plan, preview)` | 要求仍有效 APPROVED parent 和同一 Plan，绑定 Fresh runtime Preview，再持久化独立 child confirmation。 |
+| `resolve_runtime(id, approved, plan, preview)` | 解析一次 object-specific immediate gate；不构造或执行 Request。 |
+| `require_approved_pair(parent_id, runtime_id, plan, preview)` | 验证两条 durable approval 的 parent、状态、expiry、Plan/Preview/payload/target/object/risk/privilege bindings；返回 pair 但不消费。 |
+| `_resolve(...)` | 私有 shared decision path；仅允许 PENDING，验证 current/bindings 后持久化 APPROVED/REJECTED。 |
+| `_create(...)` | 私有 record factory；计算 tier-specific expiry 并复制所有 exact binding fields。 |
+| `_require_not_expired(value)` | 到期时把 PENDING/APPROVED durable 标为 EXPIRED，然后抛 confirmation error。 |
+| `_require_current(plan, preview)` | 私有 safety gate；要求 Plan/Preview IDs/hash/action/target/risk、Mock marker 和 safety-approved Admin resolution 完全一致。 |
+| `PrivilegedActionRepository.__init__(database_path)` | 为三个 additive Stage 4X1 table 建立 SQLite engine/session factory；尚不授权任何操作。 |
+| `initialize()` | 建表并把上次遗留 active transaction 标记 INTERRUPTED、关联 Request 标记 CONSUMED；返回被中断 plan UUID tuple。DB/数据损坏抛 `PrivilegedActionStoreError`。 |
+| `create(plan, preview)` | 在请求确认前持久化 exact canonical Plan/initial Preview；mismatch/duplicate/store failure fail closed。 |
+| `save_confirmation(confirmation)` | 只在 transaction 处于对应 awaiting state 时插入 PLAN 或 RUNTIME confirmation。 |
+| `get_confirmation(id)` | 重建 strict typed confirmation；unknown、损坏或 DB 错误统一抛 store error。 |
+| `update_confirmation(confirmation)` | 只允许 PENDING→APPROVED/REJECTED/EXPIRED 或 APPROVED→EXPIRED，并原子推进 transaction；非法/竞态拒绝。 |
+| `bind_runtime_preview(plan, preview)` | 仅在 PLAN_CONFIRMED 且 plan/target 未变时替换 Fresh Preview，并进入 awaiting runtime confirmation。 |
+| `register_request(envelope)` | 仅在 AUTHORIZED 且全部 request bindings 匹配时插入 CREATED replay row；request ID/digest/nonce fingerprint 任一重复抛 `PrivilegedReplayError`。 |
+| `snapshot(request)` | 只读重建 transaction/Plan/Preview/two confirmations/replay binding；unknown/incomplete/corrupt evidence fail closed。 |
+| `consume(request, now)` | 单个 SQLite transaction 条件 claim CREATED request，重验 expiry/transaction/confirmations/parent/nonce，再同时标记 request CONSUMING、两级确认 CONSUMED；并发只能一方成功。 |
+| `reject_unconsumed(id, result_code, expired)` | 对 authentic CREATED request 写入永久 REJECTED/EXPIRED terminal state；不会消费确认或重新开放。 |
+| `transition(id, transaction_state, replay_state, result_code)` | 只推进已经 CONSUMING/CONSUMED 的 request；未消费 authority 不能进入执行状态。 |
+| `close()` | dispose SQLite engine 并清除 initialized flag；之后所有读写 fail closed。 |
+| `_transaction(session, plan_id)` | 私有 exact plan lookup；unknown plan 抛 store error，不做 display fallback。 |
+| `_require_initialized()` | 私有 guard；repository 未初始化或已关闭时拒绝全部操作。 |
+| `PrivilegedRequestReplayStore.__init__(repository)` | 把完整 repository 收窄为 Broker replay API。 |
+| `PrivilegedRequestReplayStore.inspect(request)` | 委托 durable snapshot，不改变权限。 |
+| `PrivilegedRequestReplayStore.consume(request, now)` | 委托原子 claim/confirmation consumption。 |
+| `nonce_fingerprint(nonce)` | 以 ASCII SHA-256 生成持久化/审计关联值；避免存 raw nonce。 |
+| `_confirmation_to_row(value)` | 私有 typed model→SQLAlchemy row 映射；不加入未授权字段。 |
+| `_confirmation_from_row(row)` | 私有 row→strict model 重建并恢复 UTC；损坏由 repository 转为 store error。 |
+| `_as_utc(value)` | SQLite naive 时间附加 UTC，aware 时间转换为 UTC，保证后续 expiry 比较一致。 |
+
+### Orchestration, Broker, audit and UI
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `PrivilegedActionService.__init__(...)` | 注入 builder/confirmations/repository/serializer/Mock Broker/audit/caller；UI 不直接持有 handler。 |
+| `prepare(...)` | 只接受 resolver `REQUIRED`，建立 Plan/Preview、持久事务并请求 PLAN confirmation；其他路由抛 `PrivilegedActionPreparationError`。 |
+| `resolve_plan_confirmation(...)` | 委托第一层 durable decision，不构造 Request。 |
+| `prepare_runtime_confirmation(...)` | 用新 Fresh evidence 建立第二个 Preview 和短时 RUNTIME confirmation。 |
+| `resolve_runtime_confirmation(...)` | 委托第二层 durable decision，不执行 fake/real state。 |
+| `build_and_register(...)` | 在 exact approved pair 后构造认证 envelope、持久化 replay record，再记录 Main authorization audit；audit/DB 失败不派发。 |
+| `dispatch_mock(envelope)` | canonical serialize 后只发送给同进程 Mock Broker 和固定 caller context；没有 transport fallback。 |
+| `MockPrivilegedBroker.__init__(...)` | 注入 serializer/authenticator/repository/replay/registry/audit/clock 和可选 final-TOCTOU test hook；不创建 Windows adapter。 |
+| `MockPrivilegedBroker.dispatch(serialized, caller)` | 执行 parse→integrity→expiry→replay→allow-list→bindings→Fresh→audit→atomic consume→final TOCTOU→fake execute→verify→audit 的完整固定管线，返回 authenticated result envelope。 |
+| `_binding_decision(...)` | 比较带外 caller、payload model、stored request/nonce、Plan/Preview、两级确认、risk 与 privilege；返回 stable rejection 或 `None`。 |
+| `_require_preview_fresh(preview, fresh)` | 独立比较 target state、safety 和 privilege digest；差异抛精确 revalidation decision。 |
+| `_reject(envelope, decision, mutate, expired)` | 对 authentic stale request可 durable terminal reject，再写 validation audit；replay/store/audit error 映射成更保守 decision。 |
+| `_malformed(decision)` | 在尚无可信 request identity 时写最小 validation audit并返回无 request/action ID 的 authenticated rejection。 |
+| `_finish(envelope, result)` | 写 final verification audit并附 audit UUID；audit 不可用把结果降为 `PERSISTENCE_UNAVAILABLE`。 |
+| `_result_envelope(result)` | canonical 编码 result、计算 SHA-256、HMAC 签名并返回 versioned envelope。 |
+| `PrivilegedActionAuditLogger.__init__(repository, app_version, git_commit)` | 注入 mandatory append-only audit 和版本信息。 |
+| `authorized(envelope)` | 写 `MAIN_AUTHORIZATION_EVENT`；表示两级确认后已签名但尚未消费。 |
+| `malformed(decision)` | 写无可信 request identity 的最小 `BROKER_VALIDATION_EVENT`。 |
+| `validation(envelope, decision)` | 在消费前写 Broker allow/reject decision；APPROVED 文案明确 `VALID_NOT_CONSUMED`。 |
+| `execution(envelope, started)` | 在消费后记录 fake executor 是否到达；不记录 payload。 |
+| `verification(envelope, result)` | 记录 execution/result/verification codes，不把 process/handler outcome等同系统成功。 |
+| `_safe_parameters(envelope)` | 只返回 IDs、digests、risk/privilege/time、hashed nonce；排除 payload、raw nonce、HMAC/key、SID/session fingerprint。 |
+| `ApplicationRuntime.create_privileged_action_services(fake_state)` | 仅当 setting=`mock` 且主进程 token 未提升时，才组合 ephemeral authenticator、durable confirmation/replay、private registry、Broker 和 service；disabled/elevated-main 抛 `RuntimeError`；调用方必须注入 fake state。 |
+| `_runtime_fingerprint(value)` | 对当前 runtime username/session material做 SHA-256，仅供 caller context 关联；不把原值放 Request/audit。 |
+| `AppSettings.validate_privileged_broker_mode(value)` | trim/lower 后只允许 disabled/mock；任何 real/其他值触发 settings `ValidationError`。 |
+| `PrivilegedActionDialog.__init__(plan, preview, broker_mode, parent)` | 建立 modal developer dialog，展示 exact action/target digest prefix/R3/Admin/Mock 警告；Mock 按钮只在 mock mode 可见且初始禁用。 |
+| `PrivilegedActionDialog.mark_authorized()` | 第一按钮禁用，只有可见 Mock 按钮启用，并明确“两级确认只适用于 Mock”。 |
+| `PrivilegedActionDialog.show_result(result)` | 禁用 Mock 按钮、HTML escape result code，并永久显示“没有真实管理员操作”。 |
+| `_preview_html(plan, preview)` | 生成固定安全 Preview HTML；只显示 digest prefix 和枚举，不渲染不可信 payload/服务内容。 |
+| `_privilege_status(prepared)` | Stage 4C1 UI helper：区分 elevated-main block、普通权限足够、仅可进入 Stage 4X1 Mock、或 safety block；权限/确认不能覆盖安全拒绝。 |
+
 ## Stage 4D4 安全残留清理 API
 
 本节逐一说明 Stage 4D4 新增或改变的生产对象、函数和方法。旧 `ResidualReport`、旧候选勾选和

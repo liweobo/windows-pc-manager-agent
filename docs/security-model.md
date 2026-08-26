@@ -1,5 +1,32 @@
 # Security model
 
+## Stage 4X1 privileged protocol controls
+
+- **No real privilege boundary:** Stage 4X1 does not elevate, call UAC, create an admin process or touch
+  SCM/registry/MSI machine state. `mock` modifies only an injected `FakePrivilegedSystemState`.
+- **Safety before privilege:** permission routing receives a completed deterministic safety result.
+  Safety-blocked input remains `BLOCKED`; SYSTEM/TrustedInstaller is `UNSUPPORTED`; incomplete or generic
+  access-denied evidence is `UNKNOWN`.
+- **Finite language:** seven action types have separate strict payloads. Only service Start/Stop are in
+  the Mock registry. There is no generic command runner or caller-controlled executable/arguments.
+- **Exact authorization:** Plan and immediate confirmations bind action, canonical Plan/Preview,
+  payload, target, object summary, R3 risk, Administrator requirement and expiry. A request additionally
+  binds caller context, Agent instance, nonce and protocol version.
+- **Integrity and parsing:** the Broker enforces a byte limit before parsing, strict UTF-8 JSON, duplicate
+  key rejection, exact protocol version, Pydantic `extra=forbid`, lowercase SHA-256 fields, explicit UTC
+  and canonical sorted JSON before verifying HMAC-SHA-256.
+- **Replay and crash safety:** request digest and hashed nonce are unique; a SQLite transaction consumes
+  both approvals and the request once. Concurrent losers, expired requests and restart recovery cannot
+  retry or resume.
+- **Fresh Broker checks:** allow-list, authenticated caller, durable bindings, service identity,
+  state/config/dependencies, safety, risk, privilege and final TOCTOU checks all run again locally.
+- **Mandatory audit:** authorization, Broker validation, Mock execution reachability and verification are
+  separate events. Missing required audit or persistence denies progress. Audit stores IDs and digests,
+  not payloads, secrets, raw nonces or HMAC values.
+
+The process-local HMAC key proves implementation mechanics only. It is not claimed to authenticate across
+a real standard-user/elevated process boundary; that residual design risk is deferred to a future stage.
+
 ## Stage 4D4 residual cleanup policy
 
 Stage 4D4 uses default denial. HIGH ownership proves only that a path probably belongs to an uninstalled

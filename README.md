@@ -1,5 +1,23 @@
 # Windows PC Manager Agent
 
+## Stage 4X1：Privileged Action Protocol（仅 Mock）
+
+Stage 4X1 建立了未来独立提权 Broker 所需的协议边界，但**没有实现真实提权**。主 Agent
+继续以普通用户运行，不触发 UAC，不启动管理员子进程，也不调用任何真实管理员 API。
+
+- 权限解析始终晚于确定性安全审查；`AccessDenied` 本身不能授权提权。
+- 协议只接受七种强类型 action；没有 command、script、executable、args 或通用参数字典。
+- 本阶段仅把合成环境中的 `SERVICE_START` / `SERVICE_STOP` 加入 Mock allow-list；其余 action
+  只有协议定义，不能执行。
+- Request 绑定 Plan、Preview、两级确认、target/payload/risk/privilege digest、调用方上下文、
+  32-byte nonce、UTC 有效期和协议版本，并使用 canonical JSON + HMAC-SHA-256 验证完整性。
+- SQLite 原子消费 Request 与两级确认；重放、并发、过期、重启中断、数据库或审计不可用均
+  fail closed，且不会自动重试。
+- Broker 在消费前和 Mock 执行前分别 Fresh revalidate；Mock 只修改注入的内存假状态。
+
+默认 `PC_MANAGER_PRIVILEGED_BROKER_MODE=disabled`。开发测试可显式设为 `mock`，界面会持续
+显示“仅 Mock、没有真实系统操作”。完整协议见 `docs/privileged-action-protocol.md`。
+
 ## Stage 4D4：安全残留清理（Windows 回收站限定）
 
 Stage 4D4 允许用户从 Stage 4D3 报告中勾选少量候选，但旧报告、旧勾选和旧 R0 确认都没有
@@ -401,6 +419,7 @@ uv run pytest tests/performance/test_large_scan.py -q -s
 uv run pytest tests/integration/test_windows_process_management_real.py -q
 uv run pytest tests/integration/test_windows_startup_readonly.py -q
 uv run pytest tests/integration/test_msix_windows_inventory.py -q
+uv run pytest tests/unit/test_privileged_broker_branches.py tests/integration/test_privileged_action_flow.py -q
 uv run bandit -q -r src
 uv run pip-audit
 uv build

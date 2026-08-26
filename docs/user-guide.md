@@ -1,5 +1,24 @@
 # User guide
 
+## Stage 4X1 开发者 Mock 权限协议
+
+普通用户无需开启此功能。默认设置为 `disabled`，现有服务、启动项和软件功能继续遵循各自
+安全边界，不会因为权限不足自动请求管理员权限。
+
+开发者可以临时设置 `PC_MANAGER_PRIVILEGED_BROKER_MODE=mock` 来查看协议 Preview。界面必须
+同时显示“Mock only”“不会触发 UAC”“不会修改 Windows”。即使完成计划确认和即时确认，
+Broker 也只会在内存中的假服务上模拟 Start/Stop，然后返回带验证状态的结果。Restart、服务
+启动类型、机器启动项和机器 MSI action 会显示为未加入 allow-list，无法执行。
+
+看到以下结果时请按字面理解：
+
+- `MOCK_VALIDATED`：协议和假状态验证通过，不表示 Windows 操作成功。
+- `REPLAY_REJECTED`：同一请求已使用或并发请求已输掉原子竞争；不能再次点击重试。
+- `PERSISTENCE_UNAVAILABLE`：本地授权或审计存储不可信；安全默认是不执行。
+- `INTERRUPTED`：应用曾在协议进行中退出；不会自动恢复或重发。
+
+不要以管理员身份启动整个应用。Stage 4X1 没有真实提权能力。
+
 ## 使用 Stage 4D4 安全清理少量卸载残留
 
 1. 先完成一次由 Agent 控制的软件卸载，再运行 Stage 4D3“分析可能残留”。

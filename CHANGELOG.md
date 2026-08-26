@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — Stage 4X1
+
+### Added
+
+- Strict versioned Privileged Action Protocol models, canonical JSON serialization, bounded parsing,
+  HMAC-SHA-256 Mock integrity, short-lived nonces and typed result envelopes.
+- Safety-first `PrivilegeRequirementResolver`, separate privileged allow-list, action-specific payloads,
+  durable two-level confirmations and atomic SQLite replay protection.
+- Full in-process Mock Broker pipeline with fresh target/safety/risk/privilege/TOCTOU validation, fake
+  service Start/Stop execution, postcondition verification and four privacy-minimized audit event types.
+- Disabled-by-default runtime composition, explicit developer Mock dialog, protocol documentation and
+  unit/integration/security/GUI coverage with a dedicated 95% CI gate.
+
+### Security
+
+- No real elevation, UAC prompt, admin child process, shell, subprocess, SCM write, startup write or
+  machine MSI dispatch exists in Stage 4X1. The main Agent remains a standard-user process.
+- Only `SERVICE_START` and `SERVICE_STOP` are Mock-executable. Restart, startup-type change, machine
+  startup disable/restore and machine MSI removal are defined-only and rejected by the Broker allow-list.
+- Requests contain no command, executable, argument list, script or generic dictionary. Authentication
+  keys, raw nonces, payloads and caller fingerprints are not written to audit logs.
+- Corrupt persistence, unavailable mandatory audit, changed confirmation bindings, expiry, replay,
+  concurrent consumption and crash recovery all fail closed without redispatch.
+
 ## Unreleased — Stage 4D4
 
 ### Added

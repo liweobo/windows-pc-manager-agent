@@ -104,6 +104,18 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4X1 adds a strict Privileged Action Protocol and an in-process Mock Broker only. It does not add
+real elevation, UAC, an administrator child process or any privileged Windows write. The main Agent stays
+non-elevated. Privilege routing runs only after deterministic safety review; AccessDenied alone is
+UNKNOWN and cannot authorize escalation. Protocol payloads are finite and typed with no command,
+executable, script, args or generic dictionary. Only synthetic service Start/Stop are Mock-allowlisted;
+all other defined action types reject. Requests bind canonical Plan/Preview, both durable confirmations,
+target/payload/object/risk/privilege digests, authenticated caller context, Agent instance, cryptographic
+nonce, UTC expiry and protocol version. Atomic SQLite consumption, Fresh/TOCTOU revalidation, mandatory
+audit and restart interruption are fail closed and never auto-retry. The ephemeral HMAC authenticator is
+test-only and is not a final cross-privilege trust design. Default mode is disabled; developer mock mode
+must remain visibly Mock-only.
+
 Stage 4D4 retains Stage 4D3 report-only analysis and adds exactly one independent write tool:
 `software.residuals.trash`. A Stage 4D3 report, candidate selection or R0 confirmation is intent only.
 Stage 4D4 resolves selected UUIDs locally, performs a full Fresh identity/material/ownership/

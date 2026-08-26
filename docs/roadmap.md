@@ -147,12 +147,20 @@ gate. User/config/database/package/plugin/license/application-state/unknown/shar
 unsupported-volume cleanup, permanent deletion, registry cleanup, automatic restore, shell and elevation
 remain absent.
 
-## Stage 4X — Privileged Action Broker (planned)
+## Stage 4X1 — Privileged Action Protocol and Mock Broker (complete)
 
-The next safety phase is a standard-user main application plus authenticated, short-lived, allow-listed
-elevated broker over structured IPC. It must receive a separately reviewed and confirmed typed request,
-perform exactly one narrow privileged operation, return verifiable evidence and exit. The main application
-must never remain elevated. No Stage 4X implementation is included in Stage 4D4.
+- Added safety-first permission resolution and strict versioned typed action payloads.
+- Added canonical authenticated requests, exact two-level confirmation bindings and atomic replay store.
+- Added a complete in-process Mock Broker for synthetic service Start/Stop only, with Fresh/TOCTOU
+  validation, fake execution, verification, audit and crash interruption.
+- Default remains disabled. No UAC, real elevation, admin process or Windows privileged write exists.
+
+## Stage 4X2+ — Real privileged Broker (not started)
+
+- Separately design IPC ACLs, caller/process/session authentication, signed Broker identity, key
+  establishment, UAC lifecycle, install/update trust and anti-downgrade.
+- Implement and review one real action adapter at a time; never add a generic command channel.
+- Preserve the Stage 4X1 canonical schema, replay, confirmation, audit and Fresh validation guarantees.
 
 ## Stage 4C3+ / other controlled system operations (not started)
 

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pc_manager_agent import __version__
 from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
 from pc_manager_agent.audit.msix_uninstall import MsixUninstallAuditLogger
+from pc_manager_agent.audit.privileged_actions import PrivilegedActionAuditLogger
 from pc_manager_agent.audit.process_actions import ProcessActionAuditLogger
 from pc_manager_agent.audit.repository import AuditRepository
 from pc_manager_agent.audit.residual_cleanup import ResidualCleanupAuditLogger
@@ -39,6 +41,9 @@ from pc_manager_agent.confirmation.file_operations import (
     RollbackConfirmationService,
 )
 from pc_manager_agent.confirmation.msix_uninstall import MsixConfirmationService
+from pc_manager_agent.confirmation.privileged_actions import (
+    PrivilegedActionConfirmationService,
+)
 from pc_manager_agent.confirmation.process_actions import ProcessActionConfirmationService
 from pc_manager_agent.confirmation.residual_cleanup import (
     ResidualCleanupConfirmationService,
@@ -60,6 +65,7 @@ from pc_manager_agent.confirmation.trash import TrashConfirmationService
 from pc_manager_agent.confirmation.vendor_uninstall import VendorUninstallConfirmationService
 from pc_manager_agent.confirmation.winget_uninstall import WingetUninstallConfirmationService
 from pc_manager_agent.domain.file_analysis import FileAnalysisProgress
+from pc_manager_agent.domain.privileged_actions import PrivilegedCallerContext
 from pc_manager_agent.domain.reports import ScanProgress
 from pc_manager_agent.domain.risk import RiskLevel
 from pc_manager_agent.domain.transactions import OperationProgress
@@ -83,6 +89,7 @@ from pc_manager_agent.orchestration.file_operation_planner import (
 from pc_manager_agent.orchestration.file_operation_service import FileOperationService
 from pc_manager_agent.orchestration.msix_execution_preflight import MsixExecutionPreflightService
 from pc_manager_agent.orchestration.msix_uninstall_execution import MsixUninstallService
+from pc_manager_agent.orchestration.privileged_actions import PrivilegedActionService
 from pc_manager_agent.orchestration.process_action_planner import ProcessActionPlanCompiler
 from pc_manager_agent.orchestration.process_actions import ProcessActionService
 from pc_manager_agent.orchestration.process_target_resolver import ProcessTargetResolver
@@ -160,6 +167,10 @@ from pc_manager_agent.persistence.file_operations import (
 from pc_manager_agent.persistence.msix_uninstall import (
     MsixUninstallExecutionGuard,
     MsixUninstallRepository,
+)
+from pc_manager_agent.persistence.privileged_actions import (
+    PrivilegedActionRepository,
+    PrivilegedRequestReplayStore,
 )
 from pc_manager_agent.persistence.process_actions import (
     ProcessActionRepository,
@@ -250,6 +261,15 @@ from pc_manager_agent.platform_support.windows.winget_uninstall import (
     WindowsWingetPackageInventoryPlatform,
     WindowsWingetUninstallPlatform,
 )
+from pc_manager_agent.privileged.authentication import EphemeralHmacAuthenticator
+from pc_manager_agent.privileged.builder import PrivilegedActionBuilder
+from pc_manager_agent.privileged.mock_broker import MockPrivilegedBroker
+from pc_manager_agent.privileged.registry import build_stage4x1_registry
+from pc_manager_agent.privileged.revalidation import (
+    FakePrivilegedSystemState,
+    ServicePrivilegedRevalidator,
+)
+from pc_manager_agent.privileged.serialization import PrivilegedRequestSerializer
 from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
 from pc_manager_agent.reporting.exporter import ReportExporter, ReportExportResult
@@ -532,6 +552,16 @@ class ServiceStartupActionServices:
     service: ServiceStartupActionService
 
 
+@dataclass(frozen=True, slots=True)
+class PrivilegedActionServices:
+    """Developer-only Stage 4X1 Mock components; none can elevate Windows."""
+
+    service: PrivilegedActionService
+    broker: MockPrivilegedBroker
+    caller: PrivilegedCallerContext
+    fake_state: FakePrivilegedSystemState
+
+
 class ApplicationRuntime:
     """Own shared infrastructure and create root-scoped orchestrators."""
 
@@ -540,6 +570,9 @@ class ApplicationRuntime:
         self.settings = settings
         self.audit = AuditRepository(settings.database_path)
         self.audit.initialize()
+        self.agent_instance_id = uuid4()
+        self.privileged_action_repository = PrivilegedActionRepository(settings.database_path)
+        self.interrupted_privileged_action_ids = self.privileged_action_repository.initialize()
         self.confirmation = ConfirmationService(settings.confirmation_ttl_seconds)
         self.external_consent = ExternalDataConsentService(
             settings.confirmation_ttl_seconds,
@@ -1523,6 +1556,61 @@ class ApplicationRuntime:
             service=service,
         )
 
+    def create_privileged_action_services(
+        self,
+        fake_state: FakePrivilegedSystemState,
+    ) -> PrivilegedActionServices:
+        """Compose Mock-only protocol services when the explicit developer mode is enabled."""
+        if self.settings.privileged_broker_mode != "mock":
+            raise RuntimeError("Stage 4X1 privileged broker is disabled")
+        if current_process_is_elevated():
+            raise RuntimeError(
+                "Stage 4X1 requires the main Agent to remain a standard-user process"
+            )
+        serializer = PrivilegedRequestSerializer(self.settings.privileged_max_request_bytes)
+        authenticator = EphemeralHmacAuthenticator.generate()
+        confirmations = PrivilegedActionConfirmationService(
+            self.privileged_action_repository,
+            plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            runtime_ttl_seconds=(self.settings.privileged_runtime_confirmation_ttl_seconds),
+        )
+        builder = PrivilegedActionBuilder(
+            serializer,
+            authenticator,
+            confirmations,
+            request_ttl_seconds=self.settings.privileged_request_ttl_seconds,
+        )
+        audit = PrivilegedActionAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        caller = PrivilegedCallerContext(
+            context_id=uuid4(),
+            agent_instance_id=self.agent_instance_id,
+            user_sid_fingerprint=_runtime_fingerprint(current_windows_username()),
+            session_fingerprint=_runtime_fingerprint(f"{os.getpid()}:{self.agent_instance_id}"),
+        )
+        registry = build_stage4x1_registry(ServicePrivilegedRevalidator(fake_state))
+        broker = MockPrivilegedBroker(
+            serializer,
+            authenticator,
+            self.privileged_action_repository,
+            PrivilegedRequestReplayStore(self.privileged_action_repository),
+            registry,
+            audit,
+        )
+        service = PrivilegedActionService(
+            builder,
+            confirmations,
+            self.privileged_action_repository,
+            serializer,
+            broker,
+            audit,
+            caller,
+        )
+        return PrivilegedActionServices(service, broker, caller, fake_state)
+
     def create_service_startup_action_services(self) -> ServiceStartupActionServices:
         """Build Stage 4C2 backup, Preview, confirmation, and narrow SCM tools."""
         resolver = ServiceTargetResolver(
@@ -1582,6 +1670,7 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.privileged_action_repository.close()
         self.residual_cleanup_repository.close()
         self.software_residual_repository.close()
         self.msix_uninstall_repository.close()
@@ -1653,3 +1742,8 @@ class ApplicationRuntime:
                 app_version=__version__,
             )
         )
+
+
+def _runtime_fingerprint(value: str) -> str:
+    """Hash Mock caller labels; these fingerprints are not authentication secrets."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()

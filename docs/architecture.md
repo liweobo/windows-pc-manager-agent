@@ -1,5 +1,41 @@
 # Architecture
 
+## Stage 4X1 privileged protocol and Mock Broker boundary
+
+Stage 4X1 introduces a protocol seam, not an elevated Windows component. The standard-user process
+performs ordinary Stage 4C/4D safety review first and then resolves whether the already-safe exact action
+needs Administrator access. A safety denial is terminal; a generic access failure is only `UNKNOWN`.
+
+```text
+deterministic safety evidence
+  -> PrivilegeRequirementResolver
+  -> typed PrivilegedActionPlan + fresh Mock-only Preview
+  -> durable plan confirmation
+  -> fresh Preview + durable immediate confirmation
+  -> canonical request + integrity proof + replay record
+  -> Mock Broker parse/authenticate/bind/revalidate
+  -> atomic request + confirmation consumption
+  -> final TOCTOU revalidation
+  -> fake Start/Stop executor
+  -> fresh fake-state verification + signed result + audit
+```
+
+The protocol domain is provider-neutral and contains one discriminated Pydantic payload per finite
+`PrivilegedActionType`. It cannot represent a shell command, executable or free-form argument vector.
+`PrivilegedActionRegistry` is independent from `ToolRegistry`, is not exposed to the LLM, and registers
+only Mock service Start/Stop. The standard-user `ApplicationRuntime` composes it only when the explicit
+developer mode is `mock`; `disabled` is the default.
+
+The SQLite repository stores immutable Plan/Preview JSON, two exact confirmation records and a request
+record whose request digest and nonce fingerprint are unique. One transaction atomically moves the
+request to CONSUMING and both approvals to CONSUMED. Startup recovery converts every active signed,
+validating, consuming, executing or verifying transaction to INTERRUPTED and never redispatches it.
+
+The HMAC authenticator is an injected process-local test implementation. It demonstrates canonical
+authentication and key separation but is explicitly not the future cross-privilege trust channel. A real
+Broker requires a separate design for executable identity, IPC ACLs, process/session identity, code
+signing, key establishment, UAC lifecycle and installer/service deployment.
+
 ## Stage 4D4 controlled residual-cleanup boundary
 
 Stage 4D4 is an independent R2 workflow layered after, not inside, Stage 4D3:

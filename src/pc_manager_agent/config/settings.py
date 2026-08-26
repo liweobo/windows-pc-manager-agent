@@ -67,6 +67,10 @@ class AppSettings(BaseModel):
     residual_cleanup_normal_total_bytes: int = Field(default=1 * 1024**3, ge=1)
     residual_cleanup_normal_single_item_bytes: int = Field(default=512 * 1024**2, ge=1)
     residual_cleanup_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
+    privileged_broker_mode: str = "disabled"
+    privileged_request_ttl_seconds: int = Field(default=120, ge=15, le=600)
+    privileged_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
+    privileged_max_request_bytes: int = Field(default=32_768, ge=1_024, le=1_048_576)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -86,6 +90,15 @@ class AppSettings(BaseModel):
             return None
         normalized = value.strip()
         return normalized or None
+
+    @field_validator("privileged_broker_mode")
+    @classmethod
+    def validate_privileged_broker_mode(cls, value: str) -> str:
+        """Allow only disabled or visibly Mock Stage 4X1 behavior."""
+        normalized = value.strip().lower()
+        if normalized not in {"disabled", "mock"}:
+            raise ValueError("Stage 4X1 privileged broker mode must be disabled or mock")
+        return normalized
 
     @property  # 将方法转化为只读属性的属性
     def database_path(self) -> Path:
@@ -196,6 +209,16 @@ class AppSettings(BaseModel):
             ),
             "residual_cleanup_runtime_confirmation_ttl_seconds": os.getenv(
                 "PC_MANAGER_RESIDUAL_CLEANUP_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
+            "privileged_broker_mode": os.getenv("PC_MANAGER_PRIVILEGED_BROKER_MODE", "disabled"),
+            "privileged_request_ttl_seconds": os.getenv(
+                "PC_MANAGER_PRIVILEGED_REQUEST_TTL_SECONDS", "120"
+            ),
+            "privileged_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_PRIVILEGED_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
+            ),
+            "privileged_max_request_bytes": os.getenv(
+                "PC_MANAGER_PRIVILEGED_MAX_REQUEST_BYTES", "32768"
             ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")

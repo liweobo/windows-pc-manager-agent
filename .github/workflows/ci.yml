@@ -300,6 +300,28 @@ jobs:
           --cov=pc_manager_agent.confirmation.residual_cleanup
           --cov=pc_manager_agent.tools.file_tools.recycle_executor
           --cov-report=term-missing --cov-fail-under=95 -q
+      - name: Stage 4X1 privileged protocol and Mock Broker boundary
+        if: matrix.python-version == '3.13'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          uv run pytest tests/unit/test_privilege_requirement.py
+          tests/unit/test_privileged_protocol.py
+          tests/unit/test_privileged_model_boundaries.py
+          tests/unit/test_privileged_confirmation_branches.py
+          tests/unit/test_privileged_persistence_branches.py
+          tests/unit/test_privileged_broker_branches.py
+          tests/integration/test_privileged_action_flow.py
+          tests/integration/test_privileged_runtime_wiring.py
+          tests/security/test_privileged_action_protocol.py
+          tests/gui/test_privileged_action_dialog.py
+          --cov=pc_manager_agent.domain.privileged_actions
+          --cov=pc_manager_agent.privileged
+          --cov=pc_manager_agent.confirmation.privileged_actions
+          --cov=pc_manager_agent.persistence.privileged_actions
+          --cov=pc_manager_agent.orchestration.privileged_actions
+          --cov=pc_manager_agent.audit.privileged_actions
+          --cov-report=term-missing --cov-fail-under=95 -q
       - name: Real Windows MSIX inventory read-only probe
         if: matrix.python-version == '3.13'
         run: uv run pytest tests/integration/test_msix_windows_inventory.py -q

@@ -282,6 +282,7 @@ def _preview_html(prepared: PreparedServiceAction) -> str:
     dependencies = ", ".join(item.service_name for item in observation.dependencies) or "无"
     dependents = ", ".join(item.service_name for item in observation.dependents) or "无"
     steps = " → ".join(step.value for step in prepared.plan.steps)
+    privilege_status = _privilege_status(prepared)
     return (
         f"<h3>{escape(prepared.plan.summary)}</h3>"
         "<table border='1' cellspacing='0' cellpadding='4'>"
@@ -295,10 +296,22 @@ def _preview_html(prepared: PreparedServiceAction) -> str:
         f"<tr><th>权限</th><td>START={preview.permissions.can_start}; "
         f"STOP={preview.permissions.can_stop}; "
         f"elevated={preview.permissions.process_elevated}</td></tr>"
+        f"<tr><th>权限结论</th><td>{escape(privilege_status)}</td></tr>"
         "</table>"
         f"<p>审查：{'通过' if prepared.review.approved else '阻止'}；{issues}</p>"
         "<p>不会级联启停依赖服务，不会提权，不会执行 shell。</p>"
     )
+
+
+def _privilege_status(prepared: PreparedServiceAction) -> str:
+    preview = prepared.preview
+    if preview.permissions.process_elevated:
+        return "主 Agent 已提升：安全阻止"
+    if preview.permissions.allows(prepared.plan.action):
+        return "普通用户权限足够；继续现有 Stage 4C1 路径"
+    if preview.safety.decision.value == "ALLOW":
+        return "可能需要管理员权限；Stage 4X1 仅支持 Mock 验证，不会弹出 UAC"
+    return "安全策略已阻止；管理员权限和用户确认都不能覆盖该决定"
 
 
 def _runtime_html(value: RuntimeServicePreview) -> str:

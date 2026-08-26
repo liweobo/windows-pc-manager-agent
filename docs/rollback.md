@@ -1,5 +1,16 @@
 # Rollback design
 
+## Stage 4X1 Mock protocol
+
+Stage 4X1 has no real machine or user-data side effect, so it creates no Windows rollback record. The
+Mock executor changes only an injected in-memory synthetic service state used by tests. Its protocol
+transaction is deliberately **not retryable**: once consumption starts, both confirmations and the
+request remain consumed even when final revalidation, fake execution, verification or audit fails.
+
+Application restart marks active protocol transactions `INTERRUPTED`; it does not resume or redispatch.
+This is transaction recovery, not system Undo. A future real Broker must define truthful recovery per
+action before any action is added to a production allow-list.
+
 ## Stage 4D4 residual-cleanup recovery
 
 Every eligible D4 plan declares `RollbackLevel.MANUAL`. Immediately before each Windows Shell call, the

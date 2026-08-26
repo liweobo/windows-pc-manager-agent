@@ -1,5 +1,33 @@
 # Developer guide
 
+## Stage 4X1 development
+
+Stage 4X1 is a protocol/security harness. Production code under `privileged/` must not import subprocess,
+OpenAI or a Windows write adapter. New protocol payloads require a dedicated model; never add command,
+script, executable, args or `dict[str, object]` escape hatches. The ordinary `ToolRegistry` must remain
+free of privileged actions.
+
+Run the focused gate with:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_privilege_requirement.py tests/unit/test_privileged_protocol.py `
+  tests/unit/test_privileged_model_boundaries.py tests/unit/test_privileged_confirmation_branches.py `
+  tests/unit/test_privileged_persistence_branches.py tests/unit/test_privileged_broker_branches.py `
+  tests/integration/test_privileged_action_flow.py tests/security/test_privileged_action_protocol.py `
+  tests/gui/test_privileged_action_dialog.py `
+  --cov=pc_manager_agent.domain.privileged_actions --cov=pc_manager_agent.privileged `
+  --cov=pc_manager_agent.confirmation.privileged_actions `
+  --cov=pc_manager_agent.persistence.privileged_actions `
+  --cov=pc_manager_agent.orchestration.privileged_actions `
+  --cov=pc_manager_agent.audit.privileged_actions --cov-report=term-missing --cov-fail-under=95
+```
+
+`PC_MANAGER_PRIVILEGED_BROKER_MODE=mock` is for developer UI checks only. Do not add a `real` setting.
+The injected HMAC authenticator is not reusable as a production cross-process design. Before a real
+Broker, write a new decision record covering IPC endpoint/ACL, user and session identity, Broker binary
+signature, anti-downgrade, key establishment, UAC lifecycle, deployment/update and per-action adapters.
+
 ## Stage 4D4 development
 
 The D4 production graph is composed in `ApplicationRuntime.create_residual_cleanup_services()`. Keep the
