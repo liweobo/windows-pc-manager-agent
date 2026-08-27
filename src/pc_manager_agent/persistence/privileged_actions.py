@@ -570,6 +570,35 @@ class PrivilegedActionRepository:
         except SQLAlchemyError as exc:
             raise PrivilegedActionStoreError("Privileged request state query failed") from exc
 
+    def has_active_action(
+        self,
+        action_type: PrivilegedActionType,
+        *,
+        exclude_plan_id: UUID | None = None,
+    ) -> bool:
+        """Return whether a non-terminal transaction already owns an action slot."""
+        self._require_initialized()
+        terminal = {
+            PrivilegedTransactionState.COMPLETED.value,
+            PrivilegedTransactionState.FAILED.value,
+            PrivilegedTransactionState.REJECTED.value,
+            PrivilegedTransactionState.EXPIRED.value,
+            PrivilegedTransactionState.INTERRUPTED.value,
+        }
+        try:
+            with Session(self._engine) as session:
+                statement = select(PrivilegedTransactionRow.plan_id).where(
+                    PrivilegedTransactionRow.action_type == action_type.value,
+                    PrivilegedTransactionRow.state.not_in(terminal),
+                )
+                if exclude_plan_id is not None:
+                    statement = statement.where(
+                        PrivilegedTransactionRow.plan_id != str(exclude_plan_id)
+                    )
+                return session.scalar(statement.limit(1)) is not None
+        except SQLAlchemyError as exc:
+            raise PrivilegedActionStoreError("Privileged action activity query failed") from exc
+
     def close(self) -> None:
         """Release SQLite resources."""
         self._engine.dispose()

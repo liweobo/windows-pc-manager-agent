@@ -17,7 +17,11 @@ from pc_manager_agent.domain.privileged_actions import (
     PrivilegedActionType,
     RequestIntegrity,
 )
-from pc_manager_agent.domain.service_actions import ServiceState
+from pc_manager_agent.domain.risk import RollbackLevel
+from pc_manager_agent.domain.service_actions import (
+    ServiceStartupConfiguration,
+    ServiceState,
+)
 
 BROKER_TRANSPORT_VERSION: Literal[1] = 1
 Sha256Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -258,8 +262,56 @@ class ClientProof(FrozenModel):
     proof: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class ServiceControlResultEvidence(FrozenModel):
+    """Exact runtime-state evidence for the original Stage 4X2 service actions."""
+
+    evidence_type: Literal["SERVICE_CONTROL"] = "SERVICE_CONTROL"
+    before_state: ServiceState
+    after_state: ServiceState
+
+
+class ServiceStartupResultEvidence(FrozenModel):
+    """Startup configuration readback with proof that runtime state did not change."""
+
+    evidence_type: Literal["SERVICE_STARTUP"] = "SERVICE_STARTUP"
+    before_configuration: ServiceStartupConfiguration
+    after_configuration: ServiceStartupConfiguration
+    before_runtime_state: ServiceState
+    after_runtime_state: ServiceState
+    runtime_unchanged: bool
+
+
+class MachineStartupResultEvidence(FrozenModel):
+    """Presence-only HKLM Run evidence; raw registry data never crosses IPC."""
+
+    evidence_type: Literal["MACHINE_STARTUP"] = "MACHINE_STARTUP"
+    registry_view: Literal["32", "64"]
+    value_present_before: bool
+    value_present_after: bool
+
+
+class MachineMsiResultEvidence(FrozenModel):
+    """Machine MSI dispatch and fresh registration evidence without command metadata."""
+
+    evidence_type: Literal["MACHINE_MSI"] = "MACHINE_MSI"
+    installer_category: str = Field(min_length=1, max_length=100)
+    exit_code: int | None = Field(default=None, ge=0, le=0xFFFFFFFF)
+    monitoring_detached: bool = False
+    product_registration_present_after: bool | None = None
+    software_identity_present_after: bool | None = None
+
+
+BrokerActionEvidence = Annotated[
+    ServiceControlResultEvidence
+    | ServiceStartupResultEvidence
+    | MachineStartupResultEvidence
+    | MachineMsiResultEvidence,
+    Field(discriminator="evidence_type"),
+]
+
+
 class ElevatedBrokerResult(FrozenModel):
-    """Authenticated Broker decision and exact service postcondition evidence."""
+    """Authenticated Broker decision and action-specific postcondition evidence."""
 
     request_id: UUID
     broker_instance_id: UUID
@@ -273,20 +325,16 @@ class ElevatedBrokerResult(FrozenModel):
     post_state: ServiceState | None = None
     pre_state_hash: Sha256Digest | None = None
     post_state_hash: Sha256Digest | None = None
+    action_evidence: BrokerActionEvidence | None = None
     result_code: str = Field(min_length=1, max_length=100)
     message: str = Field(min_length=1, max_length=1_000)
     started_at: datetime | None = None
     completed_at: datetime
-    rollback_level: Literal["MANUAL"] = "MANUAL"
+    rollback_level: RollbackLevel = RollbackLevel.MANUAL
 
     @model_validator(mode="after")
     def validate_result(self) -> Self:
         """Reject unsupported actions and contradictory execution claims."""
-        if self.action_type not in {
-            PrivilegedActionType.SERVICE_START,
-            PrivilegedActionType.SERVICE_STOP,
-        }:
-            raise ValueError("Stage 4X2 result action is not allowlisted")
         _require_utc(self.completed_at, "Broker result completion")
         if self.started_at is not None:
             _require_utc(self.started_at, "Broker result start")
@@ -296,9 +344,23 @@ class ElevatedBrokerResult(FrozenModel):
         ):
             raise ValueError("A non-started result cannot claim an execution outcome")
         if self.verification_status is ElevatedVerificationStatus.VERIFIED and (
-            not self.execution_started or self.post_state_hash is None
+            not self.execution_started
+            or self.post_state_hash is None
+            or self.action_evidence is None
         ):
             raise ValueError("Verified result requires execution and post-state evidence")
+        if self.action_evidence is not None:
+            expected_evidence = {
+                PrivilegedActionType.SERVICE_START: "SERVICE_CONTROL",
+                PrivilegedActionType.SERVICE_STOP: "SERVICE_CONTROL",
+                PrivilegedActionType.SERVICE_STARTUP_TYPE_CHANGE: "SERVICE_STARTUP",
+                PrivilegedActionType.SERVICE_STARTUP_TYPE_RESTORE: "SERVICE_STARTUP",
+                PrivilegedActionType.STARTUP_MACHINE_DISABLE: "MACHINE_STARTUP",
+                PrivilegedActionType.STARTUP_MACHINE_RESTORE: "MACHINE_STARTUP",
+                PrivilegedActionType.MSI_UNINSTALL_MACHINE: "MACHINE_MSI",
+            }.get(self.action_type)
+            if expected_evidence != self.action_evidence.evidence_type:
+                raise ValueError("Broker result evidence does not match its action type")
         return self
 
     def canonical_digest(self) -> str:
@@ -307,7 +369,7 @@ class ElevatedBrokerResult(FrozenModel):
 
 
 class ElevatedBrokerResultEnvelope(FrozenModel):
-    """Session-authenticated Stage 4X2 result envelope."""
+    """Session-authenticated Stage 4X3 result envelope."""
 
     protocol_version: Literal[1] = BROKER_TRANSPORT_VERSION
     broker_instance_id: UUID

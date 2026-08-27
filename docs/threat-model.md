@@ -1,5 +1,22 @@
 # Threat model
 
+## Stage 4X3 threats and mitigations
+
+| Threat | Mitigation | Residual risk |
+|---|---|---|
+| Turn Broker into an admin shell | Separate strict payloads, immutable manifests, concrete-handler requirement, no generic command/registry/SCM/uninstall API | A coding defect in a narrow adapter still needs release review and manual testing |
+| Elevation overrides a safety block | Existing policy executes before routing; Main and Broker rebuild safety; only `REQUIRED` routes | Local metadata can be incomplete, so incomplete evidence blocks |
+| Service config or runtime TOCTOU | Stable service identity, exact config/runtime/impact/backup digests, pre/post-consumption Fresh checks, runtime invariant readback | External change after dispatch can yield uncertain failure; no retry |
+| HKLM 32/64 view substitution or restore overwrite | Explicit view in identity/Payload/result, encrypted exact backup, transacted API, absence/conflict checks | External registry writers may race; final readback prevents false success |
+| ProductCode or software substitution | Fresh software + MSI registration, version/publisher/scope/architecture/source digests and complete preflight | MSI custom actions remain third-party privileged code; only vetted classes are eligible |
+| Provider or IPC secret leaks to MSI | Allowlisted child environment excludes PATH and secret-like keys; DEVNULL streams | Windows Installer itself may access machine/user state under Windows rules |
+| SYSTEM/TrustedInstaller misuse | Broker requires elevated HIGH integrity and rejects every other integrity level; no token manipulation | Compromise outside this process boundary is out of scope |
+| Confirmation replay or stale Preview | Durable parent/child confirmations, expiry, manifest/schema/policy and state digests, atomic single consumption | A post-dispatch crash can require manual reconciliation |
+| Misleading success | Typed action evidence, Broker verification and independent Main readback | MSI rollback remains NONE; successful removal cannot restore application state |
+
+Machine Vendor uninstall remains deferred because executable/argument/signature trust under elevation needs
+a separate threat model and cannot reuse the current-user Vendor authorization.
+
 ## Stage 4X2 threats and mitigations
 
 | Threat | Control | Residual risk |

@@ -49,6 +49,8 @@ from pc_manager_agent.ui.software_uninstall_router_worker import (
     SoftwareUninstallRouteWorker,
     require_software_uninstall_route,
 )
+from pc_manager_agent.ui.stage4x3_action_dialog import Stage4X3ActionDialog
+from pc_manager_agent.ui.stage4x3_workers import Stage4X3UiAction, Stage4X3UiRequest
 from pc_manager_agent.ui.system_workers import DiagnosticWorker, require_diagnostic_report
 from pc_manager_agent.ui.vendor_uninstall_dialog import VendorUninstallDialog
 from pc_manager_agent.ui.winget_uninstall_dialog import WingetUninstallDialog
@@ -84,6 +86,7 @@ class SystemDiagnosticsTab(QWidget):
         self._vendor_uninstall_dialogs: set[VendorUninstallDialog] = set()
         self._winget_uninstall_dialogs: set[WingetUninstallDialog] = set()
         self._msix_uninstall_dialogs: set[MsixUninstallDialog] = set()
+        self._stage4x3_dialogs: set[Stage4X3ActionDialog] = set()
         self._uninstall_route_workers: set[SoftwareUninstallRouteWorker] = set()
         self._build_ui()
 
@@ -568,6 +571,8 @@ class SystemDiagnosticsTab(QWidget):
             msix_dialog.close()
         for vendor_dialog in tuple(self._vendor_uninstall_dialogs):
             vendor_dialog.shutdown()
+        for privileged_dialog in tuple(self._stage4x3_dialogs):
+            privileged_dialog.shutdown()
         for route_worker in tuple(self._uninstall_route_workers):
             route_worker.cancel()
 
@@ -764,7 +769,14 @@ class SystemDiagnosticsTab(QWidget):
             return
         query = SoftwareTargetQuery(identity_digest=target.identity.canonical_digest())
         if route.mechanism is SoftwareUninstallMechanism.MSI:
-            self.open_msi_uninstall(user_goal, query=query)
+            if target.scope is SoftwareScope.LOCAL_MACHINE:
+                self.open_machine_msi_uninstall(
+                    user_goal,
+                    identity_digest=target.identity.canonical_digest(),
+                    display_name=target.display_name,
+                )
+            else:
+                self.open_msi_uninstall(user_goal, query=query)
         elif route.mechanism is SoftwareUninstallMechanism.VENDOR:
             self.open_vendor_uninstall(user_goal, query=query)
         elif route.mechanism is SoftwareUninstallMechanism.WINGET:
@@ -777,6 +789,29 @@ class SystemDiagnosticsTab(QWidget):
             self.open_msix_uninstall(user_goal, package_full_name=package_full_name)
         else:
             self._show_error(route.reason)
+
+    def open_machine_msi_uninstall(
+        self,
+        user_goal: str,
+        *,
+        identity_digest: str,
+        display_name: str,
+    ) -> None:
+        """Open the dedicated machine-MSI R3 flow; Vendor elevation remains deferred."""
+        dialog = Stage4X3ActionDialog(
+            self._runtime,
+            Stage4X3UiRequest(
+                action=Stage4X3UiAction.MSI_UNINSTALL_MACHINE,
+                user_goal=user_goal,
+                display_name=display_name,
+                software_identity_digest=identity_digest,
+            ),
+            parent=self,
+        )
+        self._stage4x3_dialogs.add(dialog)
+        dialog.finished.connect(lambda _result, value=dialog: self._stage4x3_dialogs.discard(value))
+        dialog.show()
+        self.status_message.emit("正在生成机器范围 MSI 的独立 R3 Preview；尚未显示 UAC 或启动卸载")
 
     def _route_failed(
         self,

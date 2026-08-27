@@ -1,5 +1,17 @@
 # Windows PC Manager Agent
 
+## Stage 4X3：专用管理员能力接入
+
+Stage 4X3 延续一次性 Elevated Broker，但把权限边界扩展到三个已经完成独立安全设计的业务域：
+
+- 服务启动类型：仅一个合格第三方服务的非延迟 `Automatic` ↔ `Manual`，以及基于 Agent 加密备份的冲突检查恢复；运行状态不得改变，回滚为条件式 `FULL`。
+- 机器启动项：仅显式 32/64 位视图中的一个普通第三方 `HKLM\...\Run` 值；停用和恢复都绑定原始值、注册表视图和加密备份，冲突时停止，回滚为 `FULL`。
+- 机器范围 MSI：仅一个精确、高可信、机器范围 MSI，在软件分类、Windows Installer 注册、进程/服务和全局卸载互斥检查全部通过后，使用固定 `msiexec /x {ProductCode} /norestart`；回滚为 `NONE`。
+
+每种能力都有独立 Action、严格 Payload、清单版本、Broker 处理器和结果证据。主程序先执行既有业务安全策略，再创建新的 R3 计划；计划确认后重新验证，用户即时确认后才显示一次 UAC。Broker 在原子消费两次确认前后各做一次 Fresh 检查，操作后自行验证；普通用户主程序还会独立回读。任何安全阻止、版本漂移、身份变化、备份错误、UAC 取消或验证不确定都不会自动重试或切换执行方式。
+
+Broker 仍不是管理员命令执行器：没有 PowerShell、CMD、任意可执行文件/参数、通用注册表写入、通用 SCM 配置、通用卸载命令、SYSTEM/TrustedInstaller 或安全策略绕过。机器范围 Vendor Uninstaller 明确延后。开发构建仍需按 Stage 4X2 的可信路径/哈希配置；生产可用仍取决于发布签名和安装信任。
+
 ## Stage 4X2：独立的一次性 Windows Elevated Broker
 
 Stage 4X2 在 Stage 4X1 协议之上增加了真实但默认关闭的 Windows 提权边界。主程序始终以普通

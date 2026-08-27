@@ -7,6 +7,8 @@ import ctypes
 import hashlib
 import os
 import winreg
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -19,10 +21,12 @@ from win32com.shell import shell, shellcon
 from pc_manager_agent.domain.startup_actions import (
     FolderStartupIdentity,
     RegistryStartupIdentity,
+    StartupActionType,
     StartupBackupPayload,
     StartupEntryStatus,
     StartupIdentity,
     StartupManagementMode,
+    StartupMutationResult,
     StartupObservation,
     StartupSource,
 )
@@ -33,6 +37,7 @@ from pc_manager_agent.domain.startup_errors import (
 from pc_manager_agent.platform_support.windows.file_operations import (
     WindowsFileOperationPlatform,
 )
+from pc_manager_agent.tools.manifest import CancellationToken
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _RUN_ONCE_KEY = r"Software\Microsoft\Windows\CurrentVersion\RunOnce"
@@ -65,7 +70,7 @@ class WindowsStartupManagementError(OSError):
 
 
 class WindowsStartupManagementPlatform:
-    """Manage only HKCU Run and current-user ``.lnk`` Startup Folder entries."""
+    """Manage current-user startup plus explicit-view HKLM Run through narrow methods."""
 
     def __init__(self, disabled_storage: Path) -> None:
         if os.name != "nt":
@@ -138,16 +143,21 @@ class WindowsStartupManagementPlatform:
         current = self.inspect(identity)
         if current is None:
             raise StartupIdentityChangedError("Startup entry disappeared before backup")
-        if identity.source is StartupSource.HKCU_RUN:
+        if identity.source in {StartupSource.HKCU_RUN, StartupSource.HKLM_RUN}:
             registry_detail = _require_registry(identity)
+            hive = (
+                winreg.HKEY_CURRENT_USER
+                if identity.source is StartupSource.HKCU_RUN
+                else winreg.HKEY_LOCAL_MACHINE
+            )
             value_type, data = self._read_raw_value(
-                winreg.HKEY_CURRENT_USER,
+                hive,
                 registry_detail.key_path,
                 registry_detail.value_name,
                 registry_detail.registry_view,
             )
             approval = self._read_optional_raw_value(
-                winreg.HKEY_CURRENT_USER,
+                hive,
                 _APPROVED_RUN_KEY,
                 registry_detail.value_name,
                 "NATIVE",
@@ -243,6 +253,92 @@ class WindowsStartupManagementPlatform:
                 raise WindowsStartupManagementError("Startup link restore verification failed")
             return
         raise PermissionError("This startup source cannot be restored by Stage 4B")
+
+    def disable_machine_run(
+        self,
+        payload: StartupBackupPayload,
+        cancellation: CancellationToken,
+        on_dispatched: Callable[[], None] | None = None,
+    ) -> StartupMutationResult:
+        """Transactionally remove one exact 32/64-bit HKLM Run value and nothing else."""
+        started = datetime.now(UTC)
+        detail = _require_machine_run_payload(payload)
+        before = self.inspect(payload.original_identity)
+        if before is None:
+            raise StartupIdentityChangedError("Machine startup value is already absent")
+        if cancellation.cancellation_requested():
+            return _cancelled_machine_result(payload, before.current_state_digest(), started)
+        self._require_approval_unchanged(payload)
+        self._delete_registry_value_transacted(detail, machine=True)
+        if on_dispatched is not None:
+            on_dispatched()
+        absent = self._inspect_location(payload.original_identity) is None
+        return StartupMutationResult(
+            action=StartupActionType.DISABLE,
+            identity_digest=payload.original_identity.canonical_digest(),
+            before_state_digest=before.current_state_digest(),
+            after_status=(
+                StartupEntryStatus.AGENT_DISABLED if absent else StartupEntryStatus.UNKNOWN
+            ),
+            verified=absent,
+            message=(
+                "Exact HKLM Run value is absent after the committed transaction"
+                if absent
+                else "Machine startup value remained after the registry transaction"
+            ),
+            started_at=started,
+            completed_at=datetime.now(UTC),
+        )
+
+    def restore_machine_run(
+        self,
+        payload: StartupBackupPayload,
+        cancellation: CancellationToken,
+        on_dispatched: Callable[[], None] | None = None,
+    ) -> StartupMutationResult:
+        """Restore exact bytes only while the original HKLM Run value remains absent."""
+        started = datetime.now(UTC)
+        detail = _require_machine_run_payload(payload)
+        if self._inspect_location(payload.original_identity) is not None:
+            raise StartupConflictError("Machine startup restore target is occupied")
+        if cancellation.cancellation_requested():
+            return _cancelled_machine_result(
+                payload,
+                _absent_machine_state_digest(detail),
+                started,
+                action=StartupActionType.RESTORE,
+            )
+        self._require_approval_unchanged(payload)
+        raw = base64.b64decode(payload.registry_value_data_b64 or "", validate=True)
+        if payload.registry_value_type is None:
+            raise WindowsStartupManagementError("Machine registry backup type is absent")
+        self._set_registry_value_transacted(
+            detail,
+            payload.registry_value_type,
+            raw,
+            machine=True,
+        )
+        if on_dispatched is not None:
+            on_dispatched()
+        restored = self._inspect_location(payload.original_identity)
+        verified = bool(
+            restored is not None
+            and restored.identity.canonical_digest() == payload.original_identity.canonical_digest()
+        )
+        return StartupMutationResult(
+            action=StartupActionType.RESTORE,
+            identity_digest=payload.original_identity.canonical_digest(),
+            before_state_digest=_absent_machine_state_digest(detail),
+            after_status=(StartupEntryStatus.ENABLED if verified else StartupEntryStatus.UNKNOWN),
+            verified=verified,
+            message=(
+                "Exact HKLM Run value type and bytes were restored and verified"
+                if verified
+                else "Machine startup restore readback did not match the backup"
+            ),
+            started_at=started,
+            completed_at=datetime.now(UTC),
+        )
 
     def disabled_material_matches(self, payload: StartupBackupPayload) -> bool:
         """Validate Agent storage by file identity and exact encrypted-backup digest."""
@@ -590,9 +686,16 @@ class WindowsStartupManagementPlatform:
             _raise_registry_error("Read startup registry value", result)
         return int(value_type.value), bytes(buffer.raw[: size.value])
 
-    def _delete_registry_value_transacted(self, detail: RegistryStartupIdentity) -> None:
+    def _delete_registry_value_transacted(
+        self,
+        detail: RegistryStartupIdentity,
+        *,
+        machine: bool = False,
+    ) -> None:
         transaction, handle = self._open_transacted_run_key(
-            detail, _KEY_QUERY_VALUE | _KEY_SET_VALUE
+            detail,
+            _KEY_QUERY_VALUE | _KEY_SET_VALUE,
+            machine=machine,
         )
         try:
             value_type, data = self._query_raw_handle(handle, detail.value_name)
@@ -605,7 +708,7 @@ class WindowsStartupManagementPlatform:
             delete_value.restype = ctypes.c_long
             result = int(delete_value(handle, detail.value_name))
             if result != _ERROR_SUCCESS:
-                _raise_registry_error("Disable HKCU Run value", result)
+                _raise_registry_error("Disable exact Run value", result)
             self._commit_transaction(transaction)
         except Exception:
             self._rollback_transaction(transaction)
@@ -619,9 +722,13 @@ class WindowsStartupManagementPlatform:
         detail: RegistryStartupIdentity,
         value_type: int,
         data: bytes,
+        *,
+        machine: bool = False,
     ) -> None:
         transaction, handle = self._open_transacted_run_key(
-            detail, _KEY_QUERY_VALUE | _KEY_SET_VALUE
+            detail,
+            _KEY_QUERY_VALUE | _KEY_SET_VALUE,
+            machine=machine,
         )
         try:
             try:
@@ -652,7 +759,7 @@ class WindowsStartupManagementPlatform:
                 )
             )
             if result != _ERROR_SUCCESS:
-                _raise_registry_error("Restore HKCU Run value", result)
+                _raise_registry_error("Restore exact Run value", result)
             self._commit_transaction(transaction)
         except Exception:
             self._rollback_transaction(transaction)
@@ -665,9 +772,26 @@ class WindowsStartupManagementPlatform:
         self,
         detail: RegistryStartupIdentity,
         access: int,
+        *,
+        machine: bool = False,
     ) -> tuple[ctypes.c_void_p, ctypes.c_void_p]:
-        if detail.hive != "HKCU" or detail.key_path != _RUN_KEY or detail.registry_view != "NATIVE":
-            raise PermissionError("The registry adapter is fixed to native HKCU Run")
+        if machine:
+            if (
+                detail.hive != "HKLM"
+                or detail.key_path != _RUN_KEY
+                or detail.registry_view not in {"32", "64"}
+            ):
+                raise PermissionError("The machine adapter is fixed to explicit-view HKLM Run")
+            hive = winreg.HKEY_LOCAL_MACHINE
+            access |= _view_flag(detail.registry_view)
+        else:
+            if (
+                detail.hive != "HKCU"
+                or detail.key_path != _RUN_KEY
+                or detail.registry_view != "NATIVE"
+            ):
+                raise PermissionError("The ordinary adapter is fixed to native HKCU Run")
+            hive = winreg.HKEY_CURRENT_USER
         create_transaction = cast(Any, self._ktmw32.CreateTransaction)
         create_transaction.argtypes = [
             ctypes.c_void_p,
@@ -698,7 +822,7 @@ class WindowsStartupManagementPlatform:
         open_key.restype = ctypes.c_long
         result = int(
             open_key(
-                ctypes.c_void_p(winreg.HKEY_CURRENT_USER),
+                ctypes.c_void_p(hive),
                 _RUN_KEY,
                 0,
                 access,
@@ -709,7 +833,7 @@ class WindowsStartupManagementPlatform:
         )
         if result != _ERROR_SUCCESS:
             self._close_handle(transaction)
-            _raise_registry_error("Open transacted HKCU Run key", result)
+            _raise_registry_error("Open exact transacted Run key", result)
         return transaction, handle
 
     def _commit_transaction(self, transaction: ctypes.c_void_p) -> None:
@@ -913,6 +1037,58 @@ def _require_disabled_path(payload: StartupBackupPayload) -> Path:
     if payload.disabled_storage_path is None:
         raise ValueError("Disabled storage path is missing")
     return payload.disabled_storage_path
+
+
+def _require_machine_run_payload(payload: StartupBackupPayload) -> RegistryStartupIdentity:
+    """Reject every payload outside exact explicit-view HKLM Run restore material."""
+    detail = _require_registry(payload.original_identity)
+    if (
+        payload.source is not StartupSource.HKLM_RUN
+        or detail.hive != "HKLM"
+        or detail.key_path != _RUN_KEY
+        or detail.registry_view not in {"32", "64"}
+        or payload.registry_value_data_b64 is None
+        or payload.registry_value_type is None
+        or payload.shortcut_data_b64 is not None
+    ):
+        raise PermissionError("Only exact 32/64-bit HKLM Run backup material is accepted")
+    return detail
+
+
+def machine_absent_state_digest(identity: StartupIdentity) -> str:
+    """Hash the exact machine identity plus an absent-value state for confirmation binding."""
+    detail = _require_registry(identity)
+    if (
+        identity.source is not StartupSource.HKLM_RUN
+        or detail.hive != "HKLM"
+        or detail.key_path != _RUN_KEY
+        or detail.registry_view not in {"32", "64"}
+    ):
+        raise ValueError("Absent-state digest accepts only explicit-view HKLM Run identity")
+    return _absent_machine_state_digest(detail)
+
+
+def _absent_machine_state_digest(detail: RegistryStartupIdentity) -> str:
+    return hashlib.sha256(f"{detail.canonical_digest()}\nABSENT".encode()).hexdigest()
+
+
+def _cancelled_machine_result(
+    payload: StartupBackupPayload,
+    before_state_digest: str,
+    started: datetime,
+    *,
+    action: StartupActionType = StartupActionType.DISABLE,
+) -> StartupMutationResult:
+    return StartupMutationResult(
+        action=action,
+        identity_digest=payload.original_identity.canonical_digest(),
+        before_state_digest=before_state_digest,
+        after_status=StartupEntryStatus.UNKNOWN,
+        verified=False,
+        message="Cancelled before the HKLM Run registry transaction was dispatched",
+        started_at=started,
+        completed_at=datetime.now(UTC),
+    )
 
 
 def _read_bounded_file(path: Path, maximum: int = 16 * 1024 * 1024) -> bytes:

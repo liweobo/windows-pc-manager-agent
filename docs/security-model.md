@@ -1,5 +1,25 @@
 # Security model
 
+## Stage 4X3 privileged capability controls
+
+- Real execution requires both an immutable R3 manifest and a concrete typed handler. The allowlist is
+  exactly service Start/Stop, service startup change/restore, HKLM Run disable/restore, and machine MSI.
+- Every request binds protocol version 2, action Schema version, safety-policy version, manifest digest,
+  source transaction, exact target and state, Plan/Preview, two confirmations, caller and expiry.
+- Safety runs before privilege and again in Main and Broker. `Safety BLOCK + Administrator` remains BLOCK;
+  AccessDenied alone is insufficient evidence. Broker integrity must be exactly HIGH, never SYSTEM.
+- Service startup permits only non-delayed Automatic ↔ Manual and must preserve runtime state. Restore needs
+  the Agent-owned encrypted backup and unchanged Agent-written configuration.
+- HKLM startup permits only one exact ordinary third-party Run value in an explicit 32/64 view. Backup,
+  identity, view and absent/present state are checked again immediately before a transacted mutation.
+- Machine MSI needs complete fresh software and Windows Installer identity, protected-class approval,
+  process/service preflight and global uninstall exclusion. It uses fixed `msiexec` arguments,
+  `shell=False`, a sanitized environment and no process/service/reboot/retry action.
+- Typed result evidence must match its action. Broker verification is followed by independent Main
+  readback. Uncertainty, persistence/audit failure, UAC cancellation, replay or drift never retries.
+- Payloads and audit contain no raw uninstall string, command, script, arbitrary arguments, registry value
+  bytes, credentials, HMAC material, nonce or provider key.
+
 ## Stage 4X2 elevated Broker controls
 
 - **Main stays standard:** an elevated Main Agent is rejected before composition. UAC applies only to the

@@ -1,5 +1,29 @@
 # Architecture
 
+## Stage 4X3 dedicated privileged integration boundary
+
+Stage 4X3 adds no generic administrator interface. A standard-user business workflow first resolves an
+exact target and runs its existing safety policy. `PrivilegeRequirementResolver` then routes only a
+complete, safety-approved `REQUIRED` result to `ElevatedStage4X3PreparationService`; `NOT_REQUIRED` stays on
+the ordinary executor and every other result stops.
+
+The Main side creates a dedicated typed payload, immutable manifest/schema/policy binding, R3 plan and
+Preview. Separate durable plan and runtime confirmations precede one UAC attempt. The Broker validates the
+authenticated request and stored authority, asks `PrivilegedActionDispatcher` for the exact handler,
+performs Fresh revalidation, atomically consumes authority, repeats final validation, invokes one narrow
+adapter, verifies a typed postcondition and exits. `Stage4X3PostconditionVerifier` then performs an
+independent standard-user readback. Broker success alone is insufficient.
+
+The concrete handler map is finite: service control (existing Start/Stop), service startup
+(change/restore), machine startup (disable/restore) and machine MSI (uninstall). Manifest registration and
+handler registration are both required; missing either is default-deny. Service configuration uses only the
+narrow startup-type adapter, HKLM uses only explicit-view transacted Run-value methods, and MSI uses only the
+fixed system `msiexec` adapter. Vendor elevation is deferred.
+
+Qt workers call orchestration only. The UI shows object, action, R3 risk, required Administrator privilege,
+rollback level, plan ID and the separate confirmation/UAC phases. It never constructs a command or calls a
+Windows mutation adapter directly.
+
 ## Stage 4X2 one-shot elevated Broker boundary
 
 Stage 4X2 preserves the Stage 4X1 plan/confirmation/replay protocol and replaces only its execution edge

@@ -61,7 +61,31 @@ def main(argv: list[str] | None = None) -> int:
     from pc_manager_agent.orchestration.service_dependency_analyzer import (
         ServiceDependencyAnalyzer,
     )
+    from pc_manager_agent.orchestration.software_capability import UninstallCapabilityResolver
+    from pc_manager_agent.orchestration.software_execution_preflight import (
+        SoftwareExecutionPreflight,
+    )
+    from pc_manager_agent.orchestration.software_inventory import SoftwareInventoryService
+    from pc_manager_agent.orchestration.software_msi_validation import MsiProductValidator
+    from pc_manager_agent.orchestration.software_target_resolver import SoftwareTargetResolver
+    from pc_manager_agent.orchestration.software_uninstall_verifier import MsiUninstallVerifier
     from pc_manager_agent.persistence.privileged_actions import PrivilegedActionRepository
+    from pc_manager_agent.persistence.service_startup_actions import (
+        ServiceStartupActionRepository,
+        ServiceStartupBackupVault,
+    )
+    from pc_manager_agent.persistence.software_uninstall_execution import MsiUninstallRepository
+    from pc_manager_agent.persistence.startup_actions import (
+        StartupActionRepository,
+        StartupBackupVault,
+    )
+    from pc_manager_agent.platform_support.windows.data_protection import (
+        WindowsCurrentUserDataProtector,
+    )
+    from pc_manager_agent.platform_support.windows.msi_uninstall import (
+        WindowsMsiProductInventory,
+        WindowsMsiUninstallPlatform,
+    )
     from pc_manager_agent.platform_support.windows.named_pipe import WindowsBrokerPipeServer
     from pc_manager_agent.platform_support.windows.process_identity import (
         WindowsBrokerBinaryInspector,
@@ -72,15 +96,43 @@ def main(argv: list[str] | None = None) -> int:
         WindowsServiceControlPlatform,
         current_windows_username,
     )
+    from pc_manager_agent.platform_support.windows.service_startup import (
+        WindowsServiceStartupPlatform,
+    )
+    from pc_manager_agent.platform_support.windows.software_inventory import (
+        WindowsSoftwareInventoryPlatform,
+    )
+    from pc_manager_agent.platform_support.windows.startup_management import (
+        WindowsStartupManagementPlatform,
+    )
+    from pc_manager_agent.platform_support.windows.system_diagnostics import (
+        WindowsSystemDiagnosticsPlatform,
+    )
     from pc_manager_agent.privileged.broker_identity import BrokerTrustPolicy
     from pc_manager_agent.privileged.broker_session import (
         AuthenticatedPipeStream,
         ElevatedBrokerServerSession,
     )
+    from pc_manager_agent.privileged.dispatcher import PrivilegedActionDispatcher
     from pc_manager_agent.privileged.elevated_broker import ElevatedPrivilegedBroker
+    from pc_manager_agent.privileged.machine_msi_handler import (
+        WindowsMachineMsiPrivilegedHandler,
+    )
+    from pc_manager_agent.privileged.machine_startup_handler import (
+        WindowsMachineStartupPrivilegedHandler,
+    )
+    from pc_manager_agent.privileged.manifests import build_stage4x3_manifest_registry
     from pc_manager_agent.privileged.serialization import PrivilegedRequestSerializer
+    from pc_manager_agent.privileged.service_control_dispatch import ServiceControlDispatchHandler
     from pc_manager_agent.privileged.service_handler import WindowsServicePrivilegedHandler
+    from pc_manager_agent.privileged.service_startup_handler import (
+        WindowsServiceStartupPrivilegedHandler,
+    )
+    from pc_manager_agent.safety.machine_msi_policy import MachineMsiExecutionPolicy
+    from pc_manager_agent.safety.machine_startup_policy import MachineStartupSafetyPolicy
     from pc_manager_agent.safety.service_policy import ServiceSafetyPolicy
+    from pc_manager_agent.safety.service_startup_policy import ServiceStartupSafetyPolicy
+    from pc_manager_agent.safety.software_uninstall_policy import SoftwareUninstallSafetyPolicy
 
     try:
         trust_mode = BrokerTrustMode(trust_mode_value)
@@ -91,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         binary = WindowsBrokerBinaryInspector().inspect(broker_path)
         identity = capture_current_process_identity()
-        if not identity.elevated or identity.integrity_level not in {"HIGH", "SYSTEM"}:
+        if not identity.elevated or identity.integrity_level != "HIGH":
             return _EXIT_NOT_ELEVATED
         trust = BrokerTrustPolicy(trust_mode, expected_sha256=binary.sha256)
         trust.require_binary(binary)
@@ -99,25 +151,77 @@ def main(argv: list[str] | None = None) -> int:
         return _EXIT_TRUST
     audit_repository = AuditRepository(database_path)
     privileged_repository = PrivilegedActionRepository(database_path)
+    service_startup_vault = ServiceStartupBackupVault(
+        database_path,
+        WindowsCurrentUserDataProtector(),
+    )
+    service_startup_history = ServiceStartupActionRepository(database_path)
+    startup_vault = StartupBackupVault(database_path, WindowsCurrentUserDataProtector())
+    startup_history = StartupActionRepository(database_path)
+    msi_activity = MsiUninstallRepository(database_path)
     pipe_server = None
     stream = None
     try:
         audit_repository.initialize()
         privileged_repository.initialize(reconcile_active=False)
+        service_startup_vault.initialize()
+        service_startup_history.initialize(reconcile_active=False)
+        startup_vault.initialize()
+        startup_history.initialize(reconcile_active=False)
+        msi_activity.initialize(reconcile_active=False)
         audit = ElevatedBrokerAuditLogger(audit_repository, app_version=__version__)
-        platform = WindowsServiceControlPlatform()
-        handler = WindowsServicePrivilegedHandler(
-            platform,
-            ServiceSafetyPolicy(
-                current_username=current_windows_username(),
-                agent_root=broker_path.parent,
-            ),
-            ServiceDependencyAnalyzer(),
+        control = WindowsServiceControlPlatform()
+        base_service_policy = ServiceSafetyPolicy(
+            current_username=current_windows_username(),
+            agent_root=broker_path.parent,
+        )
+        service_control = ServiceControlDispatchHandler(
+            WindowsServicePrivilegedHandler(
+                control,
+                base_service_policy,
+                ServiceDependencyAnalyzer(),
+            )
+        )
+        service_startup = WindowsServiceStartupPrivilegedHandler(
+            control,
+            WindowsServiceStartupPlatform(),
+            ServiceStartupSafetyPolicy(base_service_policy),
+            service_startup_vault,
+            service_startup_history,
+        )
+        startup_platform = WindowsStartupManagementPlatform(
+            database_path.parent / "disabled_startup"
+        )
+        machine_startup = WindowsMachineStartupPrivilegedHandler(
+            startup_platform,
+            MachineStartupSafetyPolicy(agent_root=broker_path.parent),
+            startup_vault,
+            startup_history,
+        )
+        software_resolver = SoftwareTargetResolver(
+            SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
+        )
+        msi_inventory = WindowsMsiProductInventory()
+        machine_msi = WindowsMachineMsiPrivilegedHandler(
+            software_resolver,
+            UninstallCapabilityResolver(),
+            MsiProductValidator(msi_inventory),
+            SoftwareUninstallSafetyPolicy(agent_root=broker_path.parent),
+            MachineMsiExecutionPolicy(),
+            SoftwareExecutionPreflight(WindowsSystemDiagnosticsPlatform()),
+            WindowsMsiUninstallPlatform(),
+            MsiUninstallVerifier(software_resolver, msi_inventory),
+            msi_activity,
+            privileged_repository,
+        )
+        dispatcher = PrivilegedActionDispatcher(
+            build_stage4x3_manifest_registry(),
+            (service_control, service_startup, machine_startup, machine_msi),
         )
         broker = ElevatedPrivilegedBroker(
             PrivilegedRequestSerializer(),
             privileged_repository,
-            handler,
+            dispatcher,
             audit,
             trust,
         )
@@ -152,6 +256,11 @@ def main(argv: list[str] | None = None) -> int:
             stream.close()
         if pipe_server is not None:
             pipe_server.close()
+        msi_activity.close()
+        startup_history.close()
+        startup_vault.close()
+        service_startup_history.close()
+        service_startup_vault.close()
         privileged_repository.close()
         audit_repository.close()
 

@@ -1,5 +1,27 @@
 # Developer guide
 
+## Stage 4X3 development
+
+新增管理员能力时必须同时增加独立 Payload、Schema/policy 版本、R3 manifest、Broker handler、
+Fresh revalidator、窄适配器、typed result evidence、Main readback、两级确认、审计、恢复语义和测试。
+只增加 enum 或 Payload 不会创建执行权限；manifest 和具体 handler 缺一即拒绝。不得把命令、任意
+可执行路径/参数、原始卸载字符串或通用注册表数据放入 Payload。
+
+本阶段测试命令：
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_stage4x3_routing.py tests/unit/test_stage4x3_policies.py `
+  tests/security/test_stage4x3_boundaries.py tests/gui/test_stage4x3_action_dialog.py -q
+uv run pytest tests/unit/test_elevated_broker_protocol.py `
+  tests/integration/test_elevated_broker_execution.py `
+  tests/security/test_elevated_broker_boundary.py -q
+```
+
+自动化测试必须注入假 SCM、注册表、MSI 和 Broker 端点，不得弹 UAC 或修改真实系统。真实验证仅
+按 `docs/manual-testing/privileged-actions.md` 在可回滚的测试虚拟机中手动执行。构建检查还必须
+确认 Broker 包不包含 PySide6、模型供应商或 UI 模块。机器 Vendor 能力保持 deferred。
+
 ## Stage 4X2 development and packaging
 
 Stage 4X2 real mode is `windows`; it must never be renamed to a generic `real` or enabled by default. The

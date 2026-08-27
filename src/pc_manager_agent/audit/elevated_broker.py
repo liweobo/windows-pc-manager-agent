@@ -1,4 +1,4 @@
-"""Privacy-minimized audit events for the real Stage 4X2 Broker lifecycle."""
+"""Privacy-minimized audit events for the real Stage 4X3 Broker lifecycle."""
 
 from __future__ import annotations
 
@@ -14,13 +14,16 @@ from pc_manager_agent.domain.elevated_broker import (
     BrokerLifecycleState,
     ElevatedBrokerResult,
 )
-from pc_manager_agent.domain.privileged_actions import PrivilegedActionEnvelope
+from pc_manager_agent.domain.privileged_actions import (
+    PrivilegedActionEnvelope,
+    PrivilegedActionType,
+)
 from pc_manager_agent.persistence.privileged_actions import nonce_fingerprint
 
 
 @dataclass(frozen=True, slots=True)
 class ElevatedBrokerAuditContext:
-    """Non-secret endpoint evidence shared by correlated Stage 4X2 events."""
+    """Non-secret endpoint evidence shared by correlated Stage 4X3 events."""
 
     caller_sid_fingerprint: str
     session_id: int
@@ -147,12 +150,15 @@ class ElevatedBrokerAuditLogger:
         event = AuditEvent(
             event_type="ELEVATED_BROKER_EXECUTION_EVENT",
             plan_id=str(envelope.request.plan_id),
-            agent_decision="REAL_SCM_EXECUTION_STARTING",
+            agent_decision=f"REAL_{envelope.request.action_type.value}_STARTING",
             risk_level=envelope.request.risk_level,
             confirmation_required=True,
             confirmation_result="CONSUMED",
             parameters=parameters,
-            result={"execution_started": False, "adapter": "WINDOWS_SCM_API"},
+            result={
+                "execution_started": False,
+                "adapter": _adapter_name(envelope.request.action_type),
+            },
             app_version=self._app_version,
             git_commit=self._git_commit,
         )
@@ -166,7 +172,7 @@ class ElevatedBrokerAuditLogger:
         *,
         context: ElevatedBrokerAuditContext | None = None,
     ) -> UUID:
-        """Record the truthful exact outcome and verification without service content."""
+        """Record truthful action-specific verification without commands or raw registry data."""
         parameters = self._safe_parameters(envelope, result.broker_instance_id, context)
         parameters.update(
             {
@@ -185,13 +191,24 @@ class ElevatedBrokerAuditLogger:
             confirmation_required=True,
             confirmation_result="CONSUMED",
             parameters=parameters,
-            before_state={"state": result.pre_state.value if result.pre_state else None},
+            before_state={
+                "state": result.pre_state.value if result.pre_state else None,
+                "state_hash": result.pre_state_hash,
+            },
             result={
                 "execution_status": result.execution_status.value,
                 "result_code": result.result_code,
-                "rollback_level": result.rollback_level,
+                "rollback_level": result.rollback_level.value,
+                "action_evidence": (
+                    result.action_evidence.model_dump(mode="json")
+                    if result.action_evidence is not None
+                    else None
+                ),
             },
-            after_state={"state": result.post_state.value if result.post_state else None},
+            after_state={
+                "state": result.post_state.value if result.post_state else None,
+                "state_hash": result.post_state_hash,
+            },
             verification={"status": result.verification_status.value},
             app_version=self._app_version,
             git_commit=self._git_commit,
@@ -212,6 +229,10 @@ class ElevatedBrokerAuditLogger:
             "agent_instance_id": str(request.agent_instance_id),
             "protocol_version": request.protocol_version,
             "action_type": request.action_type.value,
+            "action_schema_version": request.action_schema_version,
+            "safety_policy_version": request.safety_policy_version,
+            "manifest_digest": request.manifest_digest,
+            "payload_digest": request.payload_digest,
             "target_identity_hash": request.target_identity_hash,
             "plan_id": str(request.plan_id),
             "plan_hash": request.plan_hash,
@@ -224,6 +245,9 @@ class ElevatedBrokerAuditLogger:
             "risk_level": request.risk_level.value,
             "privilege_requirement": request.privilege_requirement.value,
         }
+        source_transaction_id = getattr(request.payload, "source_transaction_id", None)
+        if isinstance(source_transaction_id, UUID):
+            parameters["source_transaction_id"] = str(source_transaction_id)
         ElevatedBrokerAuditLogger._add_context(parameters, context)
         return parameters
 
@@ -246,3 +270,15 @@ class ElevatedBrokerAuditLogger:
         )
         if context.ipc_endpoint_fingerprint is not None:
             parameters["ipc_endpoint_fingerprint"] = context.ipc_endpoint_fingerprint
+
+
+def _adapter_name(action_type: PrivilegedActionType) -> str:
+    return {
+        PrivilegedActionType.SERVICE_START: "WINDOWS_SCM_CONTROL_API",
+        PrivilegedActionType.SERVICE_STOP: "WINDOWS_SCM_CONTROL_API",
+        PrivilegedActionType.SERVICE_STARTUP_TYPE_CHANGE: "WINDOWS_SERVICE_CONFIG_API",
+        PrivilegedActionType.SERVICE_STARTUP_TYPE_RESTORE: "WINDOWS_SERVICE_CONFIG_API",
+        PrivilegedActionType.STARTUP_MACHINE_DISABLE: "WINDOWS_TRANSACTED_HKLM_RUN_API",
+        PrivilegedActionType.STARTUP_MACHINE_RESTORE: "WINDOWS_TRANSACTED_HKLM_RUN_API",
+        PrivilegedActionType.MSI_UNINSTALL_MACHINE: "FIXED_MACHINE_MSI_ADAPTER",
+    }.get(action_type, "UNREGISTERED_ACTION")

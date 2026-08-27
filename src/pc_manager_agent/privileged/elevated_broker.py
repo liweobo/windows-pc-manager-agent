@@ -1,4 +1,4 @@
-"""One-shot deterministic Stage 4X2 Broker execution core."""
+"""One-shot deterministic Stage 4X2/4X3 Broker execution core."""
 
 from __future__ import annotations
 
@@ -20,13 +20,13 @@ from pc_manager_agent.domain.elevated_broker import (
     ElevatedBrokerResultEnvelope,
     ElevatedExecutionStatus,
     ElevatedVerificationStatus,
+    ServiceControlResultEvidence,
     WindowsProcessIdentity,
     canonical_broker_bytes,
 )
 from pc_manager_agent.domain.privileged_actions import (
     BrokerDecision,
     PrivilegedActionEnvelope,
-    PrivilegedActionType,
     PrivilegedExecutionMode,
     PrivilegedReplayState,
     PrivilegedTransactionState,
@@ -39,11 +39,14 @@ from pc_manager_agent.persistence.privileged_actions import (
     nonce_fingerprint,
 )
 from pc_manager_agent.privileged.broker_identity import BrokerTrustError, BrokerTrustPolicy
+from pc_manager_agent.privileged.dispatcher import PrivilegedActionDispatcher
 from pc_manager_agent.privileged.ipc_protocol import IpcSessionAuthenticator
+from pc_manager_agent.privileged.manifests import build_stage4x3_manifest_registry
 from pc_manager_agent.privileged.revalidation import (
     PrivilegedRevalidationError,
 )
 from pc_manager_agent.privileged.serialization import PrivilegedRequestSerializer
+from pc_manager_agent.privileged.service_control_dispatch import ServiceControlDispatchHandler
 from pc_manager_agent.privileged.service_handler import WindowsServicePrivilegedHandler
 from pc_manager_agent.tools.manifest import CancellationToken
 
@@ -59,7 +62,7 @@ class ElevatedPrivilegedBroker:
         self,
         serializer: PrivilegedRequestSerializer,
         repository: PrivilegedActionRepository,
-        handler: WindowsServicePrivilegedHandler,
+        handler: WindowsServicePrivilegedHandler | PrivilegedActionDispatcher,
         audit: ElevatedBrokerAuditLogger,
         trust_policy: BrokerTrustPolicy,
         *,
@@ -67,7 +70,14 @@ class ElevatedPrivilegedBroker:
     ) -> None:
         self._serializer = serializer
         self._repository = repository
-        self._handler = handler
+        self._dispatcher = (
+            handler
+            if isinstance(handler, PrivilegedActionDispatcher)
+            else PrivilegedActionDispatcher(
+                build_stage4x3_manifest_registry(),
+                (ServiceControlDispatchHandler(handler),),
+            )
+        )
         self._audit = audit
         self._trust = trust_policy
         self._now = now or (lambda: datetime.now(UTC))
@@ -101,10 +111,7 @@ class ElevatedPrivilegedBroker:
             broker_executable_identity=expected_broker_binary.canonical_digest(),
             broker_version=__version__,
         )
-        if request.action_type not in {
-            PrivilegedActionType.SERVICE_START,
-            PrivilegedActionType.SERVICE_STOP,
-        }:
+        if request.action_type not in self._dispatcher.actions:
             return self._reject(
                 envelope,
                 broker_instance_id,
@@ -142,8 +149,11 @@ class ElevatedPrivilegedBroker:
                 context=audit_context,
             )
         try:
-            fresh = self._handler.require(request)
-            self._require_preview_fresh(snapshot, fresh)
+            self._dispatcher.require(
+                request,
+                preview_target_state_hash=snapshot.preview.target_state_hash,
+                preview_safety_digest=snapshot.preview.safety_digest,
+            )
             self._audit.validation(
                 envelope,
                 broker_instance_id=broker_instance_id,
@@ -153,8 +163,11 @@ class ElevatedPrivilegedBroker:
             self._repository.consume(request, now=now)
             # Every write gate is consumed before this second full validation. Drift now
             # fails without reopening the capability or either confirmation.
-            final = self._handler.require(request)
-            self._require_preview_fresh(snapshot, final)
+            final = self._dispatcher.require(
+                request,
+                preview_target_state_hash=snapshot.preview.target_state_hash,
+                preview_safety_digest=snapshot.preview.safety_digest,
+            )
             self._repository.transition(
                 request.request_id,
                 PrivilegedTransactionState.EXECUTING,
@@ -205,7 +218,7 @@ class ElevatedPrivilegedBroker:
             dispatch_observed = True
 
         try:
-            step = self._handler.execute(
+            outcome = self._dispatcher.execute_and_verify(
                 request,
                 final,
                 CancellationToken(),
@@ -217,8 +230,12 @@ class ElevatedPrivilegedBroker:
                 PrivilegedReplayState.CONSUMED,
                 result_code="REAL_EXECUTION_DISPATCHED",
             )
-            verified = self._handler.verify(request)
-            success = step.control_dispatched and step.verified and verified is not None
+            success = outcome.execution_started and outcome.verified
+            service_evidence = (
+                outcome.action_evidence
+                if isinstance(outcome.action_evidence, ServiceControlResultEvidence)
+                else None
+            )
             result = ElevatedBrokerResult(
                 request_id=request.request_id,
                 broker_instance_id=broker_instance_id,
@@ -233,29 +250,33 @@ class ElevatedPrivilegedBroker:
                     ElevatedExecutionStatus.COMPLETED
                     if success
                     else (
-                        ElevatedExecutionStatus.FAILED
-                        if step.control_dispatched
+                        ElevatedExecutionStatus.INTERRUPTED
+                        if outcome.uncertain
+                        else ElevatedExecutionStatus.FAILED
+                        if outcome.execution_started
                         else ElevatedExecutionStatus.NOT_STARTED
                     )
                 ),
                 verification_status=(
                     ElevatedVerificationStatus.VERIFIED
                     if success
-                    else ElevatedVerificationStatus.FAILED
+                    else (
+                        ElevatedVerificationStatus.UNCERTAIN
+                        if outcome.uncertain
+                        else ElevatedVerificationStatus.FAILED
+                    )
                 ),
-                execution_started=step.control_dispatched,
-                pre_state=step.before_state,
-                post_state=verified.state if verified else step.after_state,
-                pre_state_hash=final.observation.state_digest(),
-                post_state_hash=verified.state_digest() if verified else None,
-                result_code="REAL_SERVICE_ACTION_VERIFIED" if success else "VERIFICATION_FAILED",
-                message=(
-                    "The exact SCM action and Broker postcondition were verified"
-                    if success
-                    else "The exact service postcondition could not be verified"
-                ),
+                execution_started=outcome.execution_started,
+                pre_state=service_evidence.before_state if service_evidence else None,
+                post_state=service_evidence.after_state if service_evidence else None,
+                pre_state_hash=outcome.pre_state_hash,
+                post_state_hash=outcome.post_state_hash,
+                action_evidence=outcome.action_evidence,
+                result_code=outcome.result_code,
+                message=outcome.message,
                 started_at=started_at,
                 completed_at=self._now(),
+                rollback_level=outcome.rollback_level,
             )
         except Exception:
             result = ElevatedBrokerResult(
@@ -271,12 +292,12 @@ class ElevatedPrivilegedBroker:
                 ),
                 verification_status=ElevatedVerificationStatus.UNCERTAIN,
                 execution_started=dispatch_observed,
-                pre_state=final.observation.state,
-                pre_state_hash=final.observation.state_digest(),
-                result_code="SCM_EXECUTION_INTERRUPTED",
-                message="The Broker lost a complete SCM result; fresh reconciliation is required",
+                pre_state_hash=final.target_state_hash,
+                result_code="PRIVILEGED_EXECUTION_INTERRUPTED",
+                message="The Broker lost a complete result; fresh reconciliation is required",
                 started_at=started_at,
                 completed_at=self._now(),
+                rollback_level=self._dispatcher.manifest(request.action_type).rollback_level,
             )
         terminal = (
             PrivilegedTransactionState.COMPLETED
@@ -297,7 +318,7 @@ class ElevatedPrivilegedBroker:
                     "decision": BrokerDecision.PERSISTENCE_UNAVAILABLE.value,
                     "result_code": "FINAL_AUDIT_OR_STATE_UNAVAILABLE",
                     "message": (
-                        "The service operation completed but final durable audit/state failed; "
+                        "The privileged operation completed but final durable audit/state failed; "
                         "fresh reconciliation is required"
                     ),
                     "verification_status": ElevatedVerificationStatus.UNCERTAIN,
@@ -337,6 +358,9 @@ class ElevatedPrivilegedBroker:
             or plan.plan_id != request.plan_id
             or plan.canonical_digest() != request.plan_hash
             or plan.action_type is not request.action_type
+            or plan.action_schema_version != request.action_schema_version
+            or plan.safety_policy_version != request.safety_policy_version
+            or plan.manifest_digest != request.manifest_digest
             or plan.payload_digest != request.payload_digest
             or plan.target_identity_hash != request.target_identity_hash
             or plan.object_summary_digest != request.object_summary_digest
@@ -349,6 +373,9 @@ class ElevatedPrivilegedBroker:
             or preview.canonical_digest() != request.preview_hash
             or preview.plan_hash != request.plan_hash
             or preview.target_identity_hash != request.target_identity_hash
+            or preview.action_schema_version != request.action_schema_version
+            or preview.safety_policy_version != request.safety_policy_version
+            or preview.manifest_digest != request.manifest_digest
         ):
             return BrokerDecision.PREVIEW_BINDING_INVALID
         if (
@@ -366,28 +393,6 @@ class ElevatedPrivilegedBroker:
         ):
             return BrokerDecision.CONFIRMATION_INVALID
         return None
-
-    @staticmethod
-    def _require_preview_fresh(
-        snapshot: PrivilegedAuthorizationSnapshot,
-        fresh: object,
-    ) -> None:
-        from pc_manager_agent.privileged.service_handler import ValidatedServiceRequest
-
-        if not isinstance(fresh, ValidatedServiceRequest):
-            raise PrivilegedRevalidationError(
-                BrokerDecision.PRECONDITION_FAILED,
-                "Broker handler returned invalid fresh evidence",
-            )
-        if (
-            snapshot.preview.target_state_hash != fresh.observation.state_digest()
-            or snapshot.preview.safety_digest != fresh.safety_digest
-            or fresh.dependency_digest != snapshot.plan.payload.expected_dependency_digest  # type: ignore[union-attr]
-        ):
-            raise PrivilegedRevalidationError(
-                BrokerDecision.TARGET_CHANGED,
-                "Fresh Preview, safety, or dependency evidence changed",
-            )
 
     def _reject(
         self,
@@ -412,7 +417,7 @@ class ElevatedPrivilegedBroker:
             envelope,
             broker_instance_id,
             decision,
-            "The privileged request was rejected before SCM execution",
+            "The privileged request was rejected before elevated execution",
         )
         try:
             self._audit.validation(

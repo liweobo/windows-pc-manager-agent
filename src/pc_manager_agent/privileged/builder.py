@@ -23,6 +23,10 @@ from pc_manager_agent.domain.privileged_actions import (
     canonical_model_digest,
 )
 from pc_manager_agent.privileged.authentication import PrivilegedRequestAuthenticator
+from pc_manager_agent.privileged.manifests import (
+    PrivilegedManifestRegistry,
+    build_stage4x3_manifest_registry,
+)
 from pc_manager_agent.privileged.serialization import PrivilegedRequestSerializer
 
 
@@ -34,6 +38,7 @@ class PrivilegedActionBuilder:
         serializer: PrivilegedRequestSerializer,
         authenticator: PrivilegedRequestAuthenticator,
         confirmations: PrivilegedActionConfirmationService,
+        manifests: PrivilegedManifestRegistry | None = None,
         *,
         request_ttl_seconds: int = 120,
         now: Callable[[], datetime] | None = None,
@@ -43,6 +48,7 @@ class PrivilegedActionBuilder:
         self._serializer = serializer
         self._authenticator = authenticator
         self._confirmations = confirmations
+        self._manifests = manifests or build_stage4x3_manifest_registry()
         self._ttl = request_ttl_seconds
         self._now = now or (lambda: datetime.now(UTC))
 
@@ -56,10 +62,19 @@ class PrivilegedActionBuilder:
         object_summary: str,
     ) -> PrivilegedActionPlan:
         """Build an exact R3 protocol plan from deterministic upstream evidence."""
+        manifest = self._manifests.require(payload.payload_type)
+        if (
+            payload.action_schema_version != manifest.action_schema_version
+            or payload.safety_policy_version != manifest.safety_policy_version
+        ):
+            raise ValueError("Payload schema or safety policy is not registered")
         return PrivilegedActionPlan(
             source_plan_id=source_plan_id,
             source_plan_hash=source_plan_hash,
             action_type=payload.payload_type,
+            action_schema_version=manifest.action_schema_version,
+            safety_policy_version=manifest.safety_policy_version,
+            manifest_digest=manifest.canonical_digest(),
             payload=payload,
             payload_digest=canonical_model_digest(payload.model_dump(mode="json")),
             target_identity_hash=target_identity_hash,
@@ -81,6 +96,9 @@ class PrivilegedActionBuilder:
             plan_id=plan.plan_id,
             plan_hash=plan.canonical_digest(),
             action_type=plan.action_type,
+            action_schema_version=plan.action_schema_version,
+            safety_policy_version=plan.safety_policy_version,
+            manifest_digest=plan.manifest_digest,
             target_identity_hash=plan.target_identity_hash,
             target_state_hash=target_state_hash,
             safety_digest=safety_digest,
@@ -93,8 +111,8 @@ class PrivilegedActionBuilder:
                 "operation will be performed."
                 if mock_only
                 else (
-                    "Stage 4X2 may request Windows UAC only after both exact confirmations; "
-                    "the one-shot Broker may execute only SERVICE_START or SERVICE_STOP."
+                    "Stage 4X3 may request Windows UAC only after both exact confirmations; "
+                    "the one-shot Broker may execute only the manifest-bound action shown."
                 )
             ),
         )
@@ -119,6 +137,9 @@ class PrivilegedActionBuilder:
         nonce = secrets.token_urlsafe(32)
         request = PrivilegedActionRequest(
             action_type=plan.action_type,
+            action_schema_version=plan.action_schema_version,
+            safety_policy_version=plan.safety_policy_version,
+            manifest_digest=plan.manifest_digest,
             payload=plan.payload,
             payload_digest=plan.payload_digest,
             target_identity_hash=plan.target_identity_hash,

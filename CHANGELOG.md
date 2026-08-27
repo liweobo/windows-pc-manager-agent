@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — Stage 4X3
+
+### Added
+
+- Dedicated Actions for service startup-type change/restore, exact HKLM Run disable/restore, and exact machine-scope MSI uninstall.
+- Immutable R3 manifests, default-deny typed dispatch, Broker Fresh revalidation, action-specific result evidence, and standard-user independent readback.
+- Conditional-FULL service/HKLM recovery indexing, machine-MSI protected-class policy, global uninstall exclusion, sanitized child environment, privacy-minimized audit, GUI and test coverage.
+
+### Changed
+
+- Privileged request/result Schema is version 2 and binds action Schema, safety-policy version, manifest digest, source transaction and typed result evidence.
+- The real allowlist now contains exactly seven actions: service Start/Stop plus five Stage 4X3 actions. Restart and machine Vendor uninstall remain unregistered.
+
+### Security
+
+- Administrator access cannot override a safety block. Broker integrity must be exactly `HIGH`; SYSTEM and TrustedInstaller routes are rejected.
+- No generic command, shell, executable runner, registry writer, SCM editor or uninstall-string path was added. UAC cancellation, expiry, replay, drift and uncertain verification fail closed without retry.
+- Automated tests never perform a real privileged mutation; real operations require explicit disposable-system manual validation.
+
 ## Unreleased — Stage 4X2
 
 ### Added

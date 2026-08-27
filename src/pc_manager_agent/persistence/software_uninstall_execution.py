@@ -167,8 +167,8 @@ class MsiUninstallRepository:
         self._sessions = sessionmaker(self._engine, expire_on_commit=False)
         self._initialized = False
 
-    def initialize(self) -> tuple[UUID, ...]:
-        """Create tables, invalidate pending approvals, and mark active work interrupted."""
+    def initialize(self, *, reconcile_active: bool = True) -> tuple[UUID, ...]:
+        """Create tables and optionally reconcile work owned by a prior process run."""
         interrupted: list[UUID] = []
         try:
             MsiUninstallBase.metadata.create_all(self._engine)
@@ -176,7 +176,11 @@ class MsiUninstallRepository:
                 connection.execute(text("SELECT 1"))
             current = datetime.now(UTC)
             with self._sessions.begin() as session:
-                rows = tuple(session.scalars(select(MsiUninstallTransactionRow)))
+                rows = (
+                    tuple(session.scalars(select(MsiUninstallTransactionRow)))
+                    if reconcile_active
+                    else ()
+                )
                 for row in rows:
                     state = MsiUninstallTransactionState(row.state)
                     if state in _TERMINAL_STATES:
@@ -200,17 +204,21 @@ class MsiUninstallRepository:
                             "Pending confirmation invalidated by application restart"
                         )
                     row.updated_at = current
-                pending = tuple(
-                    session.scalars(
-                        select(MsiUninstallConfirmationRow).where(
-                            MsiUninstallConfirmationRow.state.in_(
-                                {
-                                    MsiUninstallConfirmationState.PENDING.value,
-                                    MsiUninstallConfirmationState.APPROVED.value,
-                                }
+                pending = (
+                    tuple(
+                        session.scalars(
+                            select(MsiUninstallConfirmationRow).where(
+                                MsiUninstallConfirmationRow.state.in_(
+                                    {
+                                        MsiUninstallConfirmationState.PENDING.value,
+                                        MsiUninstallConfirmationState.APPROVED.value,
+                                    }
+                                )
                             )
                         )
                     )
+                    if reconcile_active
+                    else ()
                 )
                 for confirmation_row in pending:
                     confirmation_row.state = MsiUninstallConfirmationState.EXPIRED.value
@@ -275,6 +283,24 @@ class MsiUninstallRepository:
             raise
         except SQLAlchemyError as exc:
             raise MsiUninstallStoreError("MSI uninstall transaction creation failed") from exc
+
+    def has_active_uninstall(self) -> bool:
+        """Return whether any MSI/Vendor/winget/MSIX transaction owns the global slot."""
+        self._require_initialized()
+        try:
+            with self._sessions() as session:
+                msi_active = any(
+                    MsiUninstallTransactionState(row.state) not in _TERMINAL_STATES
+                    for row in session.scalars(select(MsiUninstallTransactionRow))
+                )
+                return bool(
+                    msi_active
+                    or _active_vendor_transaction(session)
+                    or _active_winget_transaction(session)
+                    or _active_msix_transaction(session)
+                )
+        except SQLAlchemyError as exc:
+            raise MsiUninstallStoreError("Uninstall activity lookup failed") from exc
 
     def transition(
         self,

@@ -24,6 +24,7 @@ from pc_manager_agent.domain.elevated_broker import (
     BrokerLifecycleState,
     BrokerTrustMode,
     ElevatedBrokerResultEnvelope,
+    ElevatedVerificationStatus,
     WindowsProcessIdentity,
 )
 from pc_manager_agent.domain.privileged_actions import (
@@ -81,6 +82,48 @@ class BrokerPipeClientFactory(Protocol):
         ...
 
 
+class PrivilegedPostconditionVerifier(Protocol):
+    """Perform one independent standard-user fresh readback after Broker execution."""
+
+    def verify(
+        self,
+        envelope: PrivilegedActionEnvelope,
+        result: ElevatedBrokerResultEnvelope,
+    ) -> bool:
+        """Return true only when fresh local state proves the requested postcondition."""
+        ...
+
+
+class ServiceControlPostconditionVerifier:
+    """Stage 4X2 compatibility verifier for exact service Start/Stop actions."""
+
+    def __init__(self, platform: ServiceControlPlatform) -> None:
+        self._platform = platform
+
+    def verify(
+        self,
+        envelope: PrivilegedActionEnvelope,
+        result: ElevatedBrokerResultEnvelope,
+    ) -> bool:
+        """Require authenticated Broker success plus an independent SCM readback."""
+        if result.result.verification_status is not ElevatedVerificationStatus.VERIFIED:
+            return False
+        payload = envelope.request.payload
+        if not isinstance(payload, (ServiceStartPayload, ServiceStopPayload)):
+            return False
+        current = self._platform.inspect(payload.service_identity.service_name)
+        expected = (
+            ServiceState.RUNNING
+            if isinstance(payload, ServiceStartPayload)
+            else ServiceState.STOPPED
+        )
+        return bool(
+            current is not None
+            and current.identity.canonical_digest() == envelope.request.target_identity_hash
+            and current.state is expected
+        )
+
+
 class ElevatedServiceActionCoordinator:
     """Launch and communicate with one configured Broker without blocking safety gates."""
 
@@ -97,7 +140,8 @@ class ElevatedServiceActionCoordinator:
         serializer: PrivilegedRequestSerializer,
         repository: PrivilegedActionRepository,
         audit: ElevatedBrokerAuditLogger,
-        service_platform: ServiceControlPlatform,
+        service_platform: ServiceControlPlatform | None = None,
+        postcondition_verifier: PrivilegedPostconditionVerifier | None = None,
         connect_timeout_seconds: float = 30.0,
         message_timeout_seconds: float = 15.0,
         now: Callable[[], datetime] | None = None,
@@ -114,7 +158,12 @@ class ElevatedServiceActionCoordinator:
         self._serializer = serializer
         self._repository = repository
         self._audit = audit
-        self._platform = service_platform
+        if postcondition_verifier is not None:
+            self._postcondition_verifier = postcondition_verifier
+        elif service_platform is not None:
+            self._postcondition_verifier = ServiceControlPostconditionVerifier(service_platform)
+        else:
+            raise ValueError("A privileged postcondition verifier is required")
         self._connect_timeout = connect_timeout_seconds
         self._message_timeout = message_timeout_seconds
         self._now = now or (lambda: datetime.now(UTC))
@@ -300,7 +349,7 @@ class ElevatedServiceActionCoordinator:
                 launch_ticket_digest=ticket.canonical_digest(),
                 agent_instance_id=request.agent_instance_id,
             )
-            main_readback_verified = self._verify_client_postcondition(envelope)
+            main_readback_verified = self._postcondition_verifier.verify(envelope, result)
             broker_exit_code = self._launcher.wait_for_exit(
                 launch.process,
                 timeout_seconds=self._message_timeout,
@@ -324,7 +373,7 @@ class ElevatedServiceActionCoordinator:
                     ElevatedDispatchStatus.CLIENT_VERIFICATION_FAILED,
                     result,
                     BrokerFailureCode.VERIFICATION_FAILED,
-                    "Broker replied, but the standard-user fresh service readback did not agree",
+                    "Broker replied, but the standard-user fresh readback did not agree",
                 )
             if broker_exit_code is None:
                 self._record_terminal(
@@ -344,7 +393,7 @@ class ElevatedServiceActionCoordinator:
                     ElevatedDispatchStatus.CLIENT_VERIFICATION_FAILED,
                     result,
                     BrokerFailureCode.IPC_TIMED_OUT,
-                    "The service state verified, but the elevated Broker did not exit in time",
+                    "The target state verified, but the elevated Broker did not exit in time",
                 )
             if broker_exit_code != 0:
                 self._record_terminal(
@@ -364,7 +413,7 @@ class ElevatedServiceActionCoordinator:
                     ElevatedDispatchStatus.CLIENT_VERIFICATION_FAILED,
                     result,
                     BrokerFailureCode.EXECUTION_FAILED,
-                    "The service state verified, but the Broker exit code was not successful",
+                    "The target state verified, but the Broker exit code was not successful",
                 )
             final_audit_recorded = self._record_terminal(
                 BrokerLifecycleState.EXITED,
@@ -390,7 +439,7 @@ class ElevatedServiceActionCoordinator:
                 ElevatedDispatchStatus.VERIFIED,
                 result,
                 None,
-                "Broker result and independent service readback were verified",
+                "Broker result and independent target readback were verified",
             )
         except (AuditUnavailableError, BrokerIpcError, BrokerTrustError, ValueError):
             self._interrupt_or_invalidate(request.request_id)
@@ -417,22 +466,6 @@ class ElevatedServiceActionCoordinator:
             if stream is not None:
                 stream.close()
             self._launcher.close_process_handle(launch.process)
-
-    def _verify_client_postcondition(self, envelope: PrivilegedActionEnvelope) -> bool:
-        payload = envelope.request.payload
-        if not isinstance(payload, (ServiceStartPayload, ServiceStopPayload)):
-            return False
-        current = self._platform.inspect(payload.service_identity.service_name)
-        expected = (
-            ServiceState.RUNNING
-            if isinstance(payload, ServiceStartPayload)
-            else ServiceState.STOPPED
-        )
-        return bool(
-            current is not None
-            and current.identity.canonical_digest() == envelope.request.target_identity_hash
-            and current.state is expected
-        )
 
     def _invalidate_unlaunched(self, request_id: UUID, result_code: str) -> None:
         try:

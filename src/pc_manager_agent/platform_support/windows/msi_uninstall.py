@@ -8,7 +8,7 @@ import os
 # This module permits subprocess only for the fixed system MSI executable and argument schema.
 import subprocess  # nosec B404
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -23,6 +23,9 @@ from pc_manager_agent.domain.software_uninstall_execution import (
 )
 from pc_manager_agent.orchestration.msi_exit_codes import map_msi_exit_code
 from pc_manager_agent.orchestration.software_msi_validation import normalize_product_code
+from pc_manager_agent.platform_support.windows.child_environment import (
+    sanitized_windows_child_environment,
+)
 from pc_manager_agent.tools.manifest import CancellationToken
 
 _ERROR_SUCCESS = 0
@@ -178,6 +181,7 @@ class WindowsMsiUninstallPlatform:
         long_running_seconds: float = 900.0,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
+        environment: Mapping[str, str] | None = None,
     ) -> None:
         if poll_interval_seconds <= 0 or long_running_seconds <= 0:
             raise ValueError("MSI monitor intervals must be positive")
@@ -187,11 +191,13 @@ class WindowsMsiUninstallPlatform:
         self._long_running = long_running_seconds
         self._monotonic = monotonic
         self._sleep = sleeper
+        self._environment = sanitized_windows_child_environment(environment or os.environ)
 
     def uninstall(
         self,
         product: ValidatedMsiProduct,
         cancellation: CancellationToken,
+        on_dispatched: Callable[[], None] | None = None,
     ) -> MsiInstallerExecutionResult:
         """Launch the fixed interactive client and never terminate it after dispatch."""
         if cancellation.cancellation_requested():
@@ -213,11 +219,14 @@ class WindowsMsiUninstallPlatform:
                 [str(executable), "/x", product.product_code, "/norestart"],
                 shell=False,
                 cwd=str(system_directory),
+                env=self._environment,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 close_fds=True,
             )
+            if on_dispatched is not None:
+                on_dispatched()
         except OSError as exc:
             elapsed = max(0, round((self._monotonic() - started) * 1000))
             return MsiInstallerExecutionResult(

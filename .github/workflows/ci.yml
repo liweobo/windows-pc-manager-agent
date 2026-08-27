@@ -356,6 +356,23 @@ jobs:
           --cov=pc_manager_agent.platform_support.windows.elevation
           --cov=pc_manager_agent.audit.elevated_broker
           --cov-report=term-missing --cov-fail-under=85 -q
+      - name: Stage 4X3 dedicated privileged integrations
+        if: matrix.python-version == '3.13'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          uv run pytest tests/unit/test_stage4x3_routing.py
+          tests/unit/test_stage4x3_policies.py
+          tests/unit/test_privileged_model_boundaries.py
+          tests/unit/test_elevated_service_coordinator.py
+          tests/integration/test_elevated_broker_execution.py
+          tests/integration/test_elevated_broker_handshake.py
+          tests/security/test_stage4x3_boundaries.py
+          tests/security/test_elevated_broker_boundary.py
+          tests/gui/test_stage4x3_action_dialog.py
+          tests/gui/test_service_startup_management.py
+          tests/gui/test_startup_management.py
+          tests/gui/test_software_uninstall_dialog.py -q
       - name: Build isolated Stage 4X2 Broker without real UAC
         if: matrix.python-version == '3.13'
         shell: pwsh

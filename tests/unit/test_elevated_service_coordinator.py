@@ -18,6 +18,7 @@ from pc_manager_agent.domain.elevated_broker import (
     ElevatedBrokerResultEnvelope,
     ElevatedExecutionStatus,
     ElevatedVerificationStatus,
+    ServiceControlResultEvidence,
     SignatureStatus,
     WindowsProcessIdentity,
 )
@@ -170,6 +171,10 @@ def _result(envelope: object) -> ElevatedBrokerResultEnvelope:
         post_state=ServiceState.STOPPED,
         pre_state_hash="a" * 64,
         post_state_hash="b" * 64,
+        action_evidence=ServiceControlResultEvidence(
+            before_state=ServiceState.RUNNING,
+            after_state=ServiceState.STOPPED,
+        ),
         result_code="VERIFIED",
         message="verified",
         started_at=datetime.now(UTC),

@@ -164,7 +164,18 @@ remain absent.
 - Added development hash-pinned packaging and no-UAC automated tests. Production remains `NOT_READY` until
   a release certificate, pinned signer identity, trusted installer location and signed update workflow exist.
 
-## Stage 4X3+ — additional privileged actions (not started)
+## Stage 4X3 — dedicated privileged business integrations (implementation complete; manual release validation pending)
+
+The one-shot Broker now has dedicated actions for Stage 4C2 service startup change/restore, exact 32/64-view
+HKLM Run disable/restore, and exact machine-scope MSI uninstall. Each reuses its established business safety
+policy, adds immutable manifest/schema/policy binding, performs Broker Fresh revalidation and action-specific
+verification, then requires standard-user Main readback. The GUI preserves two confirmations before one UAC
+attempt. Automated tests use synthetic adapters only.
+
+Machine-wide Vendor uninstall is deliberately deferred. Production release remains blocked on trusted
+installation and pinned Authenticode release signing, plus explicit disposable-system manual tests.
+
+## Stage 4X4+ — additional privileged actions (not started)
 
 Any startup, service-configuration, installer, registry or other R3 adapter needs its own narrow stage,
 threat model, production signing/deployment proof, Preview, confirmation, recovery semantics and disposable

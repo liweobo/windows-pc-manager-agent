@@ -1,4 +1,4 @@
-"""Deterministic Broker binary and endpoint identity policy for Stage 4X2."""
+"""Deterministic Broker binary and endpoint identity policy for Stage 4X3."""
 
 from __future__ import annotations
 
@@ -51,8 +51,8 @@ class BrokerTrustPolicy:
             raise BrokerTrustError("Named-pipe caller process identity changed")
         if caller.elevated:
             raise BrokerTrustError("The main Agent must remain a standard-user process")
-        if not broker.elevated or broker.integrity_level not in {"HIGH", "SYSTEM"}:
-            raise BrokerTrustError("Broker process is not elevated")
+        if not broker.elevated or broker.integrity_level != "HIGH":
+            raise BrokerTrustError("Broker process must have exactly HIGH integrity")
         if caller.user_sid != broker.user_sid:
             raise BrokerTrustError("V1 rejects elevation through a different account")
         if caller.session_id != broker.session_id:

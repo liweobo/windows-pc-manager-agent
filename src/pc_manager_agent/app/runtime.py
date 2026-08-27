@@ -86,6 +86,9 @@ from pc_manager_agent.orchestration.elevated_service_actions import (
 from pc_manager_agent.orchestration.elevated_service_preparation import (
     ElevatedServicePreparationService,
 )
+from pc_manager_agent.orchestration.elevated_stage4x3 import (
+    ElevatedStage4X3PreparationService,
+)
 from pc_manager_agent.orchestration.explanation import FileAnalysisExplainer
 from pc_manager_agent.orchestration.file_analysis import FileAnalysisOrchestrator
 from pc_manager_agent.orchestration.file_analysis_planner import (
@@ -101,6 +104,9 @@ from pc_manager_agent.orchestration.file_operation_service import FileOperationS
 from pc_manager_agent.orchestration.msix_execution_preflight import MsixExecutionPreflightService
 from pc_manager_agent.orchestration.msix_uninstall_execution import MsixUninstallService
 from pc_manager_agent.orchestration.privileged_actions import PrivilegedActionService
+from pc_manager_agent.orchestration.privileged_postconditions import (
+    Stage4X3PostconditionVerifier,
+)
 from pc_manager_agent.orchestration.process_action_planner import ProcessActionPlanCompiler
 from pc_manager_agent.orchestration.process_actions import ProcessActionService
 from pc_manager_agent.orchestration.process_target_resolver import ProcessTargetResolver
@@ -295,6 +301,8 @@ from pc_manager_agent.reporting.residual_exporter import ResidualReportExporter
 from pc_manager_agent.rollback.manager import RollbackManager
 from pc_manager_agent.safety.file_analysis_validator import FileAnalysisSafetyValidator
 from pc_manager_agent.safety.file_operation_validator import FileOperationSafetyValidator
+from pc_manager_agent.safety.machine_msi_policy import MachineMsiExecutionPolicy
+from pc_manager_agent.safety.machine_startup_policy import MachineStartupSafetyPolicy
 from pc_manager_agent.safety.operation_preview import OperationPreviewEngine
 from pc_manager_agent.safety.path_policy import PathPolicy
 from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
@@ -582,12 +590,19 @@ class PrivilegedActionServices:
 
 @dataclass(frozen=True, slots=True)
 class WindowsPrivilegedActionServices:
-    """Real Stage 4X2 preparation and one-shot Windows Broker coordination."""
+    """Real Stage 4X2/4X3 preparation and one-shot Windows Broker coordination."""
 
     service: PrivilegedActionService
     coordinator: ElevatedServiceActionCoordinator
     caller: PrivilegedCallerContext
     availability: PrivilegedBrokerAvailabilityService
+
+
+@dataclass(frozen=True, slots=True)
+class Stage4X3ActionServices:
+    """Dedicated Main preparation for service config, HKLM Run, and machine MSI."""
+
+    preparation: ElevatedStage4X3PreparationService
 
 
 class ApplicationRuntime:
@@ -1699,6 +1714,10 @@ class ApplicationRuntime:
             app_version=__version__,
             git_commit=os.getenv("GITHUB_SHA"),
         )
+        verification_software = SoftwareTargetResolver(
+            SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
+        )
+        verification_msi = WindowsMsiProductInventory()
         coordinator = ElevatedServiceActionCoordinator(
             broker_path=broker_path,
             expected_broker_sha256=expected_sha,
@@ -1710,7 +1729,13 @@ class ApplicationRuntime:
             serializer=serializer,
             repository=self.privileged_action_repository,
             audit=elevated_audit,
-            service_platform=self.service_control_platform,
+            postcondition_verifier=Stage4X3PostconditionVerifier(
+                self.service_control_platform,
+                self.startup_management_platform,
+                verification_software,
+                verification_msi,
+                max_items=self.settings.diagnostic_max_items,
+            ),
             connect_timeout_seconds=(self.settings.privileged_broker_connect_timeout_seconds),
             message_timeout_seconds=(self.settings.privileged_broker_message_timeout_seconds),
         )
@@ -1732,6 +1757,44 @@ class ApplicationRuntime:
             ),
             ServiceDependencyAnalyzer(),
         )
+
+    def create_stage4x3_action_services(self) -> Stage4X3ActionServices:
+        """Compose the three explicit Stage 4X3 Main preparation and readback paths."""
+        privileged = self.create_windows_privileged_action_services()
+        software = SoftwareTargetResolver(
+            SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
+        )
+        msi_inventory = WindowsMsiProductInventory()
+        service_base_policy = ServiceSafetyPolicy(
+            current_username=current_windows_username(),
+            agent_root=Path(__file__).resolve().parents[1],
+        )
+        preparation = ElevatedStage4X3PreparationService(
+            privileged.service,
+            privileged.coordinator,
+            self.service_control_platform,
+            self.service_startup_platform,
+            ServiceStartupSafetyPolicy(service_base_policy),
+            self.service_startup_backup_vault,
+            self.service_startup_repository,
+            self.startup_management_platform,
+            MachineStartupSafetyPolicy(agent_root=Path(__file__).resolve().parents[1]),
+            self.startup_backup_vault,
+            self.startup_action_repository,
+            software,
+            UninstallCapabilityResolver(),
+            MsiProductValidator(msi_inventory),
+            SoftwareUninstallSafetyPolicy(agent_root=Path(__file__).resolve().parents[1]),
+            MachineMsiExecutionPolicy(),
+            SoftwareExecutionPreflight(
+                WindowsSystemDiagnosticsPlatform(),
+                max_items=self.settings.diagnostic_max_items,
+            ),
+            self.msi_uninstall_repository,
+            self.privileged_action_repository,
+            max_items=self.settings.diagnostic_max_items,
+        )
+        return Stage4X3ActionServices(preparation)
 
     def create_service_startup_action_services(self) -> ServiceStartupActionServices:
         """Build Stage 4C2 backup, Preview, confirmation, and narrow SCM tools."""

@@ -26,6 +26,7 @@ from pc_manager_agent.app.runtime import ApplicationRuntime, ServiceStartupActio
 from pc_manager_agent.confirmation.service_startup_actions import (
     ServiceStartupActionConfirmation,
 )
+from pc_manager_agent.domain.service_actions import ServiceStableIdentity
 from pc_manager_agent.domain.service_startup_actions import (
     ServiceStartupActionPlan,
     ServiceStartupActionPreview,
@@ -45,6 +46,8 @@ from pc_manager_agent.ui.service_startup_workers import (
     require_service_startup_history,
     require_service_startup_result,
 )
+from pc_manager_agent.ui.stage4x3_action_dialog import Stage4X3ActionDialog
+from pc_manager_agent.ui.stage4x3_workers import Stage4X3UiAction, Stage4X3UiRequest
 
 
 class ServiceStartupActionDialog(QDialog):
@@ -74,6 +77,7 @@ class ServiceStartupActionDialog(QDialog):
         self._plan_confirmation: ServiceStartupActionConfirmation | None = None
         self._runtime_confirmation: ServiceStartupActionConfirmation | None = None
         self._worker: object | None = None
+        self._stage4x3_dialog: Stage4X3ActionDialog | None = None
         self._stage = "PREPARING"
         self._cancel_callback: Callable[[], object] = self.reject
         self.setWindowTitle("Stage 4C2 服务启动类型安全变更")
@@ -259,6 +263,9 @@ class ServiceStartupActionDialog(QDialog):
     @Slot(str)
     def _failed(self, message: str) -> None:
         self._worker = None
+        if self._can_offer_stage4x3(message):
+            self._open_stage4x3()
+            return
         self._stage = "FAILED"
         self._progress.setRange(0, 1)
         self._risk.setText("启动类型操作未完成；不会自动重试或提升权限。")
@@ -267,10 +274,57 @@ class ServiceStartupActionDialog(QDialog):
         self._cancel.setText("关闭")
         self._replace_cancel_callback(self.accept)
 
+    def _can_offer_stage4x3(self, message: str) -> bool:
+        return bool(
+            self._stage == "PREPARING"
+            and "PRIVILEGE_REQUIRED" in message
+            and self._runtime.settings.privileged_broker_mode == "windows"
+            and (self._action is ServiceStartupActionType.RESTORE or self._identity is not None)
+        )
+
+    def _open_stage4x3(self) -> None:
+        """Hand a permission-only Stage 4C2 denial to its dedicated R3 workflow."""
+        action = (
+            Stage4X3UiAction.SERVICE_STARTUP_RESTORE
+            if self._action is ServiceStartupActionType.RESTORE
+            else Stage4X3UiAction.SERVICE_STARTUP_CHANGE
+        )
+        identity = (
+            None
+            if self._action is ServiceStartupActionType.RESTORE
+            else ServiceStableIdentity.model_validate(self._identity)
+        )
+        request = Stage4X3UiRequest(
+            action=action,
+            user_goal=f"更改 {self._display_name} 的服务启动类型",
+            display_name=self._display_name,
+            service_identity=identity,
+            service_action=self._action,
+            backup_id=self._restore_backup_id,
+        )
+        dialog = Stage4X3ActionDialog(self._runtime, request, parent=self)
+        dialog.completed.connect(self.completed.emit)
+        dialog.finished.connect(lambda _result: self.accept())
+        self._stage4x3_dialog = dialog
+        self._stage = "ELEVATED_HANDOFF"
+        self._progress.setRange(0, 1)
+        self._risk.setText(
+            "普通用户权限不足；已打开独立 Stage 4X3 管理员流程。原 R2 确认不会被复用。"
+        )
+        self._details.setPlainText(
+            "管理员流程会重新创建 R3 计划、重新验证备份，并要求计划确认、即时确认和 Windows UAC。"
+        )
+        self._primary.setEnabled(False)
+        self._cancel.setText("关闭")
+        self._replace_cancel_callback(self.accept)
+        dialog.show()
+
     def shutdown(self) -> None:
         """Cancel a not-yet-dispatched configuration write during application shutdown."""
         if isinstance(self._worker, ServiceStartupExecutionWorker):
             self._worker.cancel()
+        if self._stage4x3_dialog is not None:
+            self._stage4x3_dialog.shutdown()
 
     def _replace_cancel_callback(self, callback: Callable[[], object]) -> None:
         self._cancel.clicked.disconnect(self._cancel_callback)

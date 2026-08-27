@@ -167,7 +167,7 @@ def test_broker_maps_malformed_transport_decisions(tmp_path: Path) -> None:
     try:
         envelope = prepare_stop(stack)
         raw = json.loads(stack.serializer.serialize(envelope))
-        raw["request"]["protocol_version"] = 2
+        raw["request"]["protocol_version"] = 99
         cases = (
             (b"x" * (stack.serializer.max_request_bytes + 1), BrokerDecision.REQUEST_TOO_LARGE),
             (json.dumps(raw).encode(), BrokerDecision.UNSUPPORTED_PROTOCOL_VERSION),
@@ -181,15 +181,11 @@ def test_broker_maps_malformed_transport_decisions(tmp_path: Path) -> None:
         stack.close()
 
 
-def test_defined_only_restart_is_rejected_and_consumes_authority(tmp_path: Path) -> None:
+def test_defined_only_restart_is_rejected_before_authority_creation(tmp_path: Path) -> None:
     stack = build_privileged_test_stack(tmp_path / "state.db")
     try:
-        envelope = _prepare_restart(stack)
-        first = stack.service.dispatch_mock(envelope).result
-        second = stack.service.dispatch_mock(envelope).result
-        assert first.broker_decision is BrokerDecision.ACTION_NOT_ALLOWLISTED
-        assert second.broker_decision is BrokerDecision.REPLAY_REJECTED
-        assert not first.execution_started
+        with pytest.raises(LookupError, match="not registered"):
+            _prepare_restart(stack)
     finally:
         stack.close()
 
@@ -375,7 +371,8 @@ def test_rejection_store_and_audit_errors_do_not_grant_execution(tmp_path: Path)
     ):
         stack = build_privileged_test_stack(tmp_path / f"{variant}.db")
         try:
-            envelope = _prepare_restart(stack)
+            envelope = prepare_stop(stack)
+            stack.broker._registry = PrivilegedActionRegistry()
             if variant == "replay":
 
                 def reject(*_args: object, **_kwargs: object) -> NoReturn:

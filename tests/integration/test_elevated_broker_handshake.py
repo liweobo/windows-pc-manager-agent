@@ -15,6 +15,7 @@ from pc_manager_agent.domain.elevated_broker import (
     ElevatedBrokerResultEnvelope,
     ElevatedExecutionStatus,
     ElevatedVerificationStatus,
+    ServiceControlResultEvidence,
     SignatureStatus,
     WindowsProcessIdentity,
     canonical_broker_bytes,
@@ -90,6 +91,10 @@ class _FakeBroker:
             post_state=ServiceState.STOPPED,
             pre_state_hash="a" * 64,
             post_state_hash="b" * 64,
+            action_evidence=ServiceControlResultEvidence(
+                before_state=ServiceState.RUNNING,
+                after_state=ServiceState.STOPPED,
+            ),
             result_code="TEST_VERIFIED",
             message="Synthetic Broker result",
             started_at=datetime.now(UTC),

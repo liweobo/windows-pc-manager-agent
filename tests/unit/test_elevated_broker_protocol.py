@@ -297,10 +297,22 @@ def test_binary_and_peer_trust_reject_reparse_manifest_and_standard_broker() -> 
         with pytest.raises((BrokerTrustError, ValueError)):
             policy.require_binary(identity.model_copy(update=update))
     caller = _process()
-    with pytest.raises(BrokerTrustError, match="not elevated"):
+    with pytest.raises(BrokerTrustError, match="exactly HIGH"):
         BrokerTrustPolicy.require_pipe_peers(
             caller=caller,
             expected_caller=caller,
             broker=_process(),
             expected_broker_binary=identity,
+        )
+
+
+def test_pipe_peer_policy_rejects_system_integrity_broker() -> None:
+    """Stage 4X3 permits a HIGH UAC Broker, never SYSTEM or TrustedInstaller."""
+    caller = _process()
+    with pytest.raises(BrokerTrustError, match="exactly HIGH"):
+        BrokerTrustPolicy.require_pipe_peers(
+            caller=caller,
+            expected_caller=caller,
+            broker=_process(elevated=True).model_copy(update={"integrity_level": "SYSTEM"}),
+            expected_broker_binary=_binary(),
         )

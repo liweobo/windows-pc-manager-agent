@@ -109,10 +109,29 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
-Stage 4X2 retains Stage 4X1 and adds a disabled-by-default independent one-shot Windows Elevated Broker for
-exact `SERVICE_START` and `SERVICE_STOP` only. A request may be prepared only from a Stage 4C1-safe action
-blocked solely by insufficient ordinary SCM access. Restart, service configuration, startup items, registry,
-installers and every other privileged action remain blocked. The Main Agent must stay standard-user.
+Stage 4X3 retains the one-shot authenticated Broker and adds exactly five real R3 actions:
+`SERVICE_STARTUP_TYPE_CHANGE`, `SERVICE_STARTUP_TYPE_RESTORE`, `STARTUP_MACHINE_DISABLE`,
+`STARTUP_MACHINE_RESTORE`, and `MSI_UNINSTALL_MACHINE`. Together with Stage 4X2 `SERVICE_START` and
+`SERVICE_STOP`, these are the complete real allowlist. Restart and machine Vendor uninstall remain
+unregistered. Every action has a separate strict Payload, immutable manifest/schema/policy binding,
+Broker Fresh revalidation, narrow executor, action-specific result evidence and Main readback.
+
+Service startup changes remain non-delayed Automatic ↔ Manual only and never alter runtime state. HKLM
+startup changes apply only to one exact ordinary third-party Run value in an explicit 32/64 view and need
+a verified encrypted backup. Both are conditional FULL recovery. Machine MSI accepts only a fresh exact
+high-confidence machine registration that passes existing protected-software and complete preflight gates;
+its only child is fixed system `msiexec /x ProductCode /norestart`, with sanitized environment,
+`shell=False`, no kill/stop/reboot/retry and rollback NONE.
+
+The Main application remains standard user. UAC occurs only after a new R3 plan confirmation and a fresh
+short-lived immediate confirmation. Broker integrity must be exactly HIGH, never SYSTEM. Safety BLOCK plus
+Administrator remains BLOCK. There is no PowerShell/CMD, arbitrary executable/arguments, generic
+registry/SCM/uninstall API, SYSTEM/TrustedInstaller path, fallback, automatic retry or automatic resume.
+
+The original Stage 4X2 boundary introduced the disabled-by-default one-shot Broker for exact
+`SERVICE_START` and `SERVICE_STOP`. Those actions still require a Stage 4C1-safe target blocked solely by
+insufficient ordinary SCM access. Stage 4X3 adds capabilities through separate manifests and handlers; it
+does not broaden the Stage 4X2 service-control handler. The Main Agent must stay standard-user.
 
 Before UAC, the Main process requires an absolute non-reparse Broker EXE, exact SHA-256 and `asInvoker`
 manifest. Production additionally requires trusted installation, valid Authenticode and pinned signer;

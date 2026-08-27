@@ -1,9 +1,32 @@
-# Stage 4X1/4X2 Privileged Action Protocol
+# Stage 4X1/4X2/4X3 Privileged Action Protocol
+
+## Stage 4X3 current capability status
+
+The authenticated one-shot transport remains version 1, while the inner privileged request/result Schema
+is version 2. Version 2 adds action Schema version, safety-policy version, immutable manifest digest,
+source-transaction binding and action-specific result evidence. Main and Broker must use the same manifest;
+schema, policy or manifest drift fails before execution.
+
+The real manifest/handler intersection contains exactly seven actions: Stage 4X2 service Start/Stop plus
+service startup-type change/restore, HKLM Run disable/restore and machine MSI uninstall. Restart and machine
+Vendor uninstall are not registered. No dispatch fallback exists.
+
+For each Stage 4X3 action the Broker rebuilds its business evidence twice: once before consuming authority
+and once immediately afterward. Service startup reloads identity/config/runtime/dependency impact/safety and
+the encrypted backup/history. HKLM reloads exact identity/view/value or absent state, backup/history and
+machine-startup policy. MSI reloads complete software inventory, Windows Installer registration,
+protected-class policy, process/service preflight and global uninstall activity. Only then can the dedicated
+narrow handler run.
+
+Result evidence is discriminated by action: service runtime/config state, HKLM value presence plus view, or
+MSI installer category and fresh registration/software presence. A `VERIFIED` result without matching typed
+evidence is invalid. Main independently reads the final target and may downgrade Broker success.
 
 ## Stage 4X2 current real-Broker status
 
-Stage 4X2 implements a real Windows privilege boundary for exactly two actions: `SERVICE_START` and
-`SERVICE_STOP`. It does not convert the Stage 4X1 Mock Broker into a privileged process. Instead, the
+Stage 4X2 originally implemented a real Windows privilege boundary for exactly two actions:
+`SERVICE_START` and `SERVICE_STOP`. Stage 4X3 leaves that handler unchanged and adds separate handlers.
+It does not convert the Stage 4X1 Mock Broker into a generic privileged process. Instead, the
 standard-user Main application retains plan construction, safety review, confirmation and independent
 verification, while a separately packaged one-shot Broker owns the final authorization checks and one SCM
 dispatch.
@@ -11,7 +34,7 @@ dispatch.
 The real route is disabled by default and is never selected merely because an API returns AccessDenied.
 The source Stage 4C1 Preview must already prove an exact signed third-party service, allowed safety class,
 safe dependency impact, complete query evidence, a non-elevated Main token and insufficient ordinary rights
-for only the requested Start or Stop. Restart and all other protocol actions have no real handler.
+for only the requested Start or Stop. Restart still has no real handler.
 
 ### Pre-UAC trust and launch
 
@@ -124,17 +147,18 @@ alone does not identify the cause and therefore cannot authorize escalation.
 
 ## Protocol action language
 
-Protocol version 1 defines these finite action types:
+Privileged request Schema version 2 defines these finite action types:
 
-| Action | Payload | Stage 4X1 execution status |
+| Action | Payload | Real Broker status |
 |---|---|---|
-| `SERVICE_START` | exact service identity, expected STOPPED/config/dependency evidence | Mock allow-listed |
-| `SERVICE_STOP` | exact service identity, expected RUNNING/config/dependency evidence | Mock allow-listed |
+| `SERVICE_START` | exact service identity, expected STOPPED/config/dependency evidence | Stage 4X2 handler |
+| `SERVICE_STOP` | exact service identity, expected RUNNING/config/dependency evidence | Stage 4X2 handler |
 | `SERVICE_RESTART` | exact service identity and expected evidence | Defined only; rejected |
-| `SERVICE_STARTUP_TYPE_CHANGE` | exact service identity, current config, Automatic/Manual target, backup/impact digests | Defined only; rejected |
-| `STARTUP_MACHINE_DISABLE` | exact HKLM Run identity and state digests | Defined only; rejected |
-| `STARTUP_MACHINE_RESTORE` | exact identity/state and backup digests | Defined only; rejected |
-| `MSI_UNINSTALL_MACHINE` | exact ProductCode, normalized software and registration digests | Defined only; rejected |
+| `SERVICE_STARTUP_TYPE_CHANGE` | exact service identity, current config/runtime, Automatic/Manual target, backup/impact/safety digests | Stage 4X3 handler |
+| `SERVICE_STARTUP_TYPE_RESTORE` | exact Agent change history, current/wanted config, runtime, backup/impact/safety digests | Stage 4X3 handler |
+| `STARTUP_MACHINE_DISABLE` | exact 32/64-view HKLM Run identity, current state, safety and backup digests | Stage 4X3 handler |
+| `STARTUP_MACHINE_RESTORE` | exact original disable/history/identity/view/absent-state and backup digests | Stage 4X3 handler |
+| `MSI_UNINSTALL_MACHINE` | exact ProductCode, software/capability/registration/policy/preflight/source digests | Stage 4X3 handler |
 
 Each action has a separate strict Pydantic model with `extra=forbid`. No payload has a `command`,
 `script`, `shell`, `executable`, `executable_path`, `args`, raw registry value or generic argument mapping.

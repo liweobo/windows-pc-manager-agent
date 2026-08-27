@@ -311,8 +311,8 @@ class ServiceStartupActionRepository:
         self._sessions = sessionmaker(self._engine, expire_on_commit=False)
         self._initialized = False
 
-    def initialize(self) -> tuple[UUID, ...]:
-        """Create tables and mark prior active writes interrupted without resuming them."""
+    def initialize(self, *, reconcile_active: bool = True) -> tuple[UUID, ...]:
+        """Create tables and optionally reconcile writes owned by a prior process run."""
         try:
             ServiceStartupBase.metadata.create_all(self._engine)
             with self._engine.begin() as connection:
@@ -331,12 +331,16 @@ class ServiceStartupActionRepository:
             interrupted: list[UUID] = []
             now = datetime.now(UTC)
             with self._sessions.begin() as session:
-                rows = tuple(
-                    session.scalars(
-                        select(ServiceStartupTransactionRow).where(
-                            ServiceStartupTransactionRow.state.in_(active | pending)
+                rows = (
+                    tuple(
+                        session.scalars(
+                            select(ServiceStartupTransactionRow).where(
+                                ServiceStartupTransactionRow.state.in_(active | pending)
+                            )
                         )
                     )
+                    if reconcile_active
+                    else ()
                 )
                 for row in rows:
                     if row.state in active:
@@ -630,6 +634,52 @@ class ServiceStartupActionRepository:
                 session.add(row)
         except SQLAlchemyError as exc:
             raise ServiceStartupStoreError("Service startup change history failed") from exc
+        return value
+
+    def record_privileged_change(
+        self,
+        *,
+        transaction_id: UUID,
+        backup_id: UUID,
+        backup_digest: str,
+        stable_identity: ServiceStableIdentity,
+        display_name: str,
+        original_configuration: ServiceStartupConfiguration,
+        written_configuration: ServiceStartupConfiguration,
+        original_runtime_state: ServiceState,
+    ) -> ServiceStartupChangeRecord:
+        """Index a verified Broker write without inventing an ordinary-user transaction."""
+        self._require_initialized()
+        value = ServiceStartupChangeRecord(
+            original_transaction_id=transaction_id,
+            backup_id=backup_id,
+            backup_digest=backup_digest,
+            stable_identity=stable_identity,
+            display_name=display_name,
+            original_configuration=original_configuration,
+            written_configuration=written_configuration,
+            original_runtime_state=original_runtime_state,
+            changed_at=datetime.now(UTC),
+        )
+        try:
+            with self._sessions.begin() as session:
+                session.add(
+                    ServiceStartupChangeRow(
+                        original_transaction_id=str(value.original_transaction_id),
+                        backup_id=str(value.backup_id),
+                        backup_digest=value.backup_digest,
+                        stable_identity=value.stable_identity.model_dump(mode="json"),
+                        display_name=value.display_name,
+                        original_configuration=value.original_configuration.model_dump(mode="json"),
+                        written_configuration=value.written_configuration.model_dump(mode="json"),
+                        original_runtime_state=value.original_runtime_state.value,
+                        changed_at=value.changed_at,
+                    )
+                )
+        except SQLAlchemyError as exc:
+            raise ServiceStartupStoreError(
+                "Privileged service startup change history failed"
+            ) from exc
         return value
 
     def mark_restored(self, backup_id: UUID) -> None:

@@ -6087,3 +6087,125 @@ MSI、Vendor、winget、MSIX 四个 `execute()` 现在仅多出 recorder hook：
 | `_required_state()` | 要求 services/plan/context/confirmation 全部存在；缺失 fail-closed。 |
 | `closeEvent(event)` | 关闭窗口前复用取消路径，避免遗留失控扫描。 |
 | `_format_size(value)` | 把非负字节转为 B/KiB/MiB/GiB/TiB 文本；无 I/O。 |
+
+## Stage 4X3 专用管理员能力 API
+
+以下列出本阶段新增或改变行为的全部公开函数、属性和入口。构造器只保存依赖，真正的权限来自持久化
+计划、两次确认和单次 Request；UI、模型和调用者都不能通过直接实例化对象获得系统写权限。
+
+### Domain、摘要与动作证据
+
+| 函数/方法 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `PrivilegeResolution.validate_resolution()` | Pydantic 后置验证：安全被阻止时结果必须为 BLOCKED；REQUIRED 必须明确要求 Administrator 且 preflight 完整；SYSTEM/TrustedInstaller 只能 UNSUPPORTED/BLOCKED。无 I/O。 |
+| `PrivilegeResolution.canonical_digest()` | 对完整权限路由证据做 canonical JSON SHA-256，供计划、Preview、审计和重验绑定。 |
+| `ServiceStartupTypeChangePayload.enforce_stage_4c2_transition()` | 只接受非延迟 Automatic/Manual 的真实互换；no-op、Delayed、Disabled、Boot/System 均抛校验错误。 |
+| `ServiceStartupTypeRestorePayload.enforce_conflict_checked_restore()` | 要求当前值和备份目标都在同一 Automatic/Manual 边界且不是 no-op；实际历史/冲突仍由 Main/Broker Fresh 检查。 |
+| `StartupMachineDisablePayload.enforce_exact_hklm_run()` | 要求 HKLM、精确 Run key、显式 32/64 view，并重新计算 identity digest；RunOnce/NATIVE/替换身份被拒绝。 |
+| `StartupMachineRestorePayload.enforce_exact_hklm_restore()` | 对 restore 应用同一 HKLM/view/identity 约束，并绑定原 disable transaction 与 backup。 |
+| `MachineMsiUninstallPayload.bind_product_code()` | 重新散列规范 ProductCode 并与 payload digest 比较；阻止确认后替换 ProductCode。Payload 没有 executable/args 字段。 |
+| `PrivilegedActionPlan.bind_payload()` | 要求 action、payload、schema、policy、payload digest 和 R3 风险完全一致。 |
+| `PrivilegedActionPlan.canonical_digest()` | 散列计划的全部授权字段，作为确认和 Request 的不可变绑定。 |
+| `PrivilegedActionPreview.validate_preview()` | 要求 R3、Administrator REQUIRED、安全已允许，以及 Mock/real 标志一致；拒绝把普通或 blocked 操作伪装成管理员 Preview。 |
+| `PrivilegedActionPreview.canonical_digest()` | 散列 Fresh state/safety/manifest/route/时间等用户所见证据。 |
+| `PrivilegedActionRequest.validate_capability()` | 要求 protocol v2、action/payload/schema/policy/digest 一致、R3、Administrator、UTC 正有效期且不超过十分钟。 |
+| `PrivilegedActionResult.validate_result()` | 拒绝执行/验证互相矛盾的普通协议结果。 |
+| `canonical_model_digest(value)` | 以 UTF-8、排序键、无 NaN 的 canonical JSON 计算 SHA-256；用于本地非秘密绑定。 |
+| `ElevatedBrokerResult.validate_result()` | 要求时间有效；VERIFIED 必须已执行、有 post-state hash，并携带与 action 对应的 discriminated evidence。 |
+| `ElevatedBrokerResult.canonical_digest()` | 散列完整 Broker 结果，供会话 HMAC 和 Main 验证。 |
+| `ElevatedBrokerResultEnvelope.bind_result()` | 要求 envelope 的 Broker/request ID、result digest 与 HMAC 算法都匹配 inner result。 |
+| `canonical_broker_bytes(value)` / `canonical_broker_digest(value)` | 生成无歧义 IPC JSON bytes 或 SHA-256；拒绝非 JSON 安全数据。 |
+| `utc_now()` | 返回带 UTC 时区的当前时间，便于依赖注入和测试。 |
+
+`ServiceControlResultEvidence` 保存服务运行状态前后值；`ServiceStartupResultEvidence` 保存配置和运行
+状态前后值及 invariant；`MachineStartupResultEvidence` 只保存 registry view 与 value presence；
+`MachineMsiResultEvidence` 保存 installer category/exit code/monitoring 状态以及两个 fresh presence
+结论。它们都不携带命令、原始注册表数据或卸载字符串。
+
+### Manifest 与默认拒绝 Dispatcher
+
+| 函数/方法 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `PrivilegedActionManifest.canonical_digest()` | 绑定 action、schema、policy、R3 floor、rollback、handler key、最长运行时间和 HIGH integrity。 |
+| `PrivilegedManifestRegistry.require(action_type)` | 返回唯一 immutable manifest；未注册 action 抛 `LookupError`，没有 fallback。 |
+| `PrivilegedManifestRegistry.actions` | 返回不可变 `frozenset`，用于可用性诊断和测试，不授予执行权限。 |
+| `build_stage4x3_manifest_registry()` | 创建唯一真实清单：Start/Stop、startup change/restore、HKLM disable/restore、machine MSI；Restart/Vendor 不在集合。 |
+| `PrivilegedActionHandler.action_types` | Handler 协议属性，声明它实现的有限 action；Dispatcher 构造时拒绝重复或无 manifest 映射。 |
+| `PrivilegedActionHandler.require(request)` | Handler 协议的只读 Fresh 阶段；必须重建 identity/state/safety/backup/preflight 并返回 typed validated evidence。 |
+| `PrivilegedActionHandler.execute_and_verify(...)` | Handler 协议的唯一写阶段；只接收已验证 Request/Fresh evidence/cancellation 和 dispatched callback，返回中立 `PrivilegedHandlerOutcome`。 |
+| `PrivilegedActionDispatcher.actions` | 返回同时有 manifest 和 handler 的 action 交集。 |
+| `PrivilegedActionDispatcher.require(request, preview_target_state_hash, preview_safety_digest)` | 验证 route、schema、policy、manifest，再调用 exact handler Fresh 检查并与 confirmed Preview 比较；漂移抛 `PrivilegedRevalidationError`。 |
+| `PrivilegedActionDispatcher.execute_and_verify(...)` | 不转换参数、不搜索其他 mechanism，直接调用同一 exact handler。 |
+| `PrivilegedActionDispatcher.manifest(action_type)` | 为结果 rollback/audit 读取同一 manifest；无 handler 时拒绝。 |
+| `ServiceControlDispatchHandler.require(request)` | 把已验证的 Stage 4X2 Start/Stop handler 接入统一 Fresh evidence，不改变原安全策略。 |
+| `ServiceControlDispatchHandler.execute_and_verify(...)` | 调用一个 SCM Start/Stop，再做 Broker readback并生成 service-control typed evidence。 |
+
+### 三个 Broker 专用 Handler
+
+| 函数/方法 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `WindowsServiceStartupPrivilegedHandler.action_types` | 仅返回 startup change 与独立 restore。 |
+| `WindowsServiceStartupPrivilegedHandler.require(request)` | Fresh 读取 service stable identity、配置、runtime、impact、Stage 4C2 policy、加密 backup；restore 还验证 Agent history/current Agent-written value。 |
+| `WindowsServiceStartupPrivilegedHandler.execute_and_verify(...)` | 只调用 set Automatic、set Manual 或 restore；不启停服务；读取 config/runtime，成功后写 change/restore history，返回 FULL 和 typed evidence。 |
+| `WindowsMachineStartupPrivilegedHandler.action_types` | 仅返回 HKLM Run disable/restore。 |
+| `WindowsMachineStartupPrivilegedHandler.require(request)` | 解密验证 backup，重建 exact view identity；disable 要求 value/state 未变，restore 要求 Agent history 匹配且 target absent；重跑 machine policy。 |
+| `WindowsMachineStartupPrivilegedHandler.execute_and_verify(...)` | 调用一个 transacted narrow value mutation；冲突转换为 `RESTORE_CONFLICT`，验证 presence 并维护 recovery history；返回 FULL。 |
+| `WindowsMachineMsiPrivilegedHandler.action_types` | 仅返回 `MSI_UNINSTALL_MACHINE`。 |
+| `WindowsMachineMsiPrivilegedHandler.require(request)` | 检查全局 uninstall slot，刷新 software/MSI registration/capability/protected-class/preflight，逐字段匹配 Payload 并生成 Fresh state hash。 |
+| `WindowsMachineMsiPrivilegedHandler.execute_and_verify(...)` | 只调用 fixed MSI adapter；不 kill/stop/reboot/retry；退出后刷新两套 inventory，只有 `VERIFIED_REMOVED` 才成功；detached/矛盾为 uncertain，rollback NONE。 |
+| `machine_msi_state_digest(product, assessment_digest, preflight_digest)` | 将稳定 product evidence、安全 assessment 和 preflight 摘要合成 Preview state hash。 |
+
+### Main preparation、路由与独立 Readback
+
+| 函数/方法 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `ElevatedStage4X3PreparationService.prepare_service_startup_change(user_goal, identity, action)` | 精确解析服务、执行 Stage 4C2 policy/permission、创建并验证 backup，再生成独立 source transaction 和 R3 plan；普通权限可执行或安全阻止时不路由 Broker。 |
+| `prepare_service_startup_restore(user_goal, backup_id)` | 加载 Agent change/history/backup，要求 current 等于 Agent-written config，再生成新的 restore R3 plan。 |
+| `prepare_machine_startup_disable(user_goal, identity)` | 读取精确 HKLM value、执行 machine policy、捕获加密原始 bytes/type，然后生成绑定 32/64 view 的 R3 plan。 |
+| `prepare_machine_startup_restore(user_goal, backup_id)` | 要求 recovery history 与 backup 匹配且 current target absent，再生成独立 restore plan。 |
+| `prepare_machine_msi_uninstall(user_goal, software_identity_digest)` | 要求无其他 uninstall，刷新精确 software/MSI/safety/preflight，只为合格 machine MSI 生成 R3 plan。 |
+| `approve_plan(prepared, approved)` | 持久化解决第一次确认；拒绝不会生成 runtime authority。 |
+| `prepare_runtime(prepared)` | 第一次确认后重复 Main identity/safety/backup/preflight，生成新的短时 Preview 和 child confirmation；漂移停止。 |
+| `approve_runtime_and_build(prepared, runtime, approved)` | 解决即时确认；仅批准时签名并注册单次 Request，拒绝会抛准备错误且不弹 UAC。 |
+| `dispatch(envelope)` | 交给 one-shot coordinator，只尝试一次，不回退 shell/普通 runner。 |
+| `PrivilegedExecutionRouter.route(resolution)` | `NOT_REQUIRED` → ordinary executor，`REQUIRED` → Broker，其余 → BLOCKED；完全确定性且不调用模型。 |
+| `Stage4X3PostconditionVerifier.verify(action_type, request, result)` | 根据 action 做标准用户只读验证：SCM state/config/runtime、HKLM presence/view 或 MSI software+registration absence；不信任显示名/exit code。 |
+
+### Windows narrow adapters 与环境
+
+| 函数/方法 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `sanitized_windows_child_environment(environment)` | 只复制固定 Windows 路径变量；删除 PATH、provider/API key、Token、password、Broker/rendezvous/IPC 和含 NUL 数据。 |
+| `WindowsStartupManagementPlatform.disable_machine_run(backup, cancellation, on_dispatched)` | 只删除 backup 指向的一个 exact HKLM Run 32/64 view value；执行前重新比较 bytes/type，使用事务并验证 absence。 |
+| `restore_machine_run(backup, cancellation, on_dispatched)` | 仅在 exact target absent 时恢复原 bytes/type；不覆盖、不跨 view，使用事务并验证 presence。 |
+| `machine_absent_state_digest(identity)` | 对 exact HKLM identity 与 absent 状态做摘要，绑定 restore Preview。 |
+| `WindowsMsiUninstallPlatform.uninstall(product, cancellation, on_dispatched)` | 检查 fixed system `msiexec.exe`，仅生成 `/x ProductCode /norestart` 参数数组，传入 sanitized environment/DEVNULL/`shell=False`；派发后不终止 child。 |
+
+`WindowsStartupManagementPlatform` 的既有 `list_entries()`、`inspect()`、`capture_backup()`、`disable()`、
+`restore()` 与 `disabled_material_matches()` 继续服务当前用户路径；HKLM 只能通过上述两个新 narrow
+方法。`WindowsMsiProductInventory.registrations()` 仍是 ProductCode 精确只读注册查询；
+`current_process_is_elevated()` 只读取 TokenElevation，不改变 token。
+
+### Persistence、runtime、audit 与 Qt
+
+| 函数/方法 | 作用、输入/输出、异常与安全副作用 |
+|---|---|
+| `ServiceStartupActionRepository.initialize(reconcile_active=True)` | Main 默认把旧 active 标为 interrupted；Broker 传 false，避免夺取 Main transaction ownership。 |
+| `record_privileged_change(...)` | 仅在 Broker verified change 后写入可恢复索引，不虚构普通 R2 transaction。 |
+| `StartupActionRepository.initialize(reconcile_active=True)` | 与上相同，允许 Broker 只读共享 history 而不做启动恢复。 |
+| `record_machine_disabled(...)` | 为 verified HKLM disable 写 exact backup/identity/history，供独立 restore 使用。 |
+| `MsiUninstallRepository.initialize(reconcile_active=True)` | Main 负责 crash reconciliation；Broker 只检查 activity。 |
+| `MsiUninstallRepository.has_active_uninstall()` | 检查 MSI、Vendor、winget、MSIX 的全局互斥 slot；查询失败 fail closed。 |
+| `PrivilegedActionRepository.has_active_action(action_type, exclude_plan_id=None)` | 检查同类非终态 privileged transaction；runtime Fresh 可排除当前 plan，其他 active 一律阻止。 |
+| `ApplicationRuntime.create_windows_privileged_action_services()` | 组合可信 Broker availability、request service、launcher/coordinator 和统一 Stage4X3 Main readback；Main elevated/custom DB 等状态拒绝。 |
+| `ApplicationRuntime.create_stage4x3_action_services()` | 组合三个业务域的 resolver、policy、vault/history、preflight/activity 和 preparation service；不执行动作。 |
+| `Stage4X3PrepareWorker.run()` | 后台创建 runtime services 并调用一个有限 prepare 分支；成功发 typed UI wrapper，异常发脱敏文本；不显示 UAC。 |
+| `Stage4X3RuntimeWorker.run()` | 后台执行第二次 Main Fresh revalidation并发 short-lived Preview。 |
+| `Stage4X3DispatchWorker.run()` | 批准即时确认、构建 Request、显示一次 UAC 并执行 Broker/Main verification；无 retry。 |
+| `require_prepared_stage4x3(value)` / `require_runtime_stage4x3(value)` / `require_stage4x3_outcome(value)` | 收窄 Qt `Signal(object)`；类型不符抛 `TypeError`，防止错误状态推进。 |
+| `Stage4X3ActionDialog.shutdown()` | 拒绝尚未派发的确认；已进入 UAC/Broker 时不强杀 Broker。 |
+| `Stage4X3ActionDialog.closeEvent(event)` | UAC/Broker 活动时阻止窗口丢失；其他阶段复用安全取消。 |
+
+`ElevatedBrokerAuditLogger` 的 lifecycle/validation/execution/completion 方法现在按 action 输出最小化
+schema/policy/manifest/source transaction、typed evidence 与 state hash；它不记录 Payload、命令、原始
+注册表数据、卸载字符串、SID、nonce、HMAC/IPC secret 或 provider credential。

@@ -294,8 +294,8 @@ class StartupActionRepository:
         self._sessions = sessionmaker(self._engine, expire_on_commit=False)
         self._initialized = False
 
-    def initialize(self) -> tuple[UUID, ...]:
-        """Create tables and mark crash-interrupted mutations for manual inspection."""
+    def initialize(self, *, reconcile_active: bool = True) -> tuple[UUID, ...]:
+        """Create tables and optionally reconcile work owned by a prior process run."""
         try:
             StartupBase.metadata.create_all(self._engine)
             with self._engine.begin() as connection:
@@ -315,12 +315,16 @@ class StartupActionRepository:
             }
             now = datetime.now(UTC)
             with self._sessions.begin() as session:
-                rows = tuple(
-                    session.scalars(
-                        select(StartupTransactionRow).where(
-                            StartupTransactionRow.state.in_(active | pending)
+                rows = (
+                    tuple(
+                        session.scalars(
+                            select(StartupTransactionRow).where(
+                                StartupTransactionRow.state.in_(active | pending)
+                            )
                         )
                     )
+                    if reconcile_active
+                    else ()
                 )
                 for row in rows:
                     if row.state in active:
@@ -572,6 +576,42 @@ class StartupActionRepository:
                 session.add(row)
         except SQLAlchemyError as exc:
             raise StartupStoreError("Disabled startup index persistence failed") from exc
+        return value
+
+    def record_machine_disabled(
+        self,
+        transaction_id: UUID,
+        backup_id: UUID,
+        backup_digest: str,
+        observation: StartupObservation,
+    ) -> DisabledStartupRecord:
+        """Index one verified Stage 4X3 HKLM Run disable without creating R2 authority."""
+        self._require_initialized()
+        if observation.identity.source.value != "HKLM_RUN" or observation.scope != "ALL_USERS":
+            raise StartupStoreError("Only an exact machine Run observation may be indexed")
+        value = DisabledStartupRecord(
+            original_transaction_id=transaction_id,
+            backup_id=backup_id,
+            backup_digest=backup_digest,
+            identity=observation.identity,
+            display_name=observation.display_name,
+            original_observation=observation,
+            disabled_at=datetime.now(UTC),
+        )
+        row = DisabledStartupRow(
+            original_transaction_id=str(transaction_id),
+            backup_id=str(value.backup_id),
+            backup_digest=value.backup_digest,
+            identity=value.identity.model_dump(mode="json"),
+            display_name=value.display_name,
+            original_observation=value.original_observation.model_dump(mode="json"),
+            disabled_at=value.disabled_at,
+        )
+        try:
+            with self._sessions.begin() as session:
+                session.add(row)
+        except SQLAlchemyError as exc:
+            raise StartupStoreError("Machine startup disabled index persistence failed") from exc
         return value
 
     def mark_restored(self, backup_id: UUID) -> None:

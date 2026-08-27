@@ -170,6 +170,86 @@ class MsiProductValidator:
             source_anchor_digest=software.identity.source_anchor_digest,
         )
 
+    def validate_machine(
+        self,
+        software: NormalizedInstalledSoftware,
+        capability: UninstallCapability,
+    ) -> ValidatedMsiProduct:
+        """Return one exact high-confidence machine MSI for the Stage 4X3 Broker."""
+        if (
+            capability.capability_type is not UninstallCapabilityType.MSI
+            or capability.support is not CapabilitySupport.METADATA_SUPPORTED
+            or capability.confidence != "high"
+        ):
+            raise MsiProductValidationError(
+                MsiProductValidationCode.NOT_MSI_HIGH_CONFIDENCE,
+                "Only high-confidence MSI capability may enter Stage 4X3",
+            )
+        identity_code = software.identity.product_code
+        capability_code = capability.product_code
+        if identity_code is None or capability_code is None:
+            raise MsiProductValidationError(
+                MsiProductValidationCode.PRODUCT_CODE_MISSING,
+                "Machine MSI ProductCode is missing",
+            )
+        canonical = normalize_product_code(identity_code)
+        if normalize_product_code(capability_code) != canonical:
+            raise MsiProductValidationError(
+                MsiProductValidationCode.PRODUCT_CODE_CONFLICT,
+                "Machine MSI identity and capability ProductCodes differ",
+            )
+        registrations = tuple(
+            item for item in self._platform.registrations(canonical) if item.installed
+        )
+        if len(registrations) != 1:
+            raise MsiProductValidationError(
+                (
+                    MsiProductValidationCode.PRODUCT_NOT_REGISTERED
+                    if not registrations
+                    else MsiProductValidationCode.PRODUCT_CONTEXT_AMBIGUOUS
+                ),
+                "Machine ProductCode must have one exact installed registration",
+            )
+        registration = registrations[0]
+        if (
+            registration.context is not MsiInstallContext.MACHINE
+            or software.scope is not SoftwareScope.LOCAL_MACHINE
+        ):
+            raise MsiProductValidationError(
+                MsiProductValidationCode.SCOPE_MISMATCH,
+                "Registry scope and machine Windows Installer context do not agree",
+            )
+        if not software.publisher or not registration.publisher:
+            raise MsiProductValidationError(
+                MsiProductValidationCode.PUBLISHER_REQUIRED,
+                "An exact publisher is required for machine MSI identity",
+            )
+        comparisons = (
+            (software.display_name, registration.product_name),
+            (software.display_version, registration.version),
+            (software.publisher, registration.publisher),
+        )
+        if any(not _same_optional(left, right) for left, right in comparisons):
+            raise MsiProductValidationError(
+                MsiProductValidationCode.PRODUCT_METADATA_MISMATCH,
+                "Machine MSI registration and software identity metadata differ",
+            )
+        return ValidatedMsiProduct(
+            product_code=canonical,
+            product_code_digest=canonical_digest(canonical),
+            identity_digest=software.identity.canonical_digest(),
+            metadata_digest=software.metadata_digest(),
+            capability_digest=capability.canonical_digest(),
+            registration_digest=registration.canonical_digest(),
+            install_context=registration.context,
+            display_name=software.display_name,
+            display_version=software.display_version,
+            publisher=software.publisher,
+            scope=software.scope,
+            architecture=software.architecture,
+            source_anchor_digest=software.identity.source_anchor_digest,
+        )
+
 
 def _same_optional(left: str | None, right: str | None) -> bool:
     """Compare identity text without inventing missing values."""

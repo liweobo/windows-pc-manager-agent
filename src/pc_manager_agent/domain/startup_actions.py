@@ -254,13 +254,26 @@ class StartupBackupPayload(FrozenModel):
     @model_validator(mode="after")
     def require_source_material(self) -> Self:
         """Require exact registry or shortcut bytes, never both."""
-        if self.source in {StartupSource.HKCU_RUN, StartupSource.HKCU_RUN_ONCE}:
+        if self.source in {
+            StartupSource.HKCU_RUN,
+            StartupSource.HKCU_RUN_ONCE,
+            StartupSource.HKLM_RUN,
+        }:
             if (
                 self.registry_value_data_b64 is None
                 or self.registry_value_type is None
                 or self.shortcut_data_b64 is not None
             ):
                 raise ValueError("Registry backup requires exact value bytes and type")
+            registry = self.original_identity.registry
+            if self.source is StartupSource.HKLM_RUN and (
+                registry is None
+                or registry.hive != "HKLM"
+                or registry.key_path.casefold()
+                != r"Software\Microsoft\Windows\CurrentVersion\Run".casefold()
+                or registry.registry_view not in {"32", "64"}
+            ):
+                raise ValueError("Machine backup requires an explicit 32/64-bit HKLM Run value")
         elif self.source is StartupSource.USER_STARTUP_FOLDER:
             if self.shortcut_data_b64 is None or self.disabled_storage_path is None:
                 raise ValueError("Startup Folder backup requires exact link bytes and storage path")

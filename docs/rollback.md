@@ -1,5 +1,20 @@
 # Rollback design
 
+## Stage 4X3 recovery
+
+- Service startup change: `FULL` only while the current configuration exactly equals the value written by
+  the Agent. Restore creates a new R3 plan, plan confirmation, runtime confirmation and UAC request, reloads
+  the original DPAPI-protected backup and stops with `RESTORE_CONFLICT` on drift. Runtime state is never
+  changed by either direction.
+- HKLM Run disable: `FULL` only while the exact original hive/key/value/view remains absent. Restore uses the
+  verified encrypted original bytes and type, refuses overwrite, runs one transacted write and verifies
+  presence. External occupation or view/identity drift stops the restore.
+- Machine MSI uninstall: `NONE`. Reinstall is manual recovery guidance, not Undo, and may not restore user
+  settings, activation or application state. The Agent never promises automatic reinstall.
+- UAC cancellation or failure before dispatch changes nothing and does not retry. A failure after dispatch
+  is `UNCERTAIN` until the user refreshes read-only state; restart marks active authority interrupted and
+  never redispatches it.
+
 ## Stage 4X2 service Start/Stop recovery
 
 Stage 4X2 service lifecycle changes declare `MANUAL`, not `FULL`. A verified Start can usually be reversed

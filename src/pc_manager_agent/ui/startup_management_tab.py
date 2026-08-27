@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID
 
 from PySide6.QtCore import QThreadPool, Signal, Slot
@@ -25,7 +26,11 @@ from pc_manager_agent.domain.startup_actions import (
     StartupObservation,
     StartupSafetyAssessment,
     StartupSafetyDecision,
+    StartupSource,
 )
+from pc_manager_agent.safety.machine_startup_policy import MachineStartupSafetyPolicy
+from pc_manager_agent.ui.stage4x3_action_dialog import Stage4X3ActionDialog
+from pc_manager_agent.ui.stage4x3_workers import Stage4X3UiAction, Stage4X3UiRequest
 from pc_manager_agent.ui.startup_action_dialog import StartupActionDialog
 from pc_manager_agent.ui.startup_workers import StartupInventoryWorker, require_inventory
 
@@ -41,14 +46,15 @@ class StartupManagementTab(QWidget):
         self._worker: StartupInventoryWorker | None = None
         self._active: tuple[tuple[StartupObservation, StartupSafetyAssessment], ...] = ()
         self._disabled: tuple[DisabledStartupRecord, ...] = ()
-        self._dialogs: set[StartupActionDialog] = set()
+        self._dialogs: set[StartupActionDialog | Stage4X3ActionDialog] = set()
         self._build_ui()
         self.refresh()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         info = QLabel(
-            "仅管理当前用户 HKCU Run 与可安全解析的当前用户 Startup Folder .lnk。"
+            "普通路径管理当前用户 HKCU Run 与安全的 Startup Folder .lnk；"
+            "Stage 4X3 可为严格合格的单个 HKLM Run 项创建独立管理员 Preview。"
             "系统、Microsoft、安全、驱动、企业、Agent 和未知对象默认只读或阻止。"
         )
         info.setWordWrap(True)
@@ -149,6 +155,8 @@ class StartupManagementTab(QWidget):
                 (
                     "可停用（需双重确认）"
                     if assessment.decision is StartupSafetyDecision.ALLOW
+                    else "可进入管理员 Preview（双确认 + UAC）"
+                    if self._machine_allowed(observation)
                     else f"只读/阻止：{assessment.explanation}"
                 ),
             )
@@ -179,14 +187,21 @@ class StartupManagementTab(QWidget):
     def _selection_changed(self) -> None:
         active = self._selected_active()
         self._disable.setEnabled(
-            active is not None and active[1].decision is StartupSafetyDecision.ALLOW
+            active is not None
+            and (
+                active[1].decision is StartupSafetyDecision.ALLOW
+                or self._machine_allowed(active[0])
+            )
         )
         self._restore.setEnabled(self._selected_disabled() is not None)
 
     @Slot()
     def _disable_selected(self) -> None:
         selected = self._selected_active()
-        if selected is None or selected[1].decision is not StartupSafetyDecision.ALLOW:
+        if selected is None or (
+            selected[1].decision is not StartupSafetyDecision.ALLOW
+            and not self._machine_allowed(selected[0])
+        ):
             return
         observation, _assessment = selected
         self._open_dialog(
@@ -203,6 +218,7 @@ class StartupManagementTab(QWidget):
         self._open_dialog(
             StartupActionType.RESTORE,
             record.display_name,
+            identity=record.identity,
             backup_id=record.backup_id,
         )
 
@@ -214,18 +230,52 @@ class StartupManagementTab(QWidget):
         identity: StartupIdentity | None = None,
         backup_id: UUID | None = None,
     ) -> None:
-        dialog = StartupActionDialog(
-            self._runtime,
-            action,
-            identity=identity,
-            backup_id=backup_id,
-            display_name=display_name,
-            parent=self,
-        )
+        if identity is not None and identity.source is StartupSource.HKLM_RUN:
+            ui_action = (
+                Stage4X3UiAction.STARTUP_MACHINE_DISABLE
+                if action is StartupActionType.DISABLE
+                else Stage4X3UiAction.STARTUP_MACHINE_RESTORE
+            )
+            dialog: StartupActionDialog | Stage4X3ActionDialog = Stage4X3ActionDialog(
+                self._runtime,
+                Stage4X3UiRequest(
+                    action=ui_action,
+                    user_goal=(
+                        f"停用机器启动项 {display_name}"
+                        if action is StartupActionType.DISABLE
+                        else f"恢复机器启动项 {display_name}"
+                    ),
+                    display_name=display_name,
+                    startup_identity=identity,
+                    backup_id=backup_id,
+                ),
+                parent=self,
+            )
+        else:
+            dialog = StartupActionDialog(
+                self._runtime,
+                action,
+                identity=identity,
+                backup_id=backup_id,
+                display_name=display_name,
+                parent=self,
+            )
         dialog.completed.connect(self.refresh)
         dialog.finished.connect(lambda _result, value=dialog: self._dialogs.discard(value))
         self._dialogs.add(dialog)
         dialog.show()
+
+    def _machine_allowed(self, observation: StartupObservation) -> bool:
+        """Enable only a locally classified HKLM candidate; orchestration rechecks it."""
+        if (
+            self._runtime.settings.privileged_broker_mode != "windows"
+            or observation.identity.source is not StartupSource.HKLM_RUN
+        ):
+            return False
+        assessment = MachineStartupSafetyPolicy(
+            agent_root=Path(__file__).resolve().parents[1]
+        ).assess(observation, StartupActionType.DISABLE)
+        return assessment.decision is StartupSafetyDecision.ALLOW
 
     def _selected_active(
         self,

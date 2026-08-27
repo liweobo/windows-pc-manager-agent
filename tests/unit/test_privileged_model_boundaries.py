@@ -33,6 +33,8 @@ from pc_manager_agent.domain.service_actions import (
     ServiceStartupType,
     ServiceState,
 )
+from pc_manager_agent.domain.software_uninstall_execution import MsiInstallContext
+from pc_manager_agent.domain.system_diagnostics import SoftwareArchitecture, SoftwareScope
 from pc_manager_agent.privileged.authentication import EphemeralHmacAuthenticator
 from pc_manager_agent.privileged.builder import PrivilegedActionBuilder
 from pc_manager_agent.privileged.registry import (
@@ -129,10 +131,22 @@ def test_startup_and_msi_defined_only_payload_invariants(tmp_path: Path) -> None
                 registration_digest="2" * 64,
             )
         payload = MachineMsiUninstallPayload(
+            source_transaction_id=uuid4(),
             product_code=code,
             product_code_digest=canonical_model_digest(code),
             software_identity_digest="1" * 64,
+            metadata_digest="2" * 64,
+            capability_digest="3" * 64,
             registration_digest="2" * 64,
+            execution_assessment_digest="4" * 64,
+            preflight_digest="5" * 64,
+            display_name="Synthetic Product",
+            display_version="1.0",
+            publisher="Example Publisher",
+            install_context=MsiInstallContext.MACHINE,
+            scope=SoftwareScope.LOCAL_MACHINE,
+            architecture=SoftwareArchitecture.X64,
+            source_anchor_digest="6" * 64,
         )
         assert payload.payload_type is PrivilegedActionType.MSI_UNINSTALL_MACHINE
     finally:
