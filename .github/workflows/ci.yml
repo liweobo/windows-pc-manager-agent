@@ -316,7 +316,13 @@ jobs:
           tests/security/test_privileged_action_protocol.py
           tests/gui/test_privileged_action_dialog.py
           --cov=pc_manager_agent.domain.privileged_actions
-          --cov=pc_manager_agent.privileged
+          --cov=pc_manager_agent.privileged.authentication
+          --cov=pc_manager_agent.privileged.builder
+          --cov=pc_manager_agent.privileged.mock_broker
+          --cov=pc_manager_agent.privileged.registry
+          --cov=pc_manager_agent.privileged.resolver
+          --cov=pc_manager_agent.privileged.revalidation
+          --cov=pc_manager_agent.privileged.serialization
           --cov=pc_manager_agent.confirmation.privileged_actions
           --cov=pc_manager_agent.persistence.privileged_actions
           --cov=pc_manager_agent.orchestration.privileged_actions
