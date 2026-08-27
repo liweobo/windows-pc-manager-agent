@@ -128,6 +128,7 @@ jobs:
           uv run pytest tests/unit/test_msi_uninstall_validation.py
           tests/unit/test_msi_uninstall_adapter.py
           tests/unit/test_msi_uninstall_safety_branches.py
+          tests/unit/test_stage4x3_handlers.py
           tests/integration/test_msi_uninstall_workflow.py
           tests/security/test_msi_uninstall_execution_security.py
           tests/gui/test_software_uninstall_dialog.py
@@ -315,10 +316,22 @@ jobs:
           tests/unit/test_privileged_confirmation_branches.py
           tests/unit/test_privileged_persistence_branches.py
           tests/unit/test_privileged_broker_branches.py
+          tests/unit/test_stage4x3_routing.py
+          tests/unit/test_stage4x3_handlers.py
+          tests/unit/test_stage4x3_policies.py
+          tests/unit/test_elevated_service_coordinator.py
           tests/integration/test_privileged_action_flow.py
           tests/integration/test_privileged_runtime_wiring.py
+          tests/integration/test_elevated_broker_execution.py
+          tests/integration/test_elevated_broker_handshake.py
           tests/security/test_privileged_action_protocol.py
+          tests/security/test_stage4x3_boundaries.py
+          tests/security/test_elevated_broker_boundary.py
           tests/gui/test_privileged_action_dialog.py
+          tests/gui/test_stage4x3_action_dialog.py
+          tests/gui/test_service_startup_management.py
+          tests/gui/test_startup_management.py
+          tests/gui/test_software_uninstall_dialog.py
           --cov=pc_manager_agent.domain.privileged_actions
           --cov=pc_manager_agent.privileged.authentication
           --cov=pc_manager_agent.privileged.builder
