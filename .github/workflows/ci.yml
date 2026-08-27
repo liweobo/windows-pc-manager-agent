@@ -54,6 +54,10 @@ jobs:
           tests/unit/test_process_tools.py
           tests/unit/test_service_action_models.py
           tests/unit/test_service_startup_actions.py
+          tests/unit/test_privileged_confirmation_branches.py
+          tests/unit/test_privileged_model_boundaries.py
+          tests/unit/test_stage4x3_handlers.py
+          tests/unit/test_stage4x3_policies.py
           tests/unit/test_startup_actions.py
           tests/unit/test_startup_resolver.py
           tests/unit/test_recycle_bin_platform.py
