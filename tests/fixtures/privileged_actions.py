@@ -17,6 +17,7 @@ from pc_manager_agent.confirmation.privileged_actions import (
 from pc_manager_agent.domain.privileged_actions import (
     PrivilegedActionEnvelope,
     PrivilegedCallerContext,
+    PrivilegedExecutionMode,
     PrivilegeRequirement,
     PrivilegeResolution,
     PrivilegeResolutionStatus,
@@ -73,6 +74,7 @@ def build_privileged_test_stack(
     request_ttl_seconds: int = 120,
     before_final_revalidation: object | None = None,
     now: Callable[[], datetime] | None = None,
+    execution_mode: PrivilegedExecutionMode = PrivilegedExecutionMode.MOCK,
 ) -> PrivilegedTestStack:
     """Compose one complete Stage 4X1 stack with an injected HMAC fixture key."""
     audit_repository = AuditRepository(database_path)
@@ -142,6 +144,7 @@ def build_privileged_test_stack(
         broker,
         audit,
         caller,
+        execution_mode=execution_mode,
     )
     return PrivilegedTestStack(
         audit_repository,

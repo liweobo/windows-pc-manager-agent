@@ -1,5 +1,54 @@
 # Developer guide
 
+## Stage 4X2 development and packaging
+
+Stage 4X2 real mode is `windows`; it must never be renamed to a generic `real` or enabled by default. The
+Main process must remain standard-user, and the Broker must remain a separate frozen executable. Build it
+with:
+
+```powershell
+./scripts/build-privileged-broker.ps1
+```
+
+The script prints the development SHA-256. Configure that hash only with explicit `development` trust for
+local work. Production additionally needs a trusted Program Files installation, valid Authenticode and a
+pinned signer fingerprint supplied by the signed installer/release pipeline. This repository has no release
+certificate, so production readiness must fail closed. Do not weaken that result to make a local build run.
+
+Real mode intentionally requires the default `platformdirs` per-user data directory because the elevated
+Broker derives its authorization database location independently; never add a database path to command-line
+arguments or trust a low-integrity environment override. Bootstrap arguments must remain opaque. Do not add
+service names, payload JSON, commands, paths, tokens or secrets.
+
+The focused no-UAC gate is:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_elevated_broker_protocol.py `
+  tests/unit/test_elevated_service_coordinator.py `
+  tests/unit/test_elevated_service_preparation.py `
+  tests/unit/test_elevated_service_handler.py `
+  tests/unit/test_windows_elevation_launcher.py `
+  tests/integration/test_elevated_broker_handshake.py `
+  tests/integration/test_elevated_broker_execution.py `
+  tests/integration/test_windows_elevated_broker_pipe.py `
+  tests/security/test_elevated_broker_boundary.py `
+  --cov-config=.coveragerc-stage4x2 `
+  --cov=pc_manager_agent.domain.elevated_broker `
+  --cov=pc_manager_agent.privileged.ipc_protocol `
+  --cov=pc_manager_agent.privileged.broker_session `
+  --cov=pc_manager_agent.privileged.elevated_broker `
+  --cov=pc_manager_agent.privileged.service_handler `
+  --cov=pc_manager_agent.orchestration.elevated_service_actions `
+  --cov=pc_manager_agent.orchestration.elevated_service_preparation `
+  --cov-report=term-missing --cov-fail-under=85
+```
+
+This gate uses fake SCM/elevation launchers and a real current-user named pipe; it never shows UAC or writes
+a service. The isolated build check must also reject PySide6/OpenAI/provider/UI imports and confirm the
+no-argument Broker exits with code 20. Follow `docs/manual-testing/privileged-broker-uac.md` only on a
+disposable test service and never on protected/system/security/network services.
+
 ## Stage 4X1 development
 
 Stage 4X1 is a protocol/security harness. Production code under `privileged/` must not import subprocess,
@@ -23,10 +72,9 @@ uv run pytest tests/unit/test_privilege_requirement.py tests/unit/test_privilege
   --cov=pc_manager_agent.audit.privileged_actions --cov-report=term-missing --cov-fail-under=95
 ```
 
-`PC_MANAGER_PRIVILEGED_BROKER_MODE=mock` is for developer UI checks only. Do not add a `real` setting.
-The injected HMAC authenticator is not reusable as a production cross-process design. Before a real
-Broker, write a new decision record covering IPC endpoint/ACL, user and session identity, Broker binary
-signature, anti-downgrade, key establishment, UAC lifecycle, deployment/update and per-action adapters.
+`PC_MANAGER_PRIVILEGED_BROKER_MODE=mock` remains for isolated protocol UI checks. It must never dispatch
+into Stage 4X2. The Stage 4X1 injected HMAC authenticator is still test-only; Stage 4X2 uses a separately
+authenticated named-pipe session and does not turn the Mock Broker into an elevated component.
 
 ## Stage 4D4 development
 

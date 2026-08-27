@@ -1,5 +1,37 @@
 # Security model
 
+## Stage 4X2 elevated Broker controls
+
+- **Main stays standard:** an elevated Main Agent is rejected before composition. UAC applies only to the
+  independent one-shot Broker, never to the desktop process.
+- **Narrow entry:** only a Stage 4C1-safe exact Start/Stop whose complete permission evidence says ordinary
+  rights are insufficient may enter. Safety/dependency/identity/state blocks cannot be overridden.
+- **Binary trust:** exact absolute non-reparse EXE, adjacent `asInvoker` manifest, SHA-256 and file identity
+  are inspected before UAC. Production also requires a trusted install root, valid Authenticode and pinned
+  signer identity; missing release signing means `NOT_READY`.
+- **Opaque bootstrap:** `runas` receives only Broker/rendezvous/Agent identifiers, protocol version and
+  expected caller PID. It never receives a service name, request body, command, path to data or arguments.
+- **OS endpoint trust:** the pipe DACL grants the exact current user, denies remote clients and uses the
+  first-instance flag. Broker impersonation reads the actual client token; both sides bind SID, session,
+  PID, process creation, image/hash, Broker/Agent IDs and versions.
+- **Authenticated finite transport:** four-byte bounded framing, strict JSON, duplicate/non-finite rejection,
+  fixed six-message ordering, challenges, transcript digest, 30-second session key and HMAC on every
+  post-handshake frame prevent message substitution and replay inside the established channel.
+- **Consume before mutation:** the Broker validates persistent Plan/Preview/confirmations, request expiry,
+  allow-list, caller and Fresh service evidence, writes mandatory audit, atomically consumes authority,
+  repeats final TOCTOU checks and only then dispatches one SCM Start or Stop.
+- **Truthful completion:** exact Broker readback and an independent standard-user Main readback are both
+  required. Cancellation, timeout, disconnect, mismatch and audit/storage failure are terminal and never
+  retried automatically.
+- **Bounded natural exit:** Main waits for the one-shot Broker exit code after one result. Timeout is
+  `COMPLETED_UNVERIFIED`; Main closes only its handle and does not terminate or relaunch the Broker.
+- **Small Broker:** no GUI, provider, model, shell, script, generic process launcher, arbitrary executable,
+  service configuration, installer or registry adapter is packaged or registered.
+
+The session key is shared only after OS-derived peer checks on the private local pipe. Same-user process
+compromise and administrator/kernel compromise remain outside this boundary; denial of service by another
+same-user process is handled by failing closed, not by broadening access or retrying.
+
 ## Stage 4X1 privileged protocol controls
 
 - **No real privilege boundary:** Stage 4X1 does not elevate, call UAC, create an admin process or touch

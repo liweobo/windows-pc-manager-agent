@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased — Stage 4X2
+
+### Added
+
+- Independent one-shot PyInstaller Broker package, explicit Windows `runas` launcher, opaque bootstrap
+  arguments, asInvoker manifests, startup hardening and deterministic exit codes.
+- Current-user-only named-pipe endpoint with explicit DACL, remote-client rejection, first-instance
+  protection, length-prefixed bounded frames, fixed message order and authenticated request/result frames.
+- Mutual caller/Broker binding from Windows SID, session, PID, process creation, executable/hash,
+  Agent/Broker instance IDs and application/protocol versions.
+- Real-mode R3 service Start/Stop preparation, separate plan/runtime confirmations, pre-UAC binary trust,
+  UAC-cancellation handling, atomic replay consumption, fresh Broker validation, exact SCM adapter and
+  independent standard-user postcondition readback.
+- Privacy-minimized Broker lifecycle/validation/execution/verification audit, availability reporting,
+  background GUI workers, isolated packaging checks, real named-pipe integration coverage and UAC manual
+  test instructions.
+- Bounded natural Broker-exit verification and complete fingerprint/status audit correlation for UAC,
+  handshake, replay, safety, execution, Broker/Main verification, result integrity and final state.
+
+### Security
+
+- The main GUI never runs elevated. The Broker handles exactly one authenticated request and exits; it has
+  no shell, command runner, model/provider/UI dependency, action fallback, retry or persistence service.
+- The executable allow-list contains only `SERVICE_START` and `SERVICE_STOP`. Restart, service
+  configuration, startup items, installers, registry writes and all other protocol actions remain blocked.
+- Production mode requires a trusted install location, exact configured SHA-256, valid Authenticode and an
+  expected signer identity. Since this repository does not possess a release certificate, local development
+  builds are explicitly development-only and production mode fails closed.
+- Real Broker mode uses the fixed per-user database path shared by both processes; custom data directories
+  are rejected before UAC so authority cannot be read from a different store.
+
 ## Unreleased — Stage 4X1
 
 ### Added

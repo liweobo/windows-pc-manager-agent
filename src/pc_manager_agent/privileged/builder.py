@@ -17,6 +17,7 @@ from pc_manager_agent.domain.privileged_actions import (
     PrivilegedActionPreview,
     PrivilegedActionRequest,
     PrivilegedCallerContext,
+    PrivilegedExecutionMode,
     PrivilegedPayload,
     PrivilegeResolution,
     canonical_model_digest,
@@ -72,8 +73,10 @@ class PrivilegedActionBuilder:
         target_state_hash: str,
         safety_digest: str,
         privilege_resolution: PrivilegeResolution,
+        execution_mode: PrivilegedExecutionMode = PrivilegedExecutionMode.MOCK,
     ) -> PrivilegedActionPreview:
-        """Build a Mock-only fresh Preview without creating an authorization request."""
+        """Build a mode-bound fresh Preview without creating an authorization request."""
+        mock_only = execution_mode is PrivilegedExecutionMode.MOCK
         return PrivilegedActionPreview(
             plan_id=plan.plan_id,
             plan_hash=plan.canonical_digest(),
@@ -83,6 +86,17 @@ class PrivilegedActionBuilder:
             safety_digest=safety_digest,
             risk_level=plan.risk_level,
             privilege_resolution=privilege_resolution,
+            execution_mode=execution_mode,
+            mock_only=mock_only,
+            warning=(
+                "Stage 4X1 validates a Mock Broker request only; no real elevated system "
+                "operation will be performed."
+                if mock_only
+                else (
+                    "Stage 4X2 may request Windows UAC only after both exact confirmations; "
+                    "the one-shot Broker may execute only SERVICE_START or SERVICE_STOP."
+                )
+            ),
         )
 
     def build(

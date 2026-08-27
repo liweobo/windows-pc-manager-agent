@@ -16,6 +16,7 @@ from pc_manager_agent.domain.privileged_actions import (
     PrivilegedActionPreview,
     PrivilegedActionResultEnvelope,
     PrivilegedCallerContext,
+    PrivilegedExecutionMode,
     PrivilegedPayload,
     PrivilegeResolution,
     PrivilegeResolutionStatus,
@@ -48,7 +49,7 @@ class PreparedPrivilegedRuntimeConfirmation:
 
 
 class PrivilegedActionService:
-    """Prepare confirmations and dispatch only to the internal Mock Broker."""
+    """Prepare exact capabilities for either the Mock or external Broker boundary."""
 
     def __init__(
         self,
@@ -56,9 +57,10 @@ class PrivilegedActionService:
         confirmations: PrivilegedActionConfirmationService,
         repository: PrivilegedActionRepository,
         serializer: PrivilegedRequestSerializer,
-        broker: MockPrivilegedBroker,
+        broker: MockPrivilegedBroker | None,
         audit: PrivilegedActionAuditLogger,
         caller: PrivilegedCallerContext,
+        execution_mode: PrivilegedExecutionMode = PrivilegedExecutionMode.MOCK,
     ) -> None:
         self._builder = builder
         self._confirmations = confirmations
@@ -67,6 +69,7 @@ class PrivilegedActionService:
         self._broker = broker
         self._audit = audit
         self._caller = caller
+        self._execution_mode = execution_mode
 
     def prepare(
         self,
@@ -80,10 +83,10 @@ class PrivilegedActionService:
         safety_digest: str,
         privilege_resolution: PrivilegeResolution,
     ) -> PreparedPrivilegedAction:
-        """Persist a Mock-only Preview and request the first durable confirmation."""
+        """Persist a mode-bound Preview and request the first durable confirmation."""
         if privilege_resolution.status is not PrivilegeResolutionStatus.REQUIRED:
             raise PrivilegedActionPreparationError(
-                "Only fresh Administrator-required evidence can enter Stage 4X1"
+                "Only fresh Administrator-required evidence can enter the privileged protocol"
             )
         plan = self._builder.plan(
             source_plan_id=source_plan_id,
@@ -97,6 +100,7 @@ class PrivilegedActionService:
             target_state_hash=target_state_hash,
             safety_digest=safety_digest,
             privilege_resolution=privilege_resolution,
+            execution_mode=self._execution_mode,
         )
         self._repository.create(plan, preview)
         confirmation = self._confirmations.request_plan(plan, preview)
@@ -127,6 +131,7 @@ class PrivilegedActionService:
             target_state_hash=target_state_hash,
             safety_digest=safety_digest,
             privilege_resolution=privilege_resolution,
+            execution_mode=self._execution_mode,
         )
         confirmation = self._confirmations.request_runtime(plan_confirmation_id, plan, preview)
         return PreparedPrivilegedRuntimeConfirmation(preview, confirmation)
@@ -158,7 +163,7 @@ class PrivilegedActionService:
             caller=self._caller,
         )
         self._repository.register_request(envelope)
-        self._audit.authorized(envelope)
+        self._audit.authorized(envelope, self._execution_mode)
         return envelope
 
     def dispatch_mock(
@@ -166,6 +171,10 @@ class PrivilegedActionService:
         envelope: PrivilegedActionEnvelope,
     ) -> PrivilegedActionResultEnvelope:
         """Send canonical bytes only to the in-process Mock Broker."""
+        if self._execution_mode is not PrivilegedExecutionMode.MOCK or self._broker is None:
+            raise PrivilegedActionPreparationError(
+                "Real privileged requests cannot use Mock dispatch"
+            )
         return self._broker.dispatch(
             self._serializer.serialize(envelope),
             self._caller,

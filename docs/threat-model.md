@@ -1,5 +1,24 @@
 # Threat model
 
+## Stage 4X2 threats and mitigations
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Main application runs permanently elevated | Runtime rejects an elevated Main token; only an independent `runas` Broker elevates | A user can separately alter their local installation; production signing/install policy must detect it |
+| Malicious/changed Broker binary is launched | Absolute literal path, no PATH search/reparse, stable hash/file evidence, asInvoker manifest; production signing and trusted install location | Repository development builds are unsigned and intentionally cannot enter production mode |
+| Fake pipe server captures the request | Unpredictable endpoint, current-user DACL, reject-remote/first-instance, launched Broker PID/session check before request disclosure | A same-user attacker may race the endpoint and cause fail-closed denial of service |
+| Different client talks to elevated Broker | Broker impersonates pipe client and compares actual SID/session/PID/process identity with opaque launch expectation and Hello | Compromise of the exact Main process is outside the IPC boundary |
+| UAC credentials switch to another account | Caller and Broker SID/session must match; otherwise Broker rejects without consuming/executing | V1 cannot support over-the-shoulder credentials by design |
+| Frame confusion, truncation or JSON ambiguity | Length prefix and pre-allocation bound, exact sequence/routing, strict UTF-8/JSON, duplicate/non-finite rejection, payload digest | Local resource exhaustion may still make the operation unavailable |
+| Handshake or result is substituted | Fresh challenges, transcript binding, 30-second session key, HMAC and constant-time checks on authenticated frames | The key exists in both short-lived process memories during one exchange |
+| UAC cancel or transport failure triggers repeat prompts | One dispatch attempt, durable invalidation/interruption and no retry/resume | User must create a new plan if they intentionally try again |
+| Request replays or double-clicks | Unique durable request/nonce, atomic confirmation consumption and active-request lock | SQLite unavailability denies execution |
+| Target changes while UAC is open | Broker repeats identity/state/config/dependency/safety checks and a final TOCTOU check | Kernel-level races after the final SCM check are outside user-mode control |
+| Broker executes another privileged capability | Private registry and handler accept only exact service Start/Stop; other enums have no handler | Adding a future handler requires a separate stage/security review |
+| Service control return is reported as success | Broker postcondition plus independent Main-process SCM readback | If standard-user query rights disappear afterward, result is conservatively unverified |
+| Broker becomes a long-lived admin daemon | One endpoint/request, bounded natural-exit wait, no loop/retry/resume; timeout is unverified and Main never kills/relaunches it | Abrupt OS termination may leave the service transition outcome needing manual inspection |
+| Audit leaks SID, service name or session secret | Events store UUIDs, lifecycle and digests; raw SID, pipe name, service payload, nonce and key are omitted | Timing and action type remain local security metadata |
+
 ## Stage 4X1 threats and mitigations
 
 | Threat | Control | Residual risk |

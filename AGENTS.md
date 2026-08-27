@@ -17,7 +17,11 @@ tools, verifies results, and records a structured audit trail.
   path scope.
 - Never use `eval`, `exec`, arbitrary shell commands, `shell=True`, silent
   overwrite, permanent deletion, UAC bypass, or credential extraction.
-- R3 operations are not executable in MVP 0.1. The sole narrow exception is the
+- R3 operations are not executable in MVP 0.1 except the explicitly approved Stage 4X2
+  one-shot Broker path for one exact Stage 4C1-safe service Start or Stop. That path requires
+  a standard-user Main process, trusted independent Broker, explicit UAC, authenticated IPC,
+  fresh deterministic checks, two confirmations, single-use authority and MANUAL recovery.
+  There is no Restart, generic privileged action, retry or elevated Main path. A second narrow exception is the
   explicitly approved Stage 4C2 non-delayed `Automatic` ↔ `Manual` service
   startup-type transition, classified R2 only when every Stage 4C2 gate passes.
   All other service configuration remains R3. R4 operations are always denied.
@@ -30,7 +34,8 @@ tools, verifies results, and records a structured audit trail.
 - R2: destructive or lifecycle-changing. Requires plan confirmation plus an
   immediate, object-specific confirmation. `R2_HIGH_IMPACT` is the Stage 4A
   force-termination sublevel and never reuses graceful-exit approval.
-- R3: high-risk system change. Interface/roadmap only in MVP 0.1.
+- R3: high-risk system change. Blocked except the exact Stage 4X2 service Start/Stop boundary described
+  above; it requires plan plus immediate confirmation and explicit Windows UAC.
 - R4: prohibited. Reject and audit the reason.
 - A confirmation is bound to plan ID, canonical plan digest, step ID, argument
   digest, object summary, and expiry. A changed plan invalidates it.
@@ -103,6 +108,25 @@ documentation, audit/rollback impact, commit, remote status, and a safe rollback
 instruction are all reported truthfully.
 
 ## Current MVP boundary
+
+Stage 4X2 retains Stage 4X1 and adds a disabled-by-default independent one-shot Windows Elevated Broker for
+exact `SERVICE_START` and `SERVICE_STOP` only. A request may be prepared only from a Stage 4C1-safe action
+blocked solely by insufficient ordinary SCM access. Restart, service configuration, startup items, registry,
+installers and every other privileged action remain blocked. The Main Agent must stay standard-user.
+
+Before UAC, the Main process requires an absolute non-reparse Broker EXE, exact SHA-256 and `asInvoker`
+manifest. Production additionally requires trusted installation, valid Authenticode and pinned signer;
+unsigned development builds cannot be described as production-ready. ShellExecuteEx `runas` receives only
+opaque instance/rendezvous IDs, protocol version, caller PID and Agent instance—never commands or payloads.
+
+IPC is one fixed current-user-only, reject-remote, first-instance Named Pipe. The six-frame protocol binds
+actual Windows caller token/SID/session/process identity, launched Broker PID/image/hash, application and
+protocol version, Agent/Broker instances, challenges, transcript and short-lived HMAC. The Broker repeats
+allow-list, durable Plan/Preview/confirmation, expiry/replay, Fresh service identity/state/config/dependency/
+safety and final TOCTOU checks, atomically consumes authority, executes one exact SCM action, verifies it,
+sends one authenticated result and exits. Main independently reads SCM again. Cancellation, timeout,
+disconnect, restart, audit/storage failure and mismatches never retry or resume. Recovery is MANUAL through
+a new plan and action. The Broker package must not contain GUI, model/provider, generic runner or shell code.
 
 Stage 4X1 adds a strict Privileged Action Protocol and an in-process Mock Broker only. It does not add
 real elevation, UAC, an administrator child process or any privileged Windows write. The main Agent stays

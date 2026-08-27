@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from platformdirs import user_data_path
 from pydantic import ValidationError
 
 from pc_manager_agent.config.settings import AppSettings
@@ -53,3 +54,20 @@ def test_settings_reject_unknown_provider_and_invalid_limit() -> None:
 
 def test_empty_model_becomes_none() -> None:
     assert AppSettings(openai_model="  ").openai_model is None
+
+
+def test_windows_broker_requires_fixed_shared_database_location(tmp_path: Path) -> None:
+    broker = (tmp_path / "broker.exe").resolve()
+    common = {
+        "privileged_broker_mode": "windows",
+        "privileged_broker_path": broker,
+        "privileged_broker_expected_sha256": "a" * 64,
+    }
+    with pytest.raises(ValidationError, match="fixed per-user data directory"):
+        AppSettings(data_directory=tmp_path / "different", **common)
+
+    settings = AppSettings(
+        data_directory=user_data_path("WindowsPCManagerAgent", ensure_exists=False),
+        **common,
+    )
+    assert settings.privileged_broker_mode == "windows"

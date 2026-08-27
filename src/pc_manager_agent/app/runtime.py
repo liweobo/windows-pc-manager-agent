@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from pc_manager_agent import __version__
+from pc_manager_agent.audit.elevated_broker import ElevatedBrokerAuditLogger
 from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
 from pc_manager_agent.audit.msix_uninstall import MsixUninstallAuditLogger
@@ -64,8 +65,12 @@ from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmat
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
 from pc_manager_agent.confirmation.vendor_uninstall import VendorUninstallConfirmationService
 from pc_manager_agent.confirmation.winget_uninstall import WingetUninstallConfirmationService
+from pc_manager_agent.domain.elevated_broker import BrokerTrustMode
 from pc_manager_agent.domain.file_analysis import FileAnalysisProgress
-from pc_manager_agent.domain.privileged_actions import PrivilegedCallerContext
+from pc_manager_agent.domain.privileged_actions import (
+    PrivilegedCallerContext,
+    PrivilegedExecutionMode,
+)
 from pc_manager_agent.domain.reports import ScanProgress
 from pc_manager_agent.domain.risk import RiskLevel
 from pc_manager_agent.domain.transactions import OperationProgress
@@ -74,6 +79,12 @@ from pc_manager_agent.orchestration.diagnostic_engine import DiagnosticEngine
 from pc_manager_agent.orchestration.diagnostic_provider import (
     DiagnosticExplainer,
     DiagnosticProviderPlanner,
+)
+from pc_manager_agent.orchestration.elevated_service_actions import (
+    ElevatedServiceActionCoordinator,
+)
+from pc_manager_agent.orchestration.elevated_service_preparation import (
+    ElevatedServicePreparationService,
 )
 from pc_manager_agent.orchestration.explanation import FileAnalysisExplainer
 from pc_manager_agent.orchestration.file_analysis import FileAnalysisOrchestrator
@@ -214,6 +225,7 @@ from pc_manager_agent.platform_support.startup import StartupManagementPlatform
 from pc_manager_agent.platform_support.windows.data_protection import (
     WindowsCurrentUserDataProtector,
 )
+from pc_manager_agent.platform_support.windows.elevation import WindowsUacBrokerLauncher
 from pc_manager_agent.platform_support.windows.explorer import WindowsExplorerService
 from pc_manager_agent.platform_support.windows.file_operations import (
     WindowsFileOperationPlatform,
@@ -224,9 +236,14 @@ from pc_manager_agent.platform_support.windows.msi_uninstall import (
     current_process_is_elevated,
 )
 from pc_manager_agent.platform_support.windows.msix_packages import WindowsMsixPackagePlatform
+from pc_manager_agent.platform_support.windows.named_pipe import WindowsBrokerPipeClient
 from pc_manager_agent.platform_support.windows.path_info import (
     is_network_path,
     last_access_time_reliable,
+)
+from pc_manager_agent.platform_support.windows.process_identity import (
+    WindowsBrokerBinaryInspector,
+    capture_current_process_identity,
 )
 from pc_manager_agent.platform_support.windows.process_management import (
     WindowsProcessManagementPlatform,
@@ -262,6 +279,7 @@ from pc_manager_agent.platform_support.windows.winget_uninstall import (
     WindowsWingetUninstallPlatform,
 )
 from pc_manager_agent.privileged.authentication import EphemeralHmacAuthenticator
+from pc_manager_agent.privileged.availability import PrivilegedBrokerAvailabilityService
 from pc_manager_agent.privileged.builder import PrivilegedActionBuilder
 from pc_manager_agent.privileged.mock_broker import MockPrivilegedBroker
 from pc_manager_agent.privileged.registry import build_stage4x1_registry
@@ -560,6 +578,16 @@ class PrivilegedActionServices:
     broker: MockPrivilegedBroker
     caller: PrivilegedCallerContext
     fake_state: FakePrivilegedSystemState
+
+
+@dataclass(frozen=True, slots=True)
+class WindowsPrivilegedActionServices:
+    """Real Stage 4X2 preparation and one-shot Windows Broker coordination."""
+
+    service: PrivilegedActionService
+    coordinator: ElevatedServiceActionCoordinator
+    caller: PrivilegedCallerContext
+    availability: PrivilegedBrokerAvailabilityService
 
 
 class ApplicationRuntime:
@@ -1610,6 +1638,100 @@ class ApplicationRuntime:
             caller,
         )
         return PrivilegedActionServices(service, broker, caller, fake_state)
+
+    def create_windows_privileged_action_services(self) -> WindowsPrivilegedActionServices:
+        """Compose the disabled-by-default real Broker route for exact service Start/Stop."""
+        if self.settings.privileged_broker_mode != "windows":
+            raise RuntimeError("Stage 4X2 Windows elevated Broker is disabled")
+        if current_process_is_elevated():
+            raise RuntimeError("The main Agent must remain a standard-user process")
+        broker_path = self.settings.privileged_broker_path
+        expected_sha = self.settings.privileged_broker_expected_sha256
+        if broker_path is None or expected_sha is None:
+            raise RuntimeError("The trusted Stage 4X2 Broker path and SHA-256 are required")
+        serializer = PrivilegedRequestSerializer(self.settings.privileged_max_request_bytes)
+        bootstrap_authenticator = EphemeralHmacAuthenticator.generate()
+        confirmations = PrivilegedActionConfirmationService(
+            self.privileged_action_repository,
+            plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            runtime_ttl_seconds=self.settings.privileged_runtime_confirmation_ttl_seconds,
+        )
+        builder = PrivilegedActionBuilder(
+            serializer,
+            bootstrap_authenticator,
+            confirmations,
+            request_ttl_seconds=self.settings.privileged_request_ttl_seconds,
+        )
+        request_audit = PrivilegedActionAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        os_identity = capture_current_process_identity()
+        binary_inspector = WindowsBrokerBinaryInspector()
+        availability = PrivilegedBrokerAvailabilityService(
+            binary_inspector,
+            enabled=True,
+            broker_path=broker_path,
+            expected_sha256=expected_sha,
+            trust_mode=BrokerTrustMode(self.settings.privileged_broker_trust_mode.upper()),
+            caller_identity=os_identity,
+        )
+        availability.require_ready()
+        caller = PrivilegedCallerContext(
+            context_id=uuid4(),
+            agent_instance_id=self.agent_instance_id,
+            user_sid_fingerprint=_runtime_fingerprint(os_identity.user_sid),
+            session_fingerprint=_runtime_fingerprint(str(os_identity.session_id)),
+        )
+        service = PrivilegedActionService(
+            builder,
+            confirmations,
+            self.privileged_action_repository,
+            serializer,
+            None,
+            request_audit,
+            caller,
+            execution_mode=PrivilegedExecutionMode.WINDOWS_ELEVATED,
+        )
+        elevated_audit = ElevatedBrokerAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        coordinator = ElevatedServiceActionCoordinator(
+            broker_path=broker_path,
+            expected_broker_sha256=expected_sha,
+            trust_mode=BrokerTrustMode(self.settings.privileged_broker_trust_mode.upper()),
+            caller_identity=os_identity,
+            launcher=WindowsUacBrokerLauncher(broker_path),
+            binary_inspector=binary_inspector,
+            pipe_client_factory=WindowsBrokerPipeClient,
+            serializer=serializer,
+            repository=self.privileged_action_repository,
+            audit=elevated_audit,
+            service_platform=self.service_control_platform,
+            connect_timeout_seconds=(self.settings.privileged_broker_connect_timeout_seconds),
+            message_timeout_seconds=(self.settings.privileged_broker_message_timeout_seconds),
+        )
+        return WindowsPrivilegedActionServices(service, coordinator, caller, availability)
+
+    def create_elevated_service_preparation_service(
+        self,
+        source: ServiceActionServices,
+    ) -> ElevatedServicePreparationService:
+        """Bridge one Stage 4C1 permission-only Start/Stop block into Stage 4X2."""
+        privileged = self.create_windows_privileged_action_services()
+        return ElevatedServicePreparationService(
+            privileged.service,
+            privileged.coordinator,
+            source.platform,
+            ServiceSafetyPolicy(
+                current_username=current_windows_username(),
+                agent_root=Path(__file__).resolve().parents[1],
+            ),
+            ServiceDependencyAnalyzer(),
+        )
 
     def create_service_startup_action_services(self) -> ServiceStartupActionServices:
         """Build Stage 4C2 backup, Preview, confirmation, and narrow SCM tools."""

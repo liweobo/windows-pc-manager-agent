@@ -1,5 +1,39 @@
 # Architecture
 
+## Stage 4X2 one-shot elevated Broker boundary
+
+Stage 4X2 preserves the Stage 4X1 plan/confirmation/replay protocol and replaces only its execution edge
+for two exact actions. The GUI and orchestration stay in a standard-user process; a separate frozen Broker
+exists only for one UAC-approved request.
+
+```text
+Stage 4C1 safe Start/Stop blocked only by ordinary SCM rights
+  -> separate R3 Plan + durable plan confirmation
+  -> fresh identity/state/config/dependency/permission Preview
+  -> object-specific durable runtime confirmation
+  -> registered single-use request in fixed per-user SQLite
+  -> pre-UAC Broker path/hash/signature/install/token checks
+  -> ShellExecuteEx("runas") with opaque bootstrap identifiers
+  -> current-user-only Named Pipe + six-frame mutual handshake
+  -> Broker allow-list/binding/Fresh/TOCTOU/audit/replay checks
+  -> atomic confirmation/request consumption
+  -> exact SCM Start OR Stop + Broker readback
+  -> authenticated result + independent Main-process SCM readback
+  -> Main bounded-waits for natural Broker exit; no kill/retry/resume/daemon
+```
+
+`ElevatedServicePreparationService` is the only bridge from Stage 4C1. It refuses Restart, safety or
+dependency blocks, elevated Main processes, incomplete query evidence and actions that ordinary access can
+already perform. `ElevatedServiceActionCoordinator` owns one UAC/IPC attempt and a per-request double-click
+lock. `ElevatedBrokerServerSession` and `ElevatedBrokerClientSession` implement the fixed transport;
+`ElevatedPrivilegedBroker` owns authorization ordering; `WindowsServicePrivilegedHandler` is the sole real
+adapter. UI workers only call orchestration off-thread.
+
+The executable is packaged separately and excludes PySide6, provider, model, agent and UI modules. Both
+executables declare `asInvoker`; only the explicit `runas` call creates the short-lived elevated process.
+The Broker derives the fixed Windows user-data database path itself. No caller-controlled database path,
+service name, command or action enters its command line.
+
 ## Stage 4X1 privileged protocol and Mock Broker boundary
 
 Stage 4X1 introduces a protocol seam, not an elevated Windows component. The standard-user process

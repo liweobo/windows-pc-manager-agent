@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from platformdirs import user_data_path
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class AppSettings(BaseModel):
@@ -71,6 +71,14 @@ class AppSettings(BaseModel):
     privileged_request_ttl_seconds: int = Field(default=120, ge=15, le=600)
     privileged_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
     privileged_max_request_bytes: int = Field(default=32_768, ge=1_024, le=1_048_576)
+    privileged_broker_path: Path | None = None
+    privileged_broker_expected_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    privileged_broker_trust_mode: str = "production"
+    privileged_broker_connect_timeout_seconds: float = Field(default=30.0, ge=5.0, le=120.0)
+    privileged_broker_message_timeout_seconds: float = Field(default=15.0, ge=2.0, le=60.0)
 
     @field_validator("llm_provider")  # field_validator 校验 llm_provider 字段.
     @classmethod
@@ -94,11 +102,35 @@ class AppSettings(BaseModel):
     @field_validator("privileged_broker_mode")
     @classmethod
     def validate_privileged_broker_mode(cls, value: str) -> str:
-        """Allow only disabled or visibly Mock Stage 4X1 behavior."""
+        """Allow disabled, visibly Mock, or explicit one-shot Windows behavior."""
         normalized = value.strip().lower()
-        if normalized not in {"disabled", "mock"}:
-            raise ValueError("Stage 4X1 privileged broker mode must be disabled or mock")
+        if normalized not in {"disabled", "mock", "windows"}:
+            raise ValueError("Privileged broker mode must be disabled, mock, or windows")
         return normalized
+
+    @field_validator("privileged_broker_trust_mode")
+    @classmethod
+    def validate_privileged_broker_trust_mode(cls, value: str) -> str:
+        """Permit only production signing or explicit development hash policy."""
+        normalized = value.strip().lower()
+        if normalized not in {"production", "development"}:
+            raise ValueError("Broker trust mode must be production or development")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_windows_broker_configuration(self) -> AppSettings:
+        """Fail before UAC when Broker trust or the fixed database path is ambiguous."""
+        if self.privileged_broker_mode == "windows":
+            if self.privileged_broker_path is None or not self.privileged_broker_path.is_absolute():
+                raise ValueError("Windows Broker mode requires an absolute Broker path")
+            if self.privileged_broker_expected_sha256 is None:
+                raise ValueError("Windows Broker mode requires an expected SHA-256")
+            fixed_data_directory = user_data_path(self.app_name, ensure_exists=False)
+            if self.data_directory.resolve(strict=False) != fixed_data_directory.resolve(
+                strict=False
+            ):
+                raise ValueError("Windows Broker mode requires the fixed per-user data directory")
+        return self
 
     @property  # 将方法转化为只读属性的属性
     def database_path(self) -> Path:
@@ -219,6 +251,19 @@ class AppSettings(BaseModel):
             ),
             "privileged_max_request_bytes": os.getenv(
                 "PC_MANAGER_PRIVILEGED_MAX_REQUEST_BYTES", "32768"
+            ),
+            "privileged_broker_path": os.getenv("PC_MANAGER_PRIVILEGED_BROKER_PATH"),
+            "privileged_broker_expected_sha256": os.getenv(
+                "PC_MANAGER_PRIVILEGED_BROKER_EXPECTED_SHA256"
+            ),
+            "privileged_broker_trust_mode": os.getenv(
+                "PC_MANAGER_PRIVILEGED_BROKER_TRUST_MODE", "production"
+            ),
+            "privileged_broker_connect_timeout_seconds": os.getenv(
+                "PC_MANAGER_PRIVILEGED_BROKER_CONNECT_TIMEOUT_SECONDS", "30"
+            ),
+            "privileged_broker_message_timeout_seconds": os.getenv(
+                "PC_MANAGER_PRIVILEGED_BROKER_MESSAGE_TIMEOUT_SECONDS", "15"
             ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")

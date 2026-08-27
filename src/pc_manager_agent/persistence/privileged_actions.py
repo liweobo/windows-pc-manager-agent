@@ -144,8 +144,8 @@ class PrivilegedActionRepository:
         self._sessions = sessionmaker(self._engine, expire_on_commit=False)
         self._initialized = False
 
-    def initialize(self) -> tuple[UUID, ...]:
-        """Create tables and permanently interrupt every previously active request."""
+    def initialize(self, *, reconcile_active: bool = True) -> tuple[UUID, ...]:
+        """Create tables and optionally reconcile requests left by a prior process run."""
         interrupted: list[UUID] = []
         try:
             PrivilegedActionBase.metadata.create_all(self._engine)
@@ -158,12 +158,16 @@ class PrivilegedActionRepository:
                     PrivilegedTransactionState.EXECUTING.value,
                     PrivilegedTransactionState.VERIFYING.value,
                 }
-                rows = tuple(
-                    session.scalars(
-                        select(PrivilegedTransactionRow).where(
-                            PrivilegedTransactionRow.state.in_(active)
+                rows = (
+                    tuple(
+                        session.scalars(
+                            select(PrivilegedTransactionRow).where(
+                                PrivilegedTransactionRow.state.in_(active)
+                            )
                         )
                     )
+                    if reconcile_active
+                    else ()
                 )
                 for row in rows:
                     interrupted.append(UUID(row.plan_id))
@@ -477,8 +481,9 @@ class PrivilegedActionRepository:
         *,
         result_code: str,
         expired: bool = False,
+        invalidate_confirmations: bool = False,
     ) -> None:
-        """Permanently reject one authentic stale request without consuming confirmations."""
+        """Permanently reject one request and optionally invalidate both approvals."""
         self._require_initialized()
         try:
             with self._sessions.begin() as session:
@@ -501,6 +506,17 @@ class PrivilegedActionRepository:
                     else PrivilegedTransactionState.REJECTED.value
                 )
                 transaction.updated_at = datetime.now(UTC)
+                if invalidate_confirmations:
+                    for confirmation_id in (
+                        request.plan_confirmation_id,
+                        request.runtime_confirmation_id,
+                    ):
+                        confirmation = session.get(PrivilegedConfirmationRow, confirmation_id)
+                        if confirmation is not None and confirmation.state in {
+                            PrivilegedConfirmationState.PENDING.value,
+                            PrivilegedConfirmationState.APPROVED.value,
+                        }:
+                            confirmation.state = PrivilegedConfirmationState.CONSUMED.value
         except PrivilegedActionStoreError:
             raise
         except (SQLAlchemyError, ValueError) as exc:
@@ -536,6 +552,23 @@ class PrivilegedActionRepository:
             raise
         except (SQLAlchemyError, ValueError) as exc:
             raise PrivilegedActionStoreError("Privileged transaction transition failed") from exc
+
+    def request_is_consumed(self, request_id: UUID) -> bool:
+        """Return whether atomic consumption already made one request non-reusable."""
+        self._require_initialized()
+        try:
+            with Session(self._engine) as session:
+                request = session.get(PrivilegedRequestRow, str(request_id))
+                if request is None:
+                    raise PrivilegedActionStoreError("Unknown privileged request")
+                return request.state in {
+                    PrivilegedReplayState.CONSUMING.value,
+                    PrivilegedReplayState.CONSUMED.value,
+                }
+        except PrivilegedActionStoreError:
+            raise
+        except SQLAlchemyError as exc:
+            raise PrivilegedActionStoreError("Privileged request state query failed") from exc
 
     def close(self) -> None:
         """Release SQLite resources."""

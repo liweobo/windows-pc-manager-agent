@@ -1,6 +1,187 @@
 # API reference
 
-## Stage 4X1 Privileged Action Protocol API
+## Stage 4X2 Elevated Broker API
+
+本节描述真实但默认关闭的 Stage 4X2 Windows 提权边界。所有“执行”均严格限于通过 Stage 4C1
+安全审查的单个服务 Start/Stop；没有通用命令、Shell、任意进程或其他 R3 动作。生产信任模式在
+缺少发布签名与固定 signer 时会按设计返回不可用。
+
+### `domain.elevated_broker`：类型、消息和规范化
+
+| 函数 / 类型 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `BrokerTrustMode` | 只允许 `PRODUCTION` 或 `DEVELOPMENT`。前者要求安装/签名/signer/哈希全部可信；后者仍要求固定哈希和 asInvoker，仅供本机构建测试。 |
+| `SignatureStatus` | 规范化离线 Authenticode 结论：VALID、UNSIGNED、INVALID、UNKNOWN。它是证据，不单独授予权限。 |
+| `BrokerLifecycleState` | 描述 PREPARED 至 EXITED/REJECTED/INTERRUPTED 等一次性生命周期；终态没有自动恢复边。 |
+| `BrokerFailureCode` | 对 UAC、二进制、调用方、会话、IPC、存储、目标、执行和验证失败提供稳定脱敏代码。 |
+| `IpcMessageType` | 限定握手/请求/结果消息语言；当前成功路径只使用 READY、HELLO、GRANT、PROOF、REQUEST、RESULT。 |
+| `ElevatedExecutionStatus` / `ElevatedVerificationStatus` | 分离 SCM 是否实际派发/完成与后置条件是否被验证，避免把返回码误报为成功。 |
+| `WindowsProcessIdentity.canonical_digest()` | 对 Windows token SID、session、PID、创建时间、镜像路径/内容哈希、版本、elevation 与 integrity 生成 canonical SHA-256；无 I/O。 |
+| `BrokerBinaryIdentity.canonical_digest()` | 对 Broker 路径哈希、File ID、内容哈希、大小、版本、签名、安装位置、reparse 与 manifest 证据整体哈希。 |
+| `BrokerLaunchTicket.validate_lifetime()` | Pydantic after-validator；要求创建/过期时间为 UTC、有效期大于 0 且不超过 10 分钟，否则 `ValidationError`。 |
+| `BrokerLaunchTicket.canonical_digest()` | 绑定 Broker/rendezvous/request/Agent、调用方/二进制摘要和时限，供 HELLO 与 REQUEST 防替换。 |
+| `IpcFrame.validate_payload()` | 校验 UTC、payload digest，以及 sequence 0–2 不得伪称 HMAC、3+ 必须携带 HMAC。 |
+| `IpcFrame.unsigned_bytes()` | 返回排除 integrity 字段后的唯一 JSON bytes；用于 HMAC，解决 `Z` 与 `+00:00` 等价时间表示差异。 |
+| `BrokerReady` | Broker 的 PID/session/version/binary digest/challenge；初始未认证，但随后纳入 transcript。 |
+| `ClientHello` | Main 的 Agent/version/OS process identity/launch-ticket digest/challenge；Broker 会用真实 pipe token 校验。 |
+| `SessionGrant.require_utc_expiry()` | 要求一次性 session key 的 expiry 为明确 UTC；key 通过 `repr=False` 避免普通日志展示。 |
+| `ClientProof` | 保存 transcript digest 和 64 位 HMAC proof，证明预期 Main 收到该次 grant。 |
+| `ElevatedBrokerResult.validate_result()` | 只接受服务 Start/Stop；检查 UTC、execution_started/status 一致性及 VERIFIED 必须带 post-state hash。 |
+| `ElevatedBrokerResult.canonical_digest()` | 对完整 Broker 结论与状态证据生成结果摘要。 |
+| `ElevatedBrokerResultEnvelope.bind_result()` | 校验外层 request/Broker ID、结果 digest 和 HMAC 算法与内层完全一致。 |
+| `canonical_broker_bytes(value)` | 使用 UTF-8、sorted compact JSON、`allow_nan=False` 编码；不兼容值抛序列化异常，无 I/O。 |
+| `canonical_broker_digest(value)` | 返回 `canonical_broker_bytes` 的 SHA-256 小写 hex。 |
+| `_require_utc(value, label)` | 内部时间歧义 guard；naive 或非零 offset 直接 `ValueError`。 |
+| `utc_now()` | 返回可注入替换的 timezone-aware 当前 UTC。 |
+
+### `privileged.ipc_protocol`：有界认证帧
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `BrokerIpcError` 及四个子类 | 区分 protocol、authentication、timeout、disconnect；调用方据此 fail closed，但不会得到重试权限。 |
+| `PipeByteStream.read_exact/write_all` | 最小 transport Protocol；实现必须全读/全写或失败，不能把 partial I/O 宣称完成。 |
+| `IpcSessionAuthenticator.__init__()` | 防御性复制至少 32 bytes 的 key，并限制 key ID；无持久化。 |
+| `IpcSessionAuthenticator.generate()` | 通过 `secrets.token_bytes(32)` 创建单连接随机 key。 |
+| `secret` | 只为已验证端点之间的 session grant 返回防御性 key 副本；不得记录。 |
+| `sign(message)` / `verify(message, integrity)` | 产生或常量时间验证 HMAC-SHA256，并要求 exact key ID；`verify` 返回 bool。 |
+| `client_proof(transcript_digest)` | 对带固定域分隔前缀的 transcript 计算 HMAC，防止与普通 frame MAC 混用。 |
+| `BrokerFrameCodec.__init__(max_frame_bytes)` | 设置 1 KiB–1 MiB 的 parse-before-allocation 上限，默认 64 KiB；越界 `ValueError`。 |
+| `max_frame_bytes` | 返回不含 4-byte prefix 的实际上限。 |
+| `encode(frame)` | canonical JSON 编码并加 little-endian 长度前缀；超限抛 protocol error。 |
+| `decode_payload(payload)` | 严格 UTF-8/JSON、拒绝 duplicate/non-finite/root 非对象、错误版本/Schema/长度，返回 `IpcFrame`。 |
+| `decode_prefixed(data)` | 解析一整帧并拒绝截断、零长度、超限和 trailing/mismatch bytes。 |
+| `receive(stream, timeout_seconds)` / `send(...)` | 从抽象 stream 严格收发一个完整有界帧；超时/断开由 typed transport error 表达。 |
+| `BrokerMessageSequence.require(frame, type)` | 要求 exact message type 与单调 sequence，并限制最多 8 帧；成功后推进一次。 |
+| `build_plain_frame(...)` | 构造 sequence 0–2 的 transcript-bound 未签名握手帧，自动计算 UTC 和 payload digest。 |
+| `build_authenticated_frame(...)` | 先创建 Pydantic canonical unsigned frame，再签 routing+payload，避免时间序列化差异破坏 HMAC。 |
+| `verify_authenticated_frame(frame, authenticator)` | 缺少/错误 integrity 时抛 `BrokerIpcAuthenticationError`。 |
+| `parse_payload(frame, model)` | 将 payload 收窄为指定 strict Pydantic 模型；schema 错误转 protocol error。 |
+| `transcript_digest(*messages)` | 对 READY/HELLO 等完整模型列表做 canonical digest，绑定双方挑战和身份。 |
+| `new_opaque_id()` | 生成 256-bit、43 字符、无 padding 的 URL-safe rendezvous/challenge ID。 |
+| `_payload_dict(value)` | 将 BaseModel 或 JSON dict 复制为 transport dict，不保留可变输入引用。 |
+| `_reject_duplicate_keys(pairs)` / `_reject_non_finite(value)` | `json.loads` hooks；遇到重复 key 或 NaN/Infinity 立即抛 protocol error。 |
+
+### Broker identity、Windows process 与 availability
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `BrokerTrustPolicy.require_binary(identity)` | 要求 exact SHA-256、非 reparse、asInvoker；production 再要求 trusted location、VALID signature 和 pinned signer。失败抛 `BrokerTrustError`，不显示 UAC。 |
+| `BrokerTrustPolicy.require_pipe_peers(...)` | 比较 actual/expected caller canonical identity，要求 Main 非 elevated、Broker HIGH/SYSTEM、相同 SID/session 和运行镜像 hash。 |
+| `WindowsBrokerBinaryInspector.inspect(path)` | 只检查 absolute literal `.exe`；读取 `lstat`、reparse、相邻 manifest、SHA-256、File ID、version、签名和 trusted-location 证据。无 PATH 搜索。 |
+| `capture_current_process_identity()` | 从当前 Windows token 读取 SID/session/elevation/integrity，再绑定 psutil PID 创建时间与实际镜像 hash；证据不来自消息 payload。 |
+| `capture_impersonated_pipe_client_identity(handle, process_id, session_id)` | Broker impersonate 已连接 pipe client，读取线程 token，并要求 token session 与 pipe session 一致；finally 恢复 self/关闭 token。 |
+| `sha256_file(path)` | 用 1 MiB 有界 chunk 流式计算已验证普通文件 hash。 |
+| `authenticode_valid(path)` | 复用 Stage 4C1 的离线 WinVerifyTrust 实现，返回 bool，不访问网络。 |
+| `_process_identity(...)` | 将 token 证据与 psutil 实际 process image/creation time 合并成 strict `WindowsProcessIdentity`。 |
+| `_path_hash(path)` | 对 resolved、case-folded Windows 路径做 SHA-256；避免审计/绑定存 raw path。 |
+| `_product_version(path)` | 从 Win32 version resource 读取四段版本；缺失/错误返回 `None`。 |
+| `_integrity_label(sid)` | 将 mandatory integrity SID RID 映射为 SYSTEM/HIGH/MEDIUM/LOW/UNTRUSTED；坏 SID fail closed。 |
+| `_manifest_is_as_invoker(path)` | 读取相邻 UTF-8 manifest，并要求 exact asInvoker + uiAccess=false。 |
+| `_is_trusted_install_location(path)` | 判断 Broker 是否在解析后的 Program Files/ProgramW6432 下；仅作为 production trust 的一个必要证据。 |
+| `BrokerAvailability.ready` | 只有状态 READY 且包含可信 binary evidence 时为 true。 |
+| `PrivilegedBrokerAvailabilityService.inspect()` | 依次检查 enable/platform/Main token/config/path/inspect/trust，返回稳定 readiness 和友好消息；不启动进程。 |
+| `require_ready()` | 返回可信 `BrokerBinaryIdentity`，否则抛 `BrokerTrustError`，确保 UAC 前停止。 |
+
+### Windows Named Pipe 与 UAC launcher
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `WindowsNamedPipeStream.__init__(handle, server_end)` | 接管一个 pipe handle，记录端点方向并建立 close/I/O 锁。 |
+| `native_handle` | 仅供 Windows impersonation/identity API 使用，不进入 payload。 |
+| `peer_process_id` / `peer_session_id` | 分别调用 GetNamedPipeClient/Server OS API 获取真实 peer PID/session；失败抛 `WindowsNamedPipeError`。 |
+| `read_exact(size, timeout_seconds)` | 限制 0–1 MiB，循环读取至 exact size；deadline、断开或 Win32 错误均不返回 partial success。 |
+| `write_all(data, timeout_seconds)` | 限制非空且至多 frame limit+prefix，循环写完；零进度/timeout/断开 fail closed。 |
+| `close()` | 幂等 disconnect/close owned handle，并让后续 I/O 报 disconnected。 |
+| `_bounded_call(operation, timeout_seconds)` | 用短生命周期 daemon worker 包装阻塞 Win32 I/O；超时先关闭 handle，再抛 typed timeout。 |
+| `_write_chunk(value)` | 单次 `WriteFile` 并返回实际字节数，供 `write_all` 检查进度。 |
+| `WindowsBrokerPipeServer.__init__(rendezvous_id, user_sid)` | 验证 opaque ID，创建 reject-remote、first-instance、单实例 byte pipe，DACL 仅 exact SID。 |
+| `accept(timeout_seconds)` | 最多接受一个 client；超时关闭 endpoint，第二次调用拒绝。成功后 stream 接管 handle。 |
+| `WindowsBrokerPipeServer.close()` | 仅关闭尚未 accept 的 server handle；已连接 handle 由 stream 管理。 |
+| `WindowsBrokerPipeClient.__init__(rendezvous_id)` | 仅保存由固定 prefix+opaque ID 得到的 exact endpoint。 |
+| `connect(timeout_seconds)` | 有界 WaitNamedPipe，使用 identification-only SQOS 打开唯一 local endpoint；not found/timeout 映射为 typed timeout。 |
+| `pipe_name(rendezvous_id)` | 只接受 43 字符 URL-safe ID，返回固定 `\\.\pipe\WindowsPCManagerAgent.Stage4X2.*` 名称。 |
+| `_create_server_handle(name, user_sid)` | 建立不可继承的 explicit DACL security descriptor 与一个本地实例；Win32 失败转安全错误。 |
+| `WindowsUacBrokerLauncher.__init__(expected_path)` | 要求绝对 configured path 并保存规范化值；相对路径在 Windows 调用前拒绝。 |
+| `launch(broker_path, arguments)` | 要求 exact configured `.exe`、protocol 1、合法 rendezvous；用 `ShellExecuteEx(runas)` 和固定 opaque argv 启动。返回 STARTED/CANCELLED/FAILED，不重试。 |
+| `wait_for_exit(process, timeout_seconds)` | 有界等待 Broker 自然退出并返回真实 exit code；timeout 返回 `None`，绝不调用 TerminateProcess。 |
+| `close_process_handle(process)` | 在等待/记录后只关闭 ShellExecuteEx 返回的 handle，不 terminate Broker。 |
+| `_winerror(exc)` | 从 winerror/hresult/args 保守提取低 16 位错误码；无法识别返回 0。 |
+
+### 双向 session 与 Broker 核心
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `AuthenticatedPipeStream` | 在 byte stream 上增加 native handle、OS peer PID/session 与 close 的 Protocol。 |
+| `ElevatedBrokerServerSession.__init__(...)` | 注入 real Broker、当前 elevated process/binary、pipe caller identity reader、codec/clock/timeout/version；不打开 endpoint。 |
+| `serve(stream, broker_instance_id, expected_caller_process_id, expected_agent_instance_id)` | 完成固定六帧交换，验证 OS caller 与 Hello、same SID/session、版本和 proof，解析一个 Request，调用 Broker 一次，发送一个 authenticated Result 后返回。 |
+| `ElevatedBrokerClientSession.__init__(...)` | 注入 Main identity、pre-UAC binary、ShellExecuteEx PID、serializer/codec/timeouts/version。 |
+| `exchange(...)` | 先校验 pipe server PID/session 和 READY，再完成 HELLO/GRANT/PROOF，使用 session HMAC 重签 request transport，验证 RESULT routing/digest/HMAC 后返回。 |
+| `_require_route(frame, broker_id, request_id, sequence)` | 每步要求 exact Broker/request/sequence；漂移抛 protocol error。 |
+| `_key_id(broker_instance_id)` | 生成仅本次 Broker UUID 的 HMAC key ID，不包含 secret。 |
+| `_encode_key(value)` / `_decode_key(value)` | URL-safe 无 padding 编解码 session key；decode 必须恰为 32 bytes，否则 authentication error。 |
+| `ElevatedPrivilegedBroker.__init__(...)` | 注入 serializer、durable repository、唯一 service handler、mandatory audit、trust policy、时钟与 final-TOCTOU hook。 |
+| `dispatch(...)` | 按 transport→allow-list→durable binding→Fresh→audit→atomic consume→TOCTOU→SCM→verify→authenticated result 固定顺序处理一次。任何失败映射 typed terminal result。 |
+| `_require_transport_integrity(...)` | 校验 request canonical digest 与当前 session HMAC，不接受 Stage 4X1 bootstrap key。 |
+| `_binding_decision(...)` | 比较 caller/Agent/Plan/Preview/confirmation/execution-mode 等 durable bindings，返回明确 Broker decision。 |
+| `_require_preview_fresh(...)` | 要求 stored Preview 是 WINDOWS_ELEVATED、未过期、R3/Admin/safety-approved 且所有摘要一致。 |
+| `_reject(...)` | 对消费前拒绝建立 authenticated NOT_STARTED 结果，并按需永久 reject 未消费 request。 |
+| `_finish_failure_after_consumption(...)` | 对已消费权限写 terminal transition/audit，并返回不重试的失败结果。 |
+| `_is_consumed(request_id)` | 只读查询 durable replay state；存储错误保守返回 true，避免再次执行。 |
+| `_not_started(...)` / `_result(...)` | 统一构造内部一致、UTC、MANUAL rollback 的 typed result 和 session-authenticated envelope。 |
+
+### 服务 handler、编排、GUI 与运行时
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `ValidatedServiceRequest` | 保存最终 Fresh observation、Start/Stop action 和目标状态；只有 `require()` 可产生。 |
+| `WindowsServicePrivilegedHandler.__init__(...)` | 注入 SCM platform、Stage 4C1 policy、dependency analyzer、5–120 秒 timeout 与可选 pre-dispatch callback。 |
+| `require(request)` | 只接受 typed Start/Stop；Fresh 查询 exact 服务，重验 identity/state/config/dependencies/safety/permissions，返回 validated request，否则抛。 |
+| `execute(validated, on_dispatched)` | 对已验证对象调用 exact platform Start 或 Stop，传固定预期摘要/状态/timeout/cancellation；没有 fallback。 |
+| `verify(request)` | Fresh inspect 并仅在 identity 和 expected RUNNING/STOPPED 后置条件匹配时返回 observation，否则 `None`。 |
+| `ElevatedServiceActionCoordinator.__init__(...)` | 注入固定 Broker trust/UAC/pipe/serializer/repository/audit/SCM；拒绝 elevated caller，验证 timeout。 |
+| `dispatch(envelope)` | 以 request UUID 加锁防双击，执行一次 `_dispatch_once`，finally 释放 active 标记。 |
+| `_dispatch_once(envelope)` | 检查 durable freshness/binary/audit，创建 ticket，调用 UAC 一次，完成 IPC，再要求 Main SCM readback；取消/失败/中断不重试。 |
+| `_verify_client_postcondition(envelope)` | Main 端 Fresh inspect exact service，要求 identity 与 Start→RUNNING 或 Stop→STOPPED。 |
+| `_invalidate_unlaunched(...)` / `_interrupt_or_invalidate(...)` | UAC 前失败使 authority/confirmations 无效；可能已消费时转 INTERRUPTED，均吞掉二次存储错误以避免重试。 |
+| `_record_terminal(...)` | 尽力记录 terminal lifecycle；审计失败不能把未知结果升级为成功。 |
+| `ElevatedServicePreparationService.prepare(...)` | 只把 Stage 4C1 safety/dependency pass、普通权限缺口的 Start/Stop 转成独立 real-mode R3 Plan/Preview。 |
+| `approve_plan(...)` | 解析独立 plan confirmation；不触发 UAC。 |
+| `prepare_runtime(...)` | 再读 service identity/state/config/dependency/permission/safety，创建短时 object-specific confirmation。 |
+| `approve_runtime_and_build(...)` | 解析即时确认；仅 approved 时构建、持久化并审计单次 request。 |
+| `dispatch(envelope)` | 把 exact registered request 委托给 coordinator；不允许 UI 直接接触 launcher/SCM。 |
+| `_require_source(...)` / `_resolution(...)` / `_payload(...)` | 内部 guard：阻止 Restart/已 elevated/普通权限足够/证据变化，并构造无命令字段的 Start 或 Stop payload。 |
+| `ElevatedService*Worker.run()` | 三个 QRunnable 分别执行 prepare、runtime revalidation、UAC/IPC dispatch；通过 Qt signal 传结果，避免阻塞 UI。 |
+| `require_prepared_elevated` / `require_runtime_elevated` / `require_elevated_outcome` | 对跨线程 `object` payload 做精确类型收窄，错误抛 `TypeError`。 |
+| `_completed(...)` / `_failed(...)` | 安全发送 terminal Qt signal；窗口已销毁时抑制 Qt `RuntimeError`，不隐藏业务执行异常。 |
+| `ApplicationRuntime.create_windows_privileged_action_services()` | 仅 `windows` mode + standard Main +可信 Broker 配置下组合 serializer、两级确认、real-mode service、availability 与 coordinator。 |
+| `ApplicationRuntime.create_elevated_service_preparation_service(source)` | 将现有 Stage 4C1 platform/policy/dependency与 Stage 4X2 service/coordinator连接；唯一 GUI bridge。 |
+| `AppSettings.validate_privileged_broker_mode()` | 只接受 disabled/mock/windows；默认 disabled。 |
+| `validate_privileged_broker_trust_mode()` | 只接受 production/development。 |
+| `validate_windows_broker_configuration()` | windows mode 要求 absolute Broker path、64 位 SHA-256 和固定默认 per-user data directory；不满足在启动/UAC 前 ValidationError。 |
+| `PrivilegedActionRepository.initialize(reconcile_active)` | Main 默认 reconcile 中断；Broker 使用 false 防止启动时把当前合法 request 自己标为 INTERRUPTED。 |
+| `reject_unconsumed(..., invalidate_confirmations)` | 在 UAC取消/launch失败等消费前终止 request，并可同时使两级确认失效。 |
+| `request_is_consumed(request_id)` | 供 IPC 异常路径判断应 reject 还是标记 INTERRUPTED；未知/损坏通过 typed store error fail closed。 |
+
+### Audit、Broker entry 与 packaging
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `ElevatedBrokerAuditContext` | 汇集 caller SID 指纹、非秘密 Windows logon ID、Broker binary identity/version 与可选 endpoint 指纹；不含 raw SID/pipe/key。 |
+| `ElevatedBrokerAuditLogger.lifecycle(...)` | 记录 UAC/IPC/Broker 状态、UAC/握手/Main readback/result-integrity/exit/final-state 结论与脱敏 failure code。 |
+| `validation(envelope, broker_instance_id, decision)` | 在原子消费前记录 exact request/Plan/Preview/action/confirmation digests。写失败阻止 Broker 继续。 |
+| `execution_started(...)` | authority 消费后、SCM 调用前的 mandatory write-ahead audit，明确 `execution_started=false`。 |
+| `completion(envelope, result)` | 记录 pre/post state、execution/verification/result code 和 MANUAL recovery，不记录服务 payload。 |
+| `_safe_parameters(...)` | 生成 protocol/action/request/Agent/Plan/Preview/confirmation/risk/privilege 与 digest/fingerprint 字段；raw nonce/SID/session secret/服务名被排除。 |
+| `_add_context(...)` | 将安全的 endpoint context 合并到 audit parameters；Windows 会话号使用 `windows_logon_id`，避免与凭据型 session secret 混淆。 |
+| `broker.main.build_parser()` | 构造禁止 abbreviation/help 的固定五字段 opaque CLI；缺失/额外参数解析失败。 |
+| `broker.main.main(argv)` | 仅 frozen + elevated + trusted 时打开固定 DB/pipe，组合唯一 SCM handler，处理一次并退出；返回 0/20–25 稳定 code。 |
+| `_harden_process_environment(app_dir)` | 在重型 import 前移除 Python/provider secret 类环境变量、切换固定 cwd、收紧 DLL search；失败不扩大执行能力。 |
+| `BrokerLaunchArguments` / `ElevatedProcessHandle` / `ElevationLaunchResult` | 分别描述 opaque launcher 输入、owned process handle 和 STARTED/CANCELLED/FAILED 输出；不包含 request payload。 |
+| `BrokerBinaryInspector` / `ElevatedBrokerLauncher` / `BrokerPipe*` Protocol | 为 Main/Broker composition 提供可替换但严格收窄的 trust、launch 和 transport seam，便于无 UAC 自动测试。 |
+| `scripts/build-privileged-broker.ps1` | 运行独立 PyInstaller spec、复制相邻 manifest、打印 SHA-256；输出明确标记 development-only。 |
+| `packaging/pc-manager-privileged-broker.spec` | 生成 onedir、windowed one-shot EXE，并排除 PySide6/OpenAI/provider/UI/agent/memory 模块。 |
+
+## Stage 4X1 Privileged Action Protocol API（Mock 基线与共享模型）
 
 以下 API 只实现结构化协议与内存 Mock Broker。任何 `execute`/`dispatch` 描述都不代表真实
 Windows 管理员操作；Stage 4X1 没有 UAC、提权进程或 Windows 特权写适配器。
@@ -9,7 +190,8 @@ Windows 管理员操作；Stage 4X1 没有 UAC、提权进程或 Windows 特权�
 
 | 函数 / 类型 | 详细作用、输入输出、失败语义与副作用 |
 |---|---|
-| `PrivilegedBrokerMode` | 运行模式枚举，仅允许 `disabled` 和 `mock`；不存在 `real` 值。 |
+| `PrivilegedBrokerMode` | 运行模式枚举：`disabled`、Stage 4X1 `mock`、Stage 4X2 `windows`；刻意不存在会泛化能力的通用 `real` 值。 |
+| `PrivilegedExecutionMode` | 将 Preview/确认绑定到 `MOCK` 或 `WINDOWS_ELEVATED`，禁止两种执行边界互相复用。 |
 | `PrivilegedActionType` | 协议 v1 的七种有限 action。枚举成员本身不授予执行能力，仍需私有 registry manifest。 |
 | `PrivilegeResolutionStatus` / `PrivilegeRequirement` | 分别表达路由结论与所需 Windows 权限级别；SYSTEM/TrustedInstaller 永不执行。 |
 | `PrivilegeResolution.validate_resolution()` | Pydantic after-validator；阻止 safety=false 却非 BLOCKED、证据不完整却 REQUIRED、或把 SYSTEM/TI 标成可执行。失败抛 `ValidationError`，无 I/O。 |
@@ -23,7 +205,7 @@ Windows 管理员操作；Stage 4X1 没有 UAC、提权进程或 Windows 特权�
 | `MachineMsiUninstallPayload.bind_product_code()` | 要求大写 GUID ProductCode 的 canonical digest 精确匹配，防止验证后替换；无命令行字段。 |
 | `PrivilegedActionPlan.bind_payload()` | 绑定 action/payload type、payload digest、固定 R3 和显式 UTC；任一漂移使模型无效。 |
 | `PrivilegedActionPlan.canonical_digest()` | 哈希 Plan 的所有权限相关字段，作为两级确认和 Request 的 plan hash。 |
-| `PrivilegedActionPreview.validate_preview()` | 要求 explicit UTC、R3、Mock-only，以及 safety-approved、Administrator-required 的完整 resolver 证据。 |
+| `PrivilegedActionPreview.validate_preview()` | 要求 explicit UTC、R3、明确 execution mode，以及 safety-approved、Administrator-required 的完整 resolver 证据。 |
 | `PrivilegedActionPreview.canonical_digest()` | 哈希该次具体 Preview ID、Fresh state/safety/privilege 和警告文本。 |
 | `PrivilegedActionRequest.validate_capability()` | 校验 payload/action/digest、R3/Admin、UTC 正时长、最大 600 秒；禁止降级、过期倒置和非 UTC canonical ambiguity。 |
 | `RequestIntegrity` / `PrivilegedActionEnvelope` | 包装 HMAC algorithm/key ID/code 与 canonical request digest；字段使用 strict model 和 SHA-256 格式。 |
@@ -62,7 +244,7 @@ Windows 管理员操作；Stage 4X1 没有 UAC、提权进程或 Windows 特权�
 |---|---|
 | `PrivilegedActionBuilder.__init__(...)` | 注入 serializer/authenticator/confirmation service、可测时钟和 15–600 秒 Request TTL；无全局状态。 |
 | `PrivilegedActionBuilder.plan(...)` | 从确定性 upstream evidence 建立一个 exact R3 Plan；计算 payload/object summary digest，不扩充 action 或 target。 |
-| `PrivilegedActionBuilder.preview(...)` | 把 Fresh target/safety/privilege evidence 包成 Mock-only Preview；不创建确认或 Request。 |
+| `PrivilegedActionBuilder.preview(...)` | 把 Fresh target/safety/privilege evidence 包成指定 execution-mode Preview；不创建确认或 Request。 |
 | `PrivilegedActionBuilder.build(...)` | 先要求 exact approved confirmation pair，再生成 32-byte URL-safe nonce、短时 Request、canonical digest 和 HMAC envelope；不消费确认。 |
 | `PrivilegedActionHandler.require/execute/verify` | 私有 handler Protocol：Fresh precondition、一个有限 Mock mutation、Fresh postcondition；不得实现通用 runner。 |
 | `PrivilegedActionManifest` | 不可变 manifest，绑定 action、payload model、R3 floor、Admin requirement、handler 和 audit policy。 |
@@ -90,7 +272,7 @@ Windows 管理员操作；Stage 4X1 没有 UAC、提权进程或 Windows 特权�
 | `PrivilegedActionConfirmation.validate_confirmation()` | 要求 PLAN 无 parent、RUNTIME 有 parent，全部时间 explicit UTC 且 expiry 正向，固定 R3/Admin，APPROVED 必须有 confirmed time。 |
 | `PrivilegedConfirmationRepository.save/get/update/bind_runtime_preview` | confirmation service 所需持久化 Protocol；实现必须保持 transaction/confirmation 原子状态。 |
 | `PrivilegedActionConfirmationService.__init__(...)` | 注入 repository、两个正 TTL 和可测时钟；TTL 非正抛 `ValueError`。 |
-| `request_plan(plan, preview)` | 要求 current safe Admin Mock Preview，建立并持久化 PLAN/PENDING record。 |
+| `request_plan(plan, preview)` | 要求 current safe、明确模式的 Admin Preview，建立并持久化 PLAN/PENDING record。 |
 | `resolve_plan(id, approved, plan, preview)` | 解析一次 pending plan gate；changed/stale/expired/repeated 抛 `PrivilegedConfirmationError`。 |
 | `request_runtime(parent_id, plan, preview)` | 要求仍有效 APPROVED parent 和同一 Plan，绑定 Fresh runtime Preview，再持久化独立 child confirmation。 |
 | `resolve_runtime(id, approved, plan, preview)` | 解析一次 object-specific immediate gate；不构造或执行 Request。 |
@@ -98,9 +280,9 @@ Windows 管理员操作；Stage 4X1 没有 UAC、提权进程或 Windows 特权�
 | `_resolve(...)` | 私有 shared decision path；仅允许 PENDING，验证 current/bindings 后持久化 APPROVED/REJECTED。 |
 | `_create(...)` | 私有 record factory；计算 tier-specific expiry 并复制所有 exact binding fields。 |
 | `_require_not_expired(value)` | 到期时把 PENDING/APPROVED durable 标为 EXPIRED，然后抛 confirmation error。 |
-| `_require_current(plan, preview)` | 私有 safety gate；要求 Plan/Preview IDs/hash/action/target/risk、Mock marker 和 safety-approved Admin resolution 完全一致。 |
+| `_require_current(plan, preview)` | 私有 safety gate；要求 Plan/Preview IDs/hash/action/target/risk、execution mode 和 safety-approved Admin resolution 完全一致。 |
 | `PrivilegedActionRepository.__init__(database_path)` | 为三个 additive Stage 4X1 table 建立 SQLite engine/session factory；尚不授权任何操作。 |
-| `initialize()` | 建表并把上次遗留 active transaction 标记 INTERRUPTED、关联 Request 标记 CONSUMED；返回被中断 plan UUID tuple。DB/数据损坏抛 `PrivilegedActionStoreError`。 |
+| `initialize(reconcile_active=True)` | 建表；Main 默认把遗留 active transaction 标记 INTERRUPTED/CONSUMED。一次性 Broker 传 false，避免把正在接收的合法 request 自行中断。DB/数据损坏抛 store error。 |
 | `create(plan, preview)` | 在请求确认前持久化 exact canonical Plan/initial Preview；mismatch/duplicate/store failure fail closed。 |
 | `save_confirmation(confirmation)` | 只在 transaction 处于对应 awaiting state 时插入 PLAN 或 RUNTIME confirmation。 |
 | `get_confirmation(id)` | 重建 strict typed confirmation；unknown、损坏或 DB 错误统一抛 store error。 |
@@ -109,7 +291,7 @@ Windows 管理员操作；Stage 4X1 没有 UAC、提权进程或 Windows 特权�
 | `register_request(envelope)` | 仅在 AUTHORIZED 且全部 request bindings 匹配时插入 CREATED replay row；request ID/digest/nonce fingerprint 任一重复抛 `PrivilegedReplayError`。 |
 | `snapshot(request)` | 只读重建 transaction/Plan/Preview/two confirmations/replay binding；unknown/incomplete/corrupt evidence fail closed。 |
 | `consume(request, now)` | 单个 SQLite transaction 条件 claim CREATED request，重验 expiry/transaction/confirmations/parent/nonce，再同时标记 request CONSUMING、两级确认 CONSUMED；并发只能一方成功。 |
-| `reject_unconsumed(id, result_code, expired)` | 对 authentic CREATED request 写入永久 REJECTED/EXPIRED terminal state；不会消费确认或重新开放。 |
+| `reject_unconsumed(id, result_code, expired, invalidate_confirmations)` | 对 authentic CREATED request写入永久 REJECTED/EXPIRED；Stage 4X2 可同时使两级确认失效，绝不重新开放。 |
 | `transition(id, transaction_state, replay_state, result_code)` | 只推进已经 CONSUMING/CONSUMED 的 request；未消费 authority 不能进入执行状态。 |
 | `close()` | dispose SQLite engine 并清除 initialized flag；之后所有读写 fail closed。 |
 | `_transaction(session, plan_id)` | 私有 exact plan lookup；unknown plan 抛 store error，不做 display fallback。 |

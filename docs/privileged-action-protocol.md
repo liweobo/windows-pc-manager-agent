@@ -1,6 +1,103 @@
-# Stage 4X1 Privileged Action Protocol
+# Stage 4X1/4X2 Privileged Action Protocol
 
-## Status and non-goals
+## Stage 4X2 current real-Broker status
+
+Stage 4X2 implements a real Windows privilege boundary for exactly two actions: `SERVICE_START` and
+`SERVICE_STOP`. It does not convert the Stage 4X1 Mock Broker into a privileged process. Instead, the
+standard-user Main application retains plan construction, safety review, confirmation and independent
+verification, while a separately packaged one-shot Broker owns the final authorization checks and one SCM
+dispatch.
+
+The real route is disabled by default and is never selected merely because an API returns AccessDenied.
+The source Stage 4C1 Preview must already prove an exact signed third-party service, allowed safety class,
+safe dependency impact, complete query evidence, a non-elevated Main token and insufficient ordinary rights
+for only the requested Start or Stop. Restart and all other protocol actions have no real handler.
+
+### Pre-UAC trust and launch
+
+The Main process inspects one configured absolute `.exe`: no PATH resolution, reparse point or alternate
+extension is accepted. It binds file identity, SHA-256, product version, adjacent `asInvoker` manifest and
+signature/install evidence. Development mode accepts an explicit hash pin; production mode additionally
+requires a trusted installation root, valid Authenticode and pinned signer fingerprint. Missing release
+signing is therefore a truthful `NOT_READY`, not a reason to weaken policy.
+
+`ShellExecuteExW` uses the `runas` verb, exact executable and opaque arguments only:
+
+```text
+--broker-instance <UUID>
+--rendezvous <43-character random ID>
+--protocol-version 1
+--caller-pid <expected Main PID>
+--agent-instance <UUID>
+```
+
+The request, service name, database path, payload and action are never placed on the command line. The
+Broker independently uses the fixed `platformdirs` current-user database location. Real mode rejects a
+custom Main data directory before UAC.
+
+### Named-pipe authentication
+
+The pipe name is derived only from the opaque rendezvous ID. The server uses an explicit DACL for the exact
+current user plus LocalSystem, rejects remote clients and requests the first pipe instance. A four-byte
+little-endian length prefix is checked before allocation; strict JSON rejects duplicate keys, non-finite
+numbers, unknown fields and wrong protocol versions.
+
+The only successful sequence is:
+
+| Sequence | Direction | Message | Authentication and purpose |
+|---:|---|---|---|
+| 0 | Broker → Main | `BROKER_READY` | Binds launched Broker PID/session/version/binary digest and challenge; later transcript-bound |
+| 1 | Main → Broker | `CLIENT_HELLO` | Binds Agent instance, Main OS identity, launch-ticket digest, version and challenge |
+| 2 | Broker → Main | `SESSION_GRANT` | One 32-byte/30-second HMAC session key after expected caller PID/SID/session checks |
+| 3 | Main → Broker | `CLIENT_PROOF` | HMAC proof over both challenges/transcript |
+| 4 | Main → Broker | `REQUEST` | Session-HMAC authenticated exact Stage 4X1 envelope and launch-ticket digest |
+| 5 | Broker → Main | `RESULT` | Session-HMAC authenticated typed result and postcondition evidence |
+
+The Broker impersonates the actual pipe client and compares the token SID/session, pipe PID and full process
+identity with the expected standard-user Main. Main compares the pipe server PID/session with the exact
+process returned by `ShellExecuteEx`. Same-user/same-session is mandatory; over-the-shoulder elevation to a
+different account is deliberately unsupported.
+
+### Broker authorization and execution order
+
+After transport authentication, the Broker performs this fixed order:
+
+1. Revalidate request digest/session integrity, protocol/action/payload allow-list and all route bindings.
+2. Load the fixed SQLite authorization snapshot and require unexpired `SIGNED`/`CREATED` authority.
+3. Revalidate Plan, Preview, both confirmations, caller/Agent, execution mode and target digests.
+4. Query the exact service and repeat stable identity, expected state, startup configuration, dependency,
+   Stage 4C1 safety and action-specific permission/relationship checks.
+5. Write mandatory validation audit.
+6. Atomically consume the request and both confirmations.
+7. Repeat final service TOCTOU validation and write mandatory pre-execution audit.
+8. Call exactly one typed `WindowsServiceControlPlatform.start()` or `.stop()` operation.
+9. Read the exact post-state in Broker; send one authenticated result.
+10. Main independently reads SCM and accepts success only when identity and expected state agree.
+11. Main 有界等待并记录 Broker 自然退出码，再关闭 pipe/handle；超时不会 TerminateProcess，而会把
+    结果降为未完全验证。No loop、queue、retry、resume 或 resident service 存在。
+
+Any uncertainty fails closed. A failure before launch invalidates unconsumed authority; a failure after
+consumption becomes terminal/interrupted. UAC cancellation never retries. Broker process exit or API return
+alone is not success.
+
+### Recovery, audit and production limitation
+
+Start/Stop rollback is `MANUAL`: an opposite action needs a fresh service inventory, new Plan, two new
+confirmations and a new UAC. The Agent never sends an automatic opposite control because service state or
+dependencies may have changed.
+
+Stage 4X2 audit separates lifecycle, validation, execution-start and verification. It records action and
+correlation IDs, protocol/version、Plan/Preview/confirmation、risk/privilege、caller SID fingerprint、
+Windows logon ID、Broker binary/version、IPC endpoint fingerprint、UAC/handshake/replay/safety/consumption/
+execution/Broker verification/Main readback/result-integrity/exit/final-state 结论；不记录 raw SID、服务
+name/payload、pipe name、nonce、HMAC/session key、command line 或 provider secret。Audit/storage failure
+stops authorization or produces a conservative unverified outcome.
+
+Automated tests use fake launch/SCM adapters plus a real non-elevated same-user Named Pipe. They never show
+UAC or mutate a service. A production-ready release remains blocked until the separate Broker is installed
+in a trusted location and signed by a pinned release signer.
+
+## Stage 4X1 baseline and historical non-goals
 
 Stage 4X1 implements a versioned authorization protocol and a complete in-process Mock Broker. It proves
 that an exact operation can be represented, confirmed, authenticated, consumed once, revalidated,
@@ -128,14 +225,20 @@ current authorization path.
 
 | Environment variable | Default | Allowed values / bound |
 |---|---:|---|
-| `PC_MANAGER_PRIVILEGED_BROKER_MODE` | `disabled` | `disabled`, `mock` only |
+| `PC_MANAGER_PRIVILEGED_BROKER_MODE` | `disabled` | `disabled`, `mock`, `windows`; intentionally no generic `real` |
 | `PC_MANAGER_PRIVILEGED_REQUEST_TTL_SECONDS` | `120` | 15–600 |
 | `PC_MANAGER_PRIVILEGED_RUNTIME_CONFIRMATION_TTL_SECONDS` | `60` | 15–300 |
 | `PC_MANAGER_PRIVILEGED_MAX_REQUEST_BYTES` | `32768` | 1024–1048576 |
+| `PC_MANAGER_PRIVILEGED_BROKER_PATH` | unset | Required absolute `.exe` only for `windows` |
+| `PC_MANAGER_PRIVILEGED_BROKER_EXPECTED_SHA256` | unset | Required lowercase 64-character hash only for `windows` |
+| `PC_MANAGER_PRIVILEGED_BROKER_TRUST_MODE` | `production` | `production` or explicit `development` |
+| `PC_MANAGER_PRIVILEGED_BROKER_CONNECT_TIMEOUT_SECONDS` | `30` | 5–120 |
+| `PC_MANAGER_PRIVILEGED_BROKER_MESSAGE_TIMEOUT_SECONDS` | `15` | 2–60 |
 
-Mock runtime composition requires the main token to be non-elevated and the caller to inject
-`FakePrivilegedSystemState`; there is no factory that creates a real Windows privileged adapter. UI text
-and results always state that no UAC or real system operation occurred.
+Mock runtime composition requires the Main token to be non-elevated and the caller to inject
+`FakePrivilegedSystemState`; its UI text/results always state that no UAC or real system operation occurred.
+Windows composition is separate, also requires a non-elevated Main token, fixed default user-data directory,
+trusted Broker path/hash/policy, and exposes only the Stage 4X2 service Start/Stop bridge.
 
 ## Verification
 
@@ -146,9 +249,10 @@ dispatch, crash recovery, corrupt database JSON, audit outage, prompt-injection-
 actions, fresh evidence changes, final TOCTOU changes, fake executor/verification failures and forbidden
 process/LLM imports.
 
-## Requirements before a real Broker
+## Requirements before production release or any broader privileged action
 
-A future stage needs a new threat model and decision record for:
+Stage 4X2 has implemented the transport and one narrow adapter, but a production release or any new adapter
+still requires explicit evidence for:
 
 - Broker executable installation, code signing, update and downgrade resistance;
 - IPC transport, endpoint ACL, message framing and denial-of-service bounds;
@@ -160,4 +264,6 @@ A future stage needs a new threat model and decision record for:
 - production audit correlation without leaking privileged data;
 - recovery semantics and real-Windows disposable integration tests.
 
-Until all of these are designed and tested, `real` is not an accepted runtime mode.
+Stage 4X2 satisfies these items only for the narrow `windows` service Start/Stop route. It does not authorize
+any other action, and production mode remains unavailable until release signing and trusted deployment are
+provided. The runtime deliberately has no generic `real` mode.

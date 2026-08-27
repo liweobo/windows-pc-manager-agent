@@ -1,0 +1,12 @@
+[run]
+branch = True
+source = pc_manager_agent
+
+[report]
+show_missing = True
+skip_covered = True
+exclude_also =
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    @abstractmethod

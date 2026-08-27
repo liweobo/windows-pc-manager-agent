@@ -1,5 +1,27 @@
 # Windows PC Manager Agent
 
+## Stage 4X2：独立的一次性 Windows Elevated Broker
+
+Stage 4X2 在 Stage 4X1 协议之上增加了真实但默认关闭的 Windows 提权边界。主程序始终以普通
+用户运行；只有一个已通过 Stage 4C1 安全策略、且唯一阻塞原因是普通 SCM 权限不足的精确
+`SERVICE_START` 或 `SERVICE_STOP`，才可创建新的 R3 计划。计划确认和短时即时确认均通过后，
+应用才会使用 Windows `runas` 显示一次 UAC，并启动独立的一次性 Broker。
+
+- Broker 命令行只有随机 rendezvous、Broker/Agent UUID、协议版本和预期调用进程 ID；没有服务
+  名、命令、脚本、可执行路径或通用参数。
+- Named Pipe 使用仅当前用户可访问的显式 ACL、拒绝远程客户端和首实例保护；双方再校验用户
+  SID、登录会话、进程 ID/创建时间、镜像哈希、Agent 实例和 Broker 实例。
+- 固定六帧握手建立仅本次会话使用的 HMAC；请求和结果均绑定固定序号、路由字段、摘要和时限。
+- Broker 再次执行 allow-list、持久化、确认、Fresh 服务身份/状态/配置/依赖/安全检查，原子消费
+  权限后只调用一个强类型 SCM Start 或 Stop 适配器；完成后退出。
+- Broker 的返回不是最终成功。普通用户主程序还会独立读取 SCM 后置状态，不一致时报告验证失败。
+- UAC 取消、IPC 超时/断开、重放、状态漂移、数据库或审计异常都不会自动重试。反向操作必须重新
+  建立计划、确认并再次请求 UAC；回滚等级为 `MANUAL`。
+
+默认仍为 `disabled`。仓库构建脚本可生成开发用固定哈希 Broker，但未经可信安装和 Authenticode
+签名的构建在 `production` 信任模式下会保持 `NOT_READY`；本项目不会把开发构建冒充生产可用。
+详见 `docs/privileged-action-protocol.md` 和 `docs/manual-testing/privileged-broker-uac.md`。
+
 ## Stage 4X1：Privileged Action Protocol（仅 Mock）
 
 Stage 4X1 建立了未来独立提权 Broker 所需的协议边界，但**没有实现真实提权**。主 Agent

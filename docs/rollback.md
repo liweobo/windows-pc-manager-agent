@@ -1,5 +1,21 @@
 # Rollback design
 
+## Stage 4X2 service Start/Stop recovery
+
+Stage 4X2 service lifecycle changes declare `MANUAL`, not `FULL`. A verified Start can usually be reversed
+by a newly planned Stop and a verified Stop by a newly planned Start, but service state, dependencies,
+configuration, software installation and system policy may change in between. Therefore no old request,
+confirmation or Broker session is reusable and the Agent never automatically sends an opposite control.
+
+To reverse an operation, refresh the service list and create a completely new Stage 4C1/4X2 action. Read
+the new risk/dependency Preview, approve both new confirmations and accept a new UAC prompt. If the service
+is missing, protected, reconfigured or unsafe, stop and diagnose manually. A UAC cancellation, IPC failure,
+timeout or application crash is not proof that SCM did nothing; inspect current service state and audit
+history before deciding what to do.
+
+Code rollback uses `git revert <stage4x2-commit>`. Reverting code cannot undo a service state transition
+that already occurred; evaluate the current service independently first.
+
 ## Stage 4X1 Mock protocol
 
 Stage 4X1 has no real machine or user-data side effect, so it creates no Windows rollback record. The
@@ -8,8 +24,8 @@ transaction is deliberately **not retryable**: once consumption starts, both con
 request remain consumed even when final revalidation, fake execution, verification or audit fails.
 
 Application restart marks active protocol transactions `INTERRUPTED`; it does not resume or redispatch.
-This is transaction recovery, not system Undo. A future real Broker must define truthful recovery per
-action before any action is added to a production allow-list.
+This is transaction recovery, not system Undo. Stage 4X2 defines MANUAL recovery for its separate real
+Start/Stop route; every future real action must define truthful recovery before entering an allow-list.
 
 ## Stage 4D4 residual-cleanup recovery
 

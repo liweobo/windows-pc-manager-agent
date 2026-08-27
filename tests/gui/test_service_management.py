@@ -4,12 +4,26 @@ from pathlib import Path
 
 import pytest
 from pytestqt.qtbot import QtBot
+from tests.fixtures.privileged_actions import build_privileged_test_stack
 from tests.stage4c1_support import FakeServicePlatform, service_observation
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, ServiceActionServices
 from pc_manager_agent.audit.service_actions import ServiceActionAuditLogger
 from pc_manager_agent.confirmation.service_actions import ServiceActionConfirmationService
-from pc_manager_agent.domain.service_actions import ServiceActionType, ServiceState
+from pc_manager_agent.domain.elevated_broker import BrokerFailureCode
+from pc_manager_agent.domain.privileged_actions import PrivilegedExecutionMode
+from pc_manager_agent.domain.service_actions import (
+    ServiceActionType,
+    ServicePermissionEvidence,
+    ServiceState,
+)
+from pc_manager_agent.orchestration.elevated_service_actions import (
+    ElevatedDispatchOutcome,
+    ElevatedDispatchStatus,
+)
+from pc_manager_agent.orchestration.elevated_service_preparation import (
+    ElevatedServicePreparationService,
+)
 from pc_manager_agent.orchestration.service_action_planner import ServiceActionPlanCompiler
 from pc_manager_agent.orchestration.service_actions import ServiceActionService
 from pc_manager_agent.orchestration.service_dependency_analyzer import ServiceDependencyAnalyzer
@@ -162,3 +176,86 @@ def test_service_dialog_defaults_cancel_and_requires_two_confirmations(
     qtbot.waitUntil(lambda: dialog._stage == "COMPLETED", timeout=10_000)
     assert platform.observation.state is ServiceState.STOPPED
     assert "MANUAL" in dialog._risk.text()
+
+
+@pytest.mark.gui
+def test_stage4x2_dialog_requires_new_confirmations_and_uac_cancel_does_not_retry(
+    qtbot: QtBot,
+    runtime: ApplicationRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binary = tmp_path / "stage4x2-demo.exe"
+    binary.touch()
+    platform = FakeServicePlatform(
+        service_observation(binary),
+        permissions=ServicePermissionEvidence(
+            can_query=True,
+            can_start=False,
+            can_stop=False,
+            can_enumerate_dependents=True,
+            process_elevated=False,
+        ),
+    )
+    source = _replace_services(monkeypatch, runtime, platform, tmp_path)
+    runtime.settings = runtime.settings.model_copy(update={"privileged_broker_mode": "windows"})
+    stack = build_privileged_test_stack(
+        tmp_path / "stage4x2-gui.db",
+        execution_mode=PrivilegedExecutionMode.WINDOWS_ELEVATED,
+    )
+
+    class CancelledCoordinator:
+        calls = 0
+
+        def dispatch(self, envelope: object) -> ElevatedDispatchOutcome:
+            del envelope
+            self.calls += 1
+            return ElevatedDispatchOutcome(
+                ElevatedDispatchStatus.ELEVATION_CANCELLED,
+                None,
+                BrokerFailureCode.ELEVATION_CANCELLED,
+                "Synthetic UAC cancellation; no Windows operation occurred",
+            )
+
+    coordinator = CancelledCoordinator()
+    elevated = ElevatedServicePreparationService(
+        stack.service,
+        coordinator,  # type: ignore[arg-type]
+        platform,
+        ServiceSafetyPolicy(
+            current_username=r"DESKTOP\alice",
+            agent_root=tmp_path / "agent",
+            windows_directory=tmp_path / "Windows",
+        ),
+        ServiceDependencyAnalyzer(),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "create_elevated_service_preparation_service",
+        lambda value: elevated if value is source else None,
+    )
+    dialog = ServiceActionDialog(
+        runtime,
+        ServiceActionType.STOP,
+        service_name="UserDemoSvc",
+        display_name="User Demo Service",
+    )
+    qtbot.addWidget(dialog)
+    try:
+        qtbot.waitUntil(lambda: dialog._stage == "ELEVATED_PLAN_CONFIRMATION", timeout=10_000)
+        assert "R3" in dialog._risk.text()
+        assert coordinator.calls == 0
+        assert platform.observation.state is ServiceState.RUNNING
+
+        dialog._primary.click()
+        qtbot.waitUntil(lambda: dialog._stage == "ELEVATED_RUNTIME_CONFIRMATION", timeout=10_000)
+        assert "管理员权限" in dialog._primary.text()
+        assert coordinator.calls == 0
+
+        dialog._primary.click()
+        qtbot.waitUntil(lambda: dialog._stage == "FAILED", timeout=10_000)
+        assert coordinator.calls == 1
+        assert platform.observation.state is ServiceState.RUNNING
+        assert "不会自动重试" in dialog._risk.text()
+    finally:
+        stack.close()

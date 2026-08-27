@@ -155,12 +155,20 @@ remain absent.
   validation, fake execution, verification, audit and crash interruption.
 - Default remains disabled. No UAC, real elevation, admin process or Windows privileged write exists.
 
-## Stage 4X2+ — Real privileged Broker (not started)
+## Stage 4X2 — one-shot elevated service Broker (implementation complete; production signing pending)
 
-- Separately design IPC ACLs, caller/process/session authentication, signed Broker identity, key
-  establishment, UAC lifecycle, install/update trust and anti-downgrade.
-- Implement and review one real action adapter at a time; never add a generic command channel.
-- Preserve the Stage 4X1 canonical schema, replay, confirmation, audit and Fresh validation guarantees.
+- Added a separate frozen Broker, explicit one-shot UAC launcher, fixed current-user named-pipe ACL,
+  OS-derived caller/Broker identity, bounded authenticated handshake, replay protection and durable audit.
+- Added only exact Stage 4C1-safe `SERVICE_START` and `SERVICE_STOP`, with Broker-side Fresh/TOCTOU checks,
+  one SCM dispatch, Broker readback and independent Main readback. No Restart or generic action channel.
+- Added development hash-pinned packaging and no-UAC automated tests. Production remains `NOT_READY` until
+  a release certificate, pinned signer identity, trusted installer location and signed update workflow exist.
+
+## Stage 4X3+ — additional privileged actions (not started)
+
+Any startup, service-configuration, installer, registry or other R3 adapter needs its own narrow stage,
+threat model, production signing/deployment proof, Preview, confirmation, recovery semantics and disposable
+Windows tests. Stage 4X2 authority must never be generalized or reused.
 
 ## Stage 4C3+ / other controlled system operations (not started)
 

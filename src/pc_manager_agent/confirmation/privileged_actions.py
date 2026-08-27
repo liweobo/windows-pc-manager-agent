@@ -310,7 +310,6 @@ class PrivilegedActionConfirmationService:
             or preview.action_type is not plan.action_type
             or preview.target_identity_hash != plan.target_identity_hash
             or preview.risk_level is not plan.risk_level
-            or not preview.mock_only
             or resolution.status is not PrivilegeResolutionStatus.REQUIRED
             or resolution.requirement is not PrivilegeRequirement.ELEVATED_ADMIN_REQUIRED
             or not resolution.safety_allowed

@@ -1,4 +1,4 @@
-"""Privacy-minimized audit events for the Stage 4X1 privileged protocol."""
+"""Privacy-minimized authorization audit shared by Stage 4X1 and Stage 4X2."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from pc_manager_agent.domain.privileged_actions import (
     BrokerDecision,
     PrivilegedActionEnvelope,
     PrivilegedActionResult,
+    PrivilegedExecutionMode,
 )
 from pc_manager_agent.persistence.privileged_actions import nonce_fingerprint
 
@@ -30,17 +31,28 @@ class PrivilegedActionAuditLogger:
         self._app_version = app_version
         self._git_commit = git_commit
 
-    def authorized(self, envelope: PrivilegedActionEnvelope) -> UUID:
+    def authorized(
+        self,
+        envelope: PrivilegedActionEnvelope,
+        execution_mode: PrivilegedExecutionMode = PrivilegedExecutionMode.MOCK,
+    ) -> UUID:
         """Record signed request creation after both confirmations are approved."""
         request = envelope.request
         event = AuditEvent(
             event_type="MAIN_AUTHORIZATION_EVENT",
             plan_id=str(request.plan_id),
-            agent_decision="SIGNED_MOCK_ONLY_PRIVILEGED_REQUEST",
+            agent_decision=(
+                "SIGNED_MOCK_ONLY_PRIVILEGED_REQUEST"
+                if execution_mode is PrivilegedExecutionMode.MOCK
+                else "REGISTERED_WINDOWS_ELEVATED_PRIVILEGED_REQUEST"
+            ),
             risk_level=request.risk_level,
             confirmation_required=True,
             confirmation_result="APPROVED_NOT_CONSUMED",
-            parameters=self._safe_parameters(envelope),
+            parameters={
+                **self._safe_parameters(envelope),
+                "execution_mode": execution_mode.value,
+            },
             app_version=self._app_version,
             git_commit=self._git_commit,
         )

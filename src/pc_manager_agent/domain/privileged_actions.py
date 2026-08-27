@@ -1,4 +1,4 @@
-"""Strict provider-neutral contracts for the Stage 4X1 privileged protocol."""
+"""Strict provider-neutral contracts shared by Stage 4X1 and Stage 4X2."""
 
 from __future__ import annotations
 
@@ -26,10 +26,18 @@ Sha256Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class PrivilegedBrokerMode(StrEnum):
-    """Runtime modes available before a real elevated broker exists."""
+    """Explicit privileged runtime modes; the default remains disabled."""
 
     DISABLED = "disabled"
     MOCK = "mock"
+    WINDOWS = "windows"
+
+
+class PrivilegedExecutionMode(StrEnum):
+    """Whether a Preview authorizes synthetic validation or the Windows Broker."""
+
+    MOCK = "MOCK"
+    WINDOWS_ELEVATED = "WINDOWS_ELEVATED"
 
 
 class PrivilegedActionType(StrEnum):
@@ -258,7 +266,7 @@ class PrivilegedActionPlan(FrozenModel):
 
 
 class PrivilegedActionPreview(FrozenModel):
-    """Fresh Mock-only Preview shown before two durable confirmations."""
+    """Fresh execution-mode-bound Preview shown before two confirmations."""
 
     preview_id: UUID = Field(default_factory=uuid4)
     plan_id: UUID
@@ -270,7 +278,8 @@ class PrivilegedActionPreview(FrozenModel):
     risk_level: RiskLevel = RiskLevel.R3
     privilege_resolution: PrivilegeResolution
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    mock_only: Literal[True] = True
+    execution_mode: PrivilegedExecutionMode = PrivilegedExecutionMode.MOCK
+    mock_only: bool = True
     warning: str = Field(
         default=(
             "Stage 4X1 validates a Mock Broker request only; no real elevated system "
@@ -282,7 +291,7 @@ class PrivilegedActionPreview(FrozenModel):
 
     @model_validator(mode="after")
     def validate_preview(self) -> Self:
-        """Keep Preview routing, risk, and canonical time inside the Mock boundary."""
+        """Keep Preview routing, risk, and execution mode internally consistent."""
         _require_utc(self.generated_at, "Preview generation")
         if self.risk_level is not RiskLevel.R3:
             raise ValueError("Privileged Preview risk must remain R3")
@@ -293,6 +302,8 @@ class PrivilegedActionPreview(FrozenModel):
             or not self.privilege_resolution.safety_allowed
         ):
             raise ValueError("Privileged Preview requires safety-approved Administrator evidence")
+        if self.mock_only != (self.execution_mode is PrivilegedExecutionMode.MOCK):
+            raise ValueError("Preview mock flag and execution mode differ")
         return self
 
     def canonical_digest(self) -> str:
@@ -301,7 +312,7 @@ class PrivilegedActionPreview(FrozenModel):
 
 
 class PrivilegedActionRequest(FrozenModel):
-    """Short-lived single-target capability sent to the Mock Broker."""
+    """Short-lived single-target capability sent to the selected Broker boundary."""
 
     request_id: UUID = Field(default_factory=uuid4)
     protocol_version: Literal[1] = 1
@@ -367,7 +378,7 @@ class PrivilegedActionEnvelope(FrozenModel):
 
 
 class PrivilegedCallerContext(FrozenModel):
-    """Authenticated context supplied out-of-band by the future transport."""
+    """Authenticated context supplied out-of-band by the selected Broker transport."""
 
     context_id: UUID
     agent_instance_id: UUID
@@ -409,6 +420,7 @@ class BrokerDecision(StrEnum):
     """Stable Broker validation decisions, separate from execution outcome."""
 
     APPROVED_FOR_MOCK_EXECUTION = "APPROVED_FOR_MOCK_EXECUTION"
+    APPROVED_FOR_REAL_EXECUTION = "APPROVED_FOR_REAL_EXECUTION"
     REJECTED = "REJECTED"
     SCHEMA_INVALID = "SCHEMA_INVALID"
     UNSUPPORTED_PROTOCOL_VERSION = "UNSUPPORTED_PROTOCOL_VERSION"
@@ -427,6 +439,15 @@ class BrokerDecision(StrEnum):
     RISK_CHANGED = "RISK_CHANGED"
     PRECONDITION_FAILED = "PRECONDITION_FAILED"
     PERSISTENCE_UNAVAILABLE = "PERSISTENCE_UNAVAILABLE"
+    ELEVATION_CANCELLED = "ELEVATION_CANCELLED"
+    BROKER_UNTRUSTED = "BROKER_UNTRUSTED"
+    BROKER_NOT_ELEVATED = "BROKER_NOT_ELEVATED"
+    IPC_AUTHENTICATION_FAILED = "IPC_AUTHENTICATION_FAILED"
+    IPC_PROTOCOL_REJECTED = "IPC_PROTOCOL_REJECTED"
+    IPC_DISCONNECTED = "IPC_DISCONNECTED"
+    IPC_TIMED_OUT = "IPC_TIMED_OUT"
+    RESULT_AUTHENTICATION_FAILED = "RESULT_AUTHENTICATION_FAILED"
+    CLIENT_VERIFICATION_FAILED = "CLIENT_VERIFICATION_FAILED"
 
 
 class MockExecutionStatus(StrEnum):
@@ -490,7 +511,7 @@ class PrivilegedActionResult(FrozenModel):
 
 
 class PrivilegedActionResultEnvelope(FrozenModel):
-    """Versioned authenticated result returned by the Mock Broker."""
+    """Versioned authenticated result returned by the Stage 4X1 Mock Broker."""
 
     protocol_version: Literal[1] = 1
     result: PrivilegedActionResult
