@@ -109,6 +109,21 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4E1 adds exactly five isolated R0 tools: `optimization.snapshot`,
+`optimization.storage.analyze`, `optimization.cleanup_candidates.analyze`,
+`optimization.performance.analyze`, and `optimization.recommendations`. They collect bounded current state,
+read file metadata only inside exact known or Stage 1-authorized roots, classify report candidates, evaluate
+multi-factor performance evidence and generate non-executable advice. Their registry must contain no writer,
+Broker, shell, clean/fix/boost/apply route or arbitrary tool name.
+Each plan uses only the canonical dependency-complete subset and smallest useful Stage 3 collector set:
+disk-space analysis must not collect CPU/services, and performance-only analysis must not scan caches.
+
+All Stage 4E1 plans require digest-bound plan confirmation and declare zero changes, no runtime confirmation,
+no elevation and rollback NONE. Candidates, findings, recommendations, selections and reports are never
+execution authority; Stage 4E2 must start from a new Fresh scan and safety design. Browser credential/profile
+data, other-user roots, reparse targets, Windows security databases, WinSxS and Installer Cache are protected.
+Windows-managed space without reliable query evidence is unavailable, never guessed. Audit is aggregate-only.
+
 Stage 4X3 retains the one-shot authenticated Broker and adds exactly five real R3 actions:
 `SERVICE_STARTUP_TYPE_CHANGE`, `SERVICE_STARTUP_TYPE_RESTORE`, `STARTUP_MACHINE_DISABLE`,
 `STARTUP_MACHINE_RESTORE`, and `MSI_UNINSTALL_MACHINE`. Together with Stage 4X2 `SERVICE_START` and

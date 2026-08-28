@@ -1,5 +1,15 @@
 # Rollback design
 
+## Stage 4E1 recovery
+
+Stage 4E1 is R0 and performs no cleanup, tuning or configuration change, so its truthful rollback level is
+`NONE`: there is nothing to undo. Cancelling stops remaining reads and retains truthful partial results.
+No candidate, recommendation, confirmation or report can be replayed as a future cleanup operation.
+
+An explicitly exported JSON/CSV report is an ordinary user-created local file. The exporter never
+overwrites an existing target; removing that report, if desired, is a manual user action. A future Stage
+4E2 operation must perform a new scan, Preview, risk review, confirmation and define its own recovery level.
+
 ## Stage 4X3 recovery
 
 - Service startup change: `FULL` only while the current configuration exactly equals the value written by

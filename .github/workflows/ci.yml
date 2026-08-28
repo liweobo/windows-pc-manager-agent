@@ -99,6 +99,28 @@ jobs:
           --cov-fail-under=95
       - name: No permanent-delete production paths
         run: uv run pytest tests/security/test_trash_safety.py -q
+      - name: Stage 4E1 read-only optimization boundary
+        if: matrix.python-version == '3.13'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          uv run pytest tests/unit/test_system_optimization_models.py
+          tests/unit/test_system_optimization_engine.py
+          tests/unit/test_system_optimization_confirmation.py
+          tests/unit/test_system_optimization_tools.py
+          tests/unit/test_system_optimization_exporter.py
+          tests/unit/test_system_optimization_planner.py
+          tests/unit/test_optimization_evidence.py
+          tests/integration/test_system_optimization_flow.py
+          tests/security/test_stage4e1_zero_modification.py
+          tests/security/test_system_cleanup_scope.py
+          tests/security/test_system_optimization_safety_branches.py
+          tests/gui/test_system_optimization_tab.py
+          --cov=pc_manager_agent.safety.system_optimization
+          --cov=pc_manager_agent.safety.system_cleanup_scope
+          --cov=pc_manager_agent.safety.cleanup_candidate_policy
+          --cov=pc_manager_agent.confirmation.system_optimization
+          --cov-report=term-missing --cov-fail-under=95 -q
       - name: Stage 4D1 uninstall-analysis zero-execution boundary
         if: matrix.python-version == '3.13'
         run: >-

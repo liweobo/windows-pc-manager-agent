@@ -1,5 +1,32 @@
 # Windows PC Manager Agent
 
+## Stage 4E1：只读系统清理与性能优化分析
+
+Stage 4E1 新增独立的“系统优化分析”页面，但不会执行清理或调优。用户先查看并确认一个绑定摘要的
+R0 计划。工具注册表固定为五个只读能力，但每个计划只选择目标所需的最小子集：空间问题不会额外
+采集 CPU/服务，卡顿问题不会扫描缓存。应用生成证据关联建议，注册表不包含 Clean、Fix、Boost、
+Apply、回收站写入、进程/服务/启动项
+控制、卸载或 Elevated Broker。
+
+个人文件只会在 Stage 1 已授权目录内读取元数据。临时目录、已知应用/浏览器缓存、日志和崩溃转储
+只走有限位置清单，不打开文件内容，不跟随 symlink/junction/reparse point。浏览器 Cookie、密码、
+会话、历史和完整 Profile、Windows Installer Cache、WinSxS、安全数据库和其他用户目录均受保护。
+Windows Update 或 Delivery Optimization 没有可靠普通用户只读来源时会显示 `UNAVAILABLE`，不会通过
+目录大小猜测。
+
+报告分别展示实际观察空间、保守的潜在空间、受保护空间和未知空间。`CleanupCandidate`、性能发现、
+建议与报告均固定为不可执行；旧报告、勾选和候选 UUID 不能授权未来 Stage 4E2。可显式导出新的
+JSON/CSV 文件，目标使用独占创建且不会覆盖现有文件。
+
+运行：
+
+```powershell
+uv sync --all-groups
+uv run python -m pc_manager_agent
+```
+
+在“系统优化分析”页输入目标、选择可选的已授权个人目录、生成并确认只读计划，然后开始分析。
+
 ## Stage 4X3：专用管理员能力接入
 
 Stage 4X3 延续一次性 Elevated Broker，但把权限边界扩展到三个已经完成独立安全设计的业务域：

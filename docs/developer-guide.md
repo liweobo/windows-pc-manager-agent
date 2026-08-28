@@ -1,5 +1,34 @@
 # Developer guide
 
+## Stage 4E1 development
+
+Stage 4E1 production code may depend only on query interfaces, strict Pydantic evidence models, local
+policies and the isolated five-tool registry. Do not inject a Recycle Bin writer, process/service/startup
+controller, uninstaller, privileged router, generic runner or model-selected path. New cleanup sources need
+an exact scope classification, metadata-only collector, protection rule, partial-failure semantics, object/
+time limit, cancellation and tests before registration.
+
+The registry remains exactly five tools, but a plan must use the smallest canonical dependency-complete
+subset and the smallest useful `SystemCollector` set. Adding a collector to every goal is a privacy and
+performance regression; cover disk-only, slow-PC, boot and general-check routing in planner tests.
+
+Focused checks:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/unit/test_system_optimization_*.py `
+  tests/integration/test_system_optimization_flow.py `
+  tests/security/test_stage4e1_zero_modification.py `
+  tests/security/test_system_cleanup_scope.py `
+  tests/security/test_system_optimization_safety_branches.py `
+  tests/gui/test_system_optimization_tab.py -q
+uv run pytest tests/performance/test_system_optimization_limits.py -q -s
+```
+
+Safety/confirmation/scope coverage must remain at least 95%. A real Windows integration probe may read
+counters and bounded metadata but must never require elevation or call a mutation API. Update
+`docs/api-reference.md` for every new or changed public function.
+
 ## Stage 4X3 development
 
 新增管理员能力时必须同时增加独立 Payload、Schema/policy 版本、R3 manifest、Broker handler、

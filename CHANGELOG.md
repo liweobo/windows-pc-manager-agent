@@ -1,6 +1,30 @@
 # Changelog
 
-## Unreleased — Stage 4X3
+## Unreleased — Stage 4E1
+
+### Added
+
+- An isolated five-tool R0 optimization registry: snapshot, storage analysis, cleanup-candidate
+  classification, performance analysis, and recommendations.
+- Goal-scoped planning that runs only the minimal dependency-complete tool and collector subset; disk-space
+  analysis skips CPU/services, while performance analysis skips cache enumeration.
+- Metadata-only bounded analysis for known temporary/cache/log/dump locations, Windows Recycle Bin
+  aggregate size/count, and optional Stage 1 authorized personal roots.
+- Conservative candidate safety/protection/ownership/confidence models, multi-factor performance
+  findings, non-executable recommendations, aggregate-only audit, explicit exclusive-create JSON/CSV
+  export, cancellation, and a dedicated seven-view Qt dashboard.
+- Security tests proving that cleanup verbs, previous write tools and the Elevated Broker are absent
+  from the Stage 4E1 registry and that Stage 4E1 artifacts cannot become execution authority.
+
+### Security
+
+- Browser credentials/profile data, other-user data, reparse targets, Windows security databases,
+  WinSxS and Windows Installer Cache remain protected. Unsupported system-managed storage reports
+  `UNAVAILABLE` instead of estimating from directory size.
+- Every plan and report fixes system changes at zero. There is no cleanup, Recycle Bin mutation,
+  process/service/startup control, uninstall, shell, elevation, registry write, or Stage 4E2 action.
+
+## Stage 4X3
 
 ### Added
 

@@ -1,5 +1,145 @@
 # API reference
 
+## Stage 4E1 system optimization API
+
+本节覆盖 Stage 4E1 新增的每个函数、公开方法和关键内部安全辅助函数。所有带“执行”的方法只执行
+R0 查询或纯内存分析；不存在系统清理执行。
+
+### `domain.system_optimization`：严格模型
+
+| 函数 / 类型 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `OptimizationGoal` | 只允许释放空间、改善启动、诊断慢、降低后台负载、改善响应和常规检查六类目标；模型/用户不能增加任意目标。 |
+| `OptimizationToolName` | Stage 4E1 完整五工具 allow-list。枚举中没有 clean/fix/boost/apply 或写操作。 |
+| `CleanupCategory` | 将观察来源限制为 Temp、Cache、Log、Dump、Recycle Bin、Windows-managed、Residual、Large/Inactive/Duplicate 和 Unknown。 |
+| `CleanupSafetyClassification` / `ProtectionLevel` | 分别表达未来审查风险与数据保护强度；ownership 高不能覆盖 protection。 |
+| `OptimizationConfidence` / `OwnershipConfidence` | 分别表达结论可靠度与来源归属可靠度，均包含 UNKNOWN。 |
+| `OptimizationEvidence` / `CleanupReasonCode` | 有限证据与原因代码；自由文本、文件名和 LLM 断言不能成为授权证据。 |
+| `ObservationAvailability` / `ScanScopeDecision` | 表达 AVAILABLE/PARTIAL/UNAVAILABLE/SKIPPED 和 SAFE_READ/METADATA_ONLY/AUTHORIZED/PROTECTED/UNSUPPORTED。 |
+| `PerformanceCategory` / `ExpectedBenefit` | 限制性能发现和非执行建议收益用语，避免虚构精确加速比例。 |
+| `OptimizationPlan.validate_read_only_boundary()` | Pydantic after-validator；要求工具为五工具 allow-list 的唯一规范顺序子集，Snapshot 在首、Recommendation 在尾、Storage/Cleanup 依赖成对，collector 为唯一规范子集且 Storage 必含 Disk；同时要求 R0/read-only、仅计划确认、零变更、rollback NONE、不可执行以及 root ID/path 数量一致；失败抛 `ValidationError`。 |
+| `OptimizationPlan.canonical_digest()` | 对完整 JSON 计划做 UTF-8 sorted compact SHA-256，绑定确认；无 I/O。 |
+| `StorageObservation` | 保存一个根/对象的元数据汇总、availability、scope、ownership、有限 evidence 和脱敏 warning；不包含文件内容。 |
+| `CleanupCandidate.prohibit_actionable_protected_estimates()` | 拒绝 executable=true，并禁止 PROTECTED/BLOCKED/UNKNOWN 项携带潜在回收字节。 |
+| `PerformanceFinding.prohibit_execution()` | 保证性能发现只能描述 point-in-time 证据。 |
+| `OptimizationRecommendation.prohibit_execution()` | 保证建议不能携带当前阶段执行权限。 |
+| `OptimizationSnapshot` | 合并 Stage 3 `SystemSnapshot`、存储观察和 partial/skipped 来源。 |
+| `SystemOptimizationReport.enforce_report_boundary()` | 拒绝 `changes_performed` 或 `stage4e1_executable` 为 true 的报告。 |
+| `SnapshotRequest/Result` | 校验 1–8 个 allow-listed `SystemCollector`、2–10 次采样、0.1–2 秒间隔、进程/项目上限，并返回仅含所选来源的 Stage 3 系统快照。 |
+| `StorageAnalysisRequest/Result` | 校验本地解析的 root tuple、对象/时间/大文件/闲置阈值，返回观察、partial、skipped 和 truncated。 |
+| `CleanupAnalysisRequest/Result` | 把有限观察交给确定性分类器，返回不可执行候选。 |
+| `PerformanceAnalysisRequest/Result` | 接受已验证系统快照并返回确定性性能发现。 |
+| `RecommendationRequest/Result` | 接受有限 goals/candidates/findings 并返回非执行建议。 |
+
+### `safety.system_cleanup_scope` 与候选策略
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `SystemCleanupScanScopePolicy.__init__()` | 防御性规范化 known、authorized 和 protected root；相对路径或 `..` 立即拒绝。 |
+| `classify_root(path)` | 按 protected 优先、known 次之、authorized 再次的顺序返回有限 scope 决策；敏感文本先阻止。 |
+| `validate_root(path)` | 要求 exact allowed、存在目录、非 symlink/junction/reparse；返回 absolute `Path`，错误抛 `SystemCleanupScopeError`。 |
+| `validate_entry(path, root)` | 执行时重新检查 entry 仍在 exact root 内，且不敏感、不为 reparse；防止扫描到使用之间被替换。 |
+| `_normalize(path)` | 要求 absolute 且 parts 不含 `..`；调用 `Path.absolute()`，不通过 `resolve()` 跟随链接。 |
+| `_within(path, root)` | 用 `Path.relative_to` 做无字符串前缀歧义的包含检查。 |
+| `_reject_sensitive_text(path)` | 阻止 SSH、credential、Cookie、session、Login Data、Personal Vault、wallet 和 Windows config 安全数据库。 |
+| `_reject_reparse(path)` | 通过 `lstat`、`is_symlink` 和 Windows reparse attribute 拒绝链接；元数据不可用也拒绝。 |
+| `CleanupCandidatePolicy.classify(observation, inactive_days, now)` | 按 availability、系统保护、类别、证据和活动时间分类。不可用/系统管理项无 reclaim，回收站为 HIGH_IMPACT，个人大文件为 CAUTION，旧已知缓存最多为 LOW_RISK_CANDIDATE。 |
+| `_blocked(...)` | 内部构造受保护/未知候选，追加 PROTECTION_POLICY、rollback NONE、reclaim null。 |
+| `_candidate(...)` | 内部构造可报告候选；始终 `stage4e1_executable=false`，并保留真实 recovery。 |
+
+### `safety.system_optimization` 与确认
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `reject_stage4e1_execution_authority(artifact)` | 无条件抛 `OptimizationAuthorityError`；用于证明旧报告、selection 或 UUID 不能进入写流程。 |
+| `SystemOptimizationSafetyValidator.__init__()` | 注入隔离 registry 和 Stage 1 `AuthorizedPathService`；不接受通用 writer。 |
+| `review(plan)` | 检查 registry exact set、tool order、R0/read-only、confirmation/rollback/impact、每个 manifest 和 Fresh root identity；返回所有问题，不执行 I/O 工具。 |
+| `OptimizationConfirmationService.__init__(ttl_seconds, now)` | 建立可测试时钟的内存确认存储；默认五分钟。 |
+| `request(plan)` | 创建绑定 plan ID/digest、对象摘要和 expiry 的 PLAN 确认；摘要明确系统修改 0、无管理员权限。 |
+| `resolve(id, approved, plan)` | 验证存在、PENDING、未过期、ID/digest 未变；只解析一次，批准时保存短时绑定。 |
+| `require_approved(plan)` | 执行前要求当前 exact digest 的批准仍有效；缺失、变化或过期抛 `OptimizationConfirmationError`。 |
+
+### 五个注册工具与按目标最小化编排
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `_manifest(...)` | 为每个 Stage 4E1 工具创建 R0/read-only/rollback NONE/plan-confirmation-only 清单，后置条件固定系统和用户数据修改为零。 |
+| `OptimizationSnapshotTool.manifest` / `execute()` | 返回清单；`execute` 要求 `SnapshotRequest`，把已确认的 collector 子集传给 query-only `collect_system_snapshot`，错误类型输入直接 `TypeError`。 |
+| `OptimizationStorageAnalysisTool.__init__()` | 注入 query-only 平台和可选的历史证据源；即使提供证据源也不会得到任何 Stage 1/4D3 写接口。 |
+| `OptimizationStorageAnalysisTool.manifest` / `execute()` | 返回清单；把本地解析 roots 与有限阈值传给 metadata-only 平台，再合并经过 Fresh 文件身份校验的 Stage 1/4D3 只读证据；相同路径以更具体的历史分类替代一般观察。 |
+| `OptimizationCleanupCandidateTool.manifest` / `execute()` | 返回清单；逐项调用候选策略并在 cancellation 后停止未来项。 |
+| `OptimizationPerformanceTool.manifest` / `execute()` | 返回清单；取消时返回空发现，否则运行纯内存多因素引擎。 |
+| `OptimizationRecommendationTool.manifest` / `execute()` | 返回清单；取消时返回空建议，否则只使用结构化证据。 |
+| `is_optimization_request(text)` | 本地关键词分类，用于把 cleanup/performance 请求路由到只读页；只返回 bool，不生成工具。 |
+| `SystemOptimizationPlanCompiler.__init__()` | 注入授权服务与对象/时间/大小/闲置/采样默认上限。 |
+| `compile(user_goal, authorized_root_ids)` | 拒绝空目标；通过 UUID Fresh 解析 exact roots，进行有限 goal 分类并生成规范、依赖完整的最小工具与 collector 子集。 |
+| `_goals(text)` | 本地有限关键词映射；无匹配时使用 GENERAL_HEALTH_CHECK。 |
+| `_tools(goals, quick_check)` | 空间目标选择 Snapshot/Storage/Cleanup/Recommendation，性能或快速检查选择 Snapshot/Performance/Recommendation，全面检查才使用全部五工具。 |
+| `_collectors(goals, quick_check)` | 快速检查取 CPU/Memory/Disk；空间只取 Disk；卡顿取 CPU/Memory/Disk/Process；开机慢只取 Process/Startup；全面检查才取完整 Stage 3 query surface。 |
+| `PerformanceDiagnosticEngine.analyze(snapshot)` | 使用多次 CPU、内存比例+绝对量、磁盘比例+绝对量、进程采样和启动数量产生证据化发现；无阈值命中时返回 NO_CLEAR_BOTTLENECK。 |
+| `OptimizationRecommendationEngine.build(goals, candidates, findings)` | 将结构化证据映射为 review/repeat-observation 建议，绑定 evidence UUID 和 future risk；从不生成命令。 |
+| `SystemOptimizationOrchestrator.prepare()` | 编译、独立审查并审计计划；不采集系统。 |
+| `request_confirmation()` / `resolve_confirmation()` | Fresh review 后创建和解析 exact plan confirmation，并记录聚合审计。 |
+| `execute(plan, cancellation)` | Fresh review+确认后按规范顺序只调用计划中的依赖完整子集，未选择的 Storage/Cleanup/Performance 返回空结构，组装 observed/potential/protected/unknown bytes 与最终报告；不接受外部工具名参数。 |
+
+### Stage 1 / Stage 4D3 只读证据复用
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `OptimizationEvidenceSource.observations(authorized_roots, max_items, cancellation)` | Protocol：只允许返回有界 `StorageAnalysisResult`；接口中没有移动、删除、回收站或卸载方法。 |
+| `RepositoryOptimizationEvidenceSource.__init__()` | 注入 Stage 1 分析结果仓库和 Stage 4D3 残留报告仓库；只保存查询依赖，不扩大授权根。 |
+| `observations(authorized_roots, max_items, cancellation)` | 在对象上限和取消前提下读取最近的 Stage 1 候选和 Stage 4D3 报告；每项都做当前 `lstat` 文件身份、大小和时间校验，不匹配或不可访问时跳过而不猜测；仓库异常变为 partial source。 |
+| `_stage1_observation(record, roots)` | 仅接受仍位于已授权 root、File ID/device/size 未变且已确认 matches-plan 的记录；按 duplicate/large/inactive 证据映射为不可执行观察。 |
+| `_residual_observation(candidate)` | 仅接受 Stage 4D3 exact path、对象类型、File ID/device/size/mtime 均仍一致的候选；保留其 ownership、protection 和 protected classification，绝不把高 ownership 当清理授权。 |
+| `_stage1_category(record)` | duplicate-group 优先，其次 large，再次 inactive；没有这些有限证据则返回 `None`。 |
+| `_residual_category(classification)` | 仅把普通程序残留、Cache、Log、Shortcut 映射为有限类别；数据库、配置、用户数据和未知类型保持 UNKNOWN。 |
+| `_residual_safety(candidate)` | 任何非普通保护级别、PROTECT/REVIEW_MANUALLY 建议或受保护分类都返回 PROTECTED；其余仅返回 CAUTION，Stage 4E1 不产生低风险执行许可。 |
+| `AnalysisResultRepository.recent_matching_candidates(authorized_roots, limit)` | 在 SQLite 中按最近扫描读取 exact scan-root、matches-plan 的 Stage 1 元数据，按规范化路径去重并限制数量；只读，不读取文件内容。 |
+
+### Query-only 平台
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `SystemOptimizationPlatform.collect_system_snapshot(...)` | Protocol：只允许返回 bounded `SystemSnapshot`；接口不存在写方法。 |
+| `SystemOptimizationPlatform.analyze_storage(...)` | Protocol：只允许在 exact roots 内返回 metadata observations。 |
+| `WindowsSystemOptimizationPlatform.__init__()` | 要求 Windows，注入 Stage 3 query adapter，并绑定 Shell32 查询函数；不接收 writer。 |
+| `collect_system_snapshot(...)` | 只调用计划确认的 Stage 3 collector 子集，逐项记录 SUCCEEDED/PARTIAL/FAILED/CANCELLED，错误只保留类型；未选择来源保持空值而不是伪造零负载结论。 |
+| `analyze_storage(...)` | 构造 exact scope policy 和共享预算，扫描 known/authorized roots、查询回收站汇总、追加系统保护占位并返回 truthful partial/skipped。 |
+| `_known_roots()` | 从 Windows 环境确定有限 Temp/cache/log/dump leaf；不枚举任意 AppData 名称。 |
+| `_protected_roots()` | 返回 WinSxS、System32/config 和 Installer 的明确保护根。 |
+| `_scan_aggregate(...)` | 汇总 regular-file size/count/oldest/newest；权限或预算问题降为 PARTIAL。 |
+| `_scan_large_files(...)` | 在 authorized root 内按大小和修改时间生成 LARGE/INACTIVE observations；不读取内容或声明无用。 |
+| `_walk_metadata(...)` | 有界 DFS；每项 `lstat` 和 scope revalidation，跳过 reparse，响应 cancellation；只返回 regular-file Paths。 |
+| `_recycle_bin_observations()` | 使用 `SHQueryRecycleBinW` 查询系统卷 size/count；失败返回 UNAVAILABLE，不打开 `$Recycle.Bin`。 |
+| `_protected_system_observations()` | 为 Update、Delivery Optimization、Installer Cache 返回 protected/unavailable 结构化证据。 |
+| `_missing_observation()` / `_partial_observation()` | 将缺失和访问错误转成 SKIPPED/PARTIAL，而非零空间结论。 |
+| `_warnings()` / `_item_count()` / `_duration_ms()` | 从 Stage 3 返回值提取脱敏 warning、计数和 monotonic 耗时。 |
+| `_cancelled_outcome()` | 构造一个明确 CANCELLED collector outcome，不伪称成功。 |
+
+### 审计、导出、GUI 与运行时
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `SystemOptimizationAuditLogger.plan_reviewed()` | 记录脱敏 request 占位、goal、已选 tool/collector、limits/root count 和 review；不记录 root/path。 |
+| `confirmation_resolved()` | 记录 analysis authorization 和 `cleanup_authorized=false`。 |
+| `tool_completed()` | 记录 tool name、bounded=true、aggregate count 和 zero-change verification。 |
+| `report_completed()` | 记录 report ID、候选/发现/建议数量和 aggregate bytes/partial counts；不记录候选详情。 |
+| `SystemOptimizationReportExporter.export()` | 校验后 exclusive-create JSON/CSV，失败提示可能存在 incomplete file；返回 path/format/rows/size。 |
+| `_validate_target()` | 要求 absolute traversal-free local existing parent、正确扩展名和目标不存在；拒绝网络/覆盖。 |
+| `_write_json()` / `_write_csv()` | 创建 UTF-8 JSON 或 UTF-8-BOM CSV；CSV 每候选一行，均保存不可执行标志。 |
+| `_bytes_text(value)` | GUI 本地把字节转换为 B–TB；`None` 显示“不可可靠估算”。 |
+| `_OptimizationWorker.cancel()` / `run()` | 在线程池中调用 orchestrator；取消只设置 token，成功/失败通过 Qt Signal 返回。 |
+| `SystemOptimizationTab.__init__()` / `_build_ui()` | 创建独立服务、计划状态和七个只读结果视图；无清理按钮。 |
+| `_table(headers)` / `_fill(table, rows)` | 创建不可编辑可排序表格和填充本地字符串；不触发系统操作。 |
+| `_load_authorized_roots()` / `_selected_root_ids()` | 显示已存授权根并只返回勾选 UUID；不接受手输路径。 |
+| `prepare()` | 调用 orchestrator.prepare 并显示 goal-scoped tool/collector、scope/risk/limits；不采集。 |
+| `confirm()` | 展示明确 R0/zero-change QMessageBox，并解析 exact plan confirmation。 |
+| `run_analysis()` / `cancel()` | 启动后台 worker或请求 cooperative cancellation。 |
+| `_completed()` / `_failed()` / `_populate()` | 验证报告类型、恢复按钮状态并显示汇总/候选/发现/建议；错误不伪造结果。 |
+| `export_report()` | 要求用户选新文件并调用 exporter；不覆盖。 |
+| `shutdown()` / `_show_error()` | 关闭时请求取消；以用户友好对话框报告停止原因。 |
+| `ApplicationRuntime.create_system_optimization_services()` | 构造独立 registry、五工具、compiler、safety、confirmation、audit、orchestrator 和 exporter；不向该 bundle 注入写工具/Broker。 |
+
 ## Stage 4X2 Elevated Broker API
 
 本节描述真实但默认关闭的 Stage 4X2 Windows 提权边界。所有“执行”均严格限于通过 Stage 4C1

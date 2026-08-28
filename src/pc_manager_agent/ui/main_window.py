@@ -48,12 +48,14 @@ from pc_manager_agent.orchestration.software_uninstall_analysis import (
     is_software_uninstall_analysis_request,
 )
 from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnostic_request
+from pc_manager_agent.orchestration.system_optimization_planner import is_optimization_request
 from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
 from pc_manager_agent.ui.service_management_tab import ServiceManagementTab
 from pc_manager_agent.ui.startup_management_tab import StartupManagementTab
 from pc_manager_agent.ui.system_diagnostics_tab import SystemDiagnosticsTab
+from pc_manager_agent.ui.system_optimization_tab import SystemOptimizationTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
 from pc_manager_agent.ui.trash_tab import TrashTab
 from pc_manager_agent.ui.workers import ScanWorker, require_scan_report
@@ -73,7 +75,7 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
         self._last_service_reference: tuple[str, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 4D2B 受控软件卸载")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 4E1 只读系统优化分析")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -82,6 +84,7 @@ class MainWindow(QMainWindow):
         self._build_operation_tab()
         self._build_trash_tab()
         self._build_system_diagnostics_tab()
+        self._build_system_optimization_tab()
         self._build_startup_management_tab()
         self._build_service_management_tab()
         self._build_scan_tab()
@@ -98,14 +101,15 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         self._conversation = QTextBrowser()
         self._conversation.setPlainText(
-            "Agent：当前支持阶段 1 只读分析、Stage 2A 安全移动/重命名/回滚，"
-            "Stage 2B 双确认回收站、Stage 3 只读系统诊断和 Stage 4A 受控进程关闭。\n"
-            "Stage 4D1 可以分析软件卸载身份和影响，但没有任何卸载执行能力。\n"
-            "聊天不会直接执行系统操作；所有写操作都要经过真实 Preview 和明确确认。"
+            "Agent：Stage 4E1 已增加严格只读的空间、性能和优化建议分析。\n"
+            "系统优化分析不会清理、加速、修复或应用设置；结果也不授予未来写权限。\n"
+            "聊天不会直接执行系统操作；现有写操作仍要经过真实 Preview 和明确确认。"
         )
         input_row = QHBoxLayout()
         self._chat_input = QLineEdit()
-        self._chat_input.setPlaceholderText("输入文件分析、系统诊断或一个明确的软件卸载分析目标")
+        self._chat_input.setPlaceholderText(
+            "输入文件分析、系统诊断、系统优化分析或一个明确的软件卸载分析目标"
+        )
         send_button = QPushButton("发送")
         send_button.clicked.connect(self._handle_chat)
         self._chat_input.returnPressed.connect(self._handle_chat)
@@ -203,6 +207,12 @@ class MainWindow(QMainWindow):
             self._remember_process_reference
         )
         self._tabs.addTab(self._system_diagnostics_tab, "系统诊断")
+
+    def _build_system_optimization_tab(self) -> None:
+        """Attach the isolated Stage 4E1 read-only optimization dashboard."""
+        self._system_optimization_tab = SystemOptimizationTab(self._runtime)
+        self._system_optimization_tab.status_message.connect(self.statusBar().showMessage)
+        self._tabs.addTab(self._system_optimization_tab, "系统优化分析")
 
     def _build_startup_management_tab(self) -> None:
         """Attach current-user startup inventory, Preview, confirmation, and restore UI."""
@@ -310,6 +320,15 @@ class MainWindow(QMainWindow):
                 target_query,
                 display_name=display_name,
             )
+            return
+        if is_optimization_request(text):
+            self._tabs.setCurrentWidget(self._system_optimization_tab)
+            self._system_optimization_tab.goal_input.setText(text)
+            self._conversation.append(
+                "Agent：已转到 Stage 4E1 系统优化分析。这里仅生成 R0 计划、空间候选、"
+                "性能发现和建议，不提供一键清理、Boost、Fix 或 Apply。"
+            )
+            self._system_optimization_tab.prepare()
             return
         if is_process_action_request(text):
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
@@ -618,6 +637,7 @@ class MainWindow(QMainWindow):
         self._operation_tab.shutdown()
         self._trash_tab.shutdown()
         self._system_diagnostics_tab.shutdown()
+        self._system_optimization_tab.shutdown()
         self._startup_management_tab.shutdown()
         self._service_management_tab.shutdown()
         if self._worker:

@@ -27,6 +27,7 @@ from pc_manager_agent.audit.software_uninstall_analysis import (
 from pc_manager_agent.audit.software_uninstall_execution import MsiUninstallAuditLogger
 from pc_manager_agent.audit.startup_actions import StartupActionAuditLogger
 from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
+from pc_manager_agent.audit.system_optimization import SystemOptimizationAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
 from pc_manager_agent.audit.vendor_uninstall import VendorUninstallAuditLogger
 from pc_manager_agent.audit.winget_uninstall import WingetUninstallAuditLogger
@@ -62,6 +63,7 @@ from pc_manager_agent.confirmation.software_uninstall_execution import (
 from pc_manager_agent.confirmation.startup_actions import StartupActionConfirmationService
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
 from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmationService
+from pc_manager_agent.confirmation.system_optimization import OptimizationConfirmationService
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
 from pc_manager_agent.confirmation.vendor_uninstall import VendorUninstallConfirmationService
 from pc_manager_agent.confirmation.winget_uninstall import WingetUninstallConfirmationService
@@ -103,6 +105,15 @@ from pc_manager_agent.orchestration.file_operation_planner import (
 from pc_manager_agent.orchestration.file_operation_service import FileOperationService
 from pc_manager_agent.orchestration.msix_execution_preflight import MsixExecutionPreflightService
 from pc_manager_agent.orchestration.msix_uninstall_execution import MsixUninstallService
+from pc_manager_agent.orchestration.optimization_evidence import (
+    RepositoryOptimizationEvidenceSource,
+)
+from pc_manager_agent.orchestration.optimization_recommendation_engine import (
+    OptimizationRecommendationEngine,
+)
+from pc_manager_agent.orchestration.performance_diagnostic_engine import (
+    PerformanceDiagnosticEngine,
+)
 from pc_manager_agent.orchestration.privileged_actions import PrivilegedActionService
 from pc_manager_agent.orchestration.privileged_postconditions import (
     Stage4X3PostconditionVerifier,
@@ -153,6 +164,10 @@ from pc_manager_agent.orchestration.system_diagnostic_planner import DiagnosticP
 from pc_manager_agent.orchestration.system_diagnostics import (
     DiagnosticOrchestrator,
     SystemSnapshotService,
+)
+from pc_manager_agent.orchestration.system_optimization import SystemOptimizationOrchestrator
+from pc_manager_agent.orchestration.system_optimization_planner import (
+    SystemOptimizationPlanCompiler,
 )
 from pc_manager_agent.orchestration.transaction_executor import TransactionExecutor
 from pc_manager_agent.orchestration.trash_planner import TrashPlanCompiler
@@ -274,6 +289,9 @@ from pc_manager_agent.platform_support.windows.startup_management import (
 from pc_manager_agent.platform_support.windows.system_diagnostics import (
     WindowsSystemDiagnosticsPlatform,
 )
+from pc_manager_agent.platform_support.windows.system_optimization import (
+    WindowsSystemOptimizationPlatform,
+)
 from pc_manager_agent.platform_support.windows.vendor_uninstall import (
     WindowsVendorExecutablePlatform,
     WindowsVendorUninstallPlatform,
@@ -298,7 +316,11 @@ from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
 from pc_manager_agent.reporting.exporter import ReportExporter, ReportExportResult
 from pc_manager_agent.reporting.residual_exporter import ResidualReportExporter
+from pc_manager_agent.reporting.system_optimization_exporter import (
+    SystemOptimizationReportExporter,
+)
 from pc_manager_agent.rollback.manager import RollbackManager
+from pc_manager_agent.safety.cleanup_candidate_policy import CleanupCandidatePolicy
 from pc_manager_agent.safety.file_analysis_validator import FileAnalysisSafetyValidator
 from pc_manager_agent.safety.file_operation_validator import FileOperationSafetyValidator
 from pc_manager_agent.safety.machine_msi_policy import MachineMsiExecutionPolicy
@@ -348,6 +370,7 @@ from pc_manager_agent.safety.startup_policy import StartupSafetyPolicy
 from pc_manager_agent.safety.startup_preview import StartupPreviewEngine
 from pc_manager_agent.safety.startup_validator import StartupActionSafetyValidator
 from pc_manager_agent.safety.system_diagnostics import DiagnosticSafetyValidator
+from pc_manager_agent.safety.system_optimization import SystemOptimizationSafetyValidator
 from pc_manager_agent.safety.trash_policy import TrashPathPolicy
 from pc_manager_agent.safety.trash_preview import TrashPreviewEngine
 from pc_manager_agent.safety.trash_validator import TrashSafetyValidator
@@ -419,6 +442,13 @@ from pc_manager_agent.tools.system_tools.startup_actions import (
     DisableStartupTool,
     RestoreStartupTool,
 )
+from pc_manager_agent.tools.system_tools.system_optimization import (
+    OptimizationCleanupCandidateTool,
+    OptimizationPerformanceTool,
+    OptimizationRecommendationTool,
+    OptimizationSnapshotTool,
+    OptimizationStorageAnalysisTool,
+)
 from pc_manager_agent.tools.system_tools.vendor_uninstall import VendorUninstallTool
 from pc_manager_agent.tools.system_tools.winget_uninstall import WingetUninstallTool
 
@@ -468,6 +498,16 @@ class SystemDiagnosticServices:
     orchestrator: DiagnosticOrchestrator
     provider_planner: DiagnosticProviderPlanner | None
     explainer: DiagnosticExplainer | None
+
+
+@dataclass(frozen=True, slots=True)
+class SystemOptimizationServices:
+    """Isolated five-tool Stage 4E1 bundle with no write-tool or Broker dependency."""
+
+    registry: ToolRegistry
+    compiler: SystemOptimizationPlanCompiler
+    orchestrator: SystemOptimizationOrchestrator
+    exporter: SystemOptimizationReportExporter
 
 
 @dataclass(frozen=True, slots=True)
@@ -641,6 +681,9 @@ class ApplicationRuntime:
             settings.trash_runtime_confirmation_ttl_seconds,
         )
         self.diagnostic_confirmation = DiagnosticConfirmationService(
+            settings.confirmation_ttl_seconds
+        )
+        self.optimization_confirmation = OptimizationConfirmationService(
             settings.confirmation_ttl_seconds
         )
         self.process_confirmation = ProcessActionConfirmationService(
@@ -1057,6 +1100,54 @@ class ApplicationRuntime:
                 if provider is not None
                 else None
             ),
+        )
+
+    def create_system_optimization_services(self) -> SystemOptimizationServices:
+        """Build the exact Stage 4E1 R0 graph without importing any mutation adapter."""
+        platform_adapter = WindowsSystemOptimizationPlatform()
+        cleanup_policy = CleanupCandidatePolicy()
+        performance_engine = PerformanceDiagnosticEngine()
+        recommendation_engine = OptimizationRecommendationEngine()
+        registry = ToolRegistry()
+        for tool in (
+            OptimizationSnapshotTool(platform_adapter),
+            OptimizationStorageAnalysisTool(
+                platform_adapter,
+                RepositoryOptimizationEvidenceSource(
+                    self.analysis_results,
+                    self.software_residual_repository,
+                ),
+            ),
+            OptimizationCleanupCandidateTool(cleanup_policy),
+            OptimizationPerformanceTool(performance_engine),
+            OptimizationRecommendationTool(recommendation_engine),
+        ):
+            registry.register(tool)
+        compiler = SystemOptimizationPlanCompiler(
+            self.authorized_paths,
+            max_objects=self.settings.optimization_max_objects,
+            timeout_seconds=self.settings.optimization_timeout_seconds,
+            minimum_large_file_bytes=self.settings.optimization_large_file_bytes,
+            inactive_days=self.settings.optimization_inactive_days,
+            sample_count=self.settings.optimization_sample_count,
+            sample_interval_seconds=self.settings.optimization_sample_interval_seconds,
+        )
+        audit = SystemOptimizationAuditLogger(
+            self.audit,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        orchestrator = SystemOptimizationOrchestrator(
+            registry=registry,
+            compiler=compiler,
+            safety=SystemOptimizationSafetyValidator(registry, self.authorized_paths),
+            confirmation=self.optimization_confirmation,
+            audit=audit,
+        )
+        return SystemOptimizationServices(
+            registry=registry,
+            compiler=compiler,
+            orchestrator=orchestrator,
+            exporter=SystemOptimizationReportExporter(),
         )
 
     def create_software_analysis_services(self) -> SoftwareAnalysisServices:

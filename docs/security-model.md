@@ -1,5 +1,27 @@
 # Security model
 
+## Stage 4E1 zero-modification controls
+
+- The Stage 4E1 registry contains exactly five R0, read-only, rollback-NONE tools. No existing writer or
+  Broker is registered or injected.
+- Each confirmed plan is a canonical dependency-complete subset with the smallest useful collector set;
+  unrelated CPU/service/cache sources are not read merely because they exist in the registry.
+- Plans require one digest-bound plan confirmation, declare zero system changes and cannot request runtime
+  confirmation or elevation. Confirmation authorizes only current analysis.
+- `CleanupCandidate`, finding, recommendation and report validators reject executable state. A dedicated
+  authority guard rejects any Stage 4E1 report, selection or candidate ID offered to a write workflow.
+- Personal storage is readable only through current Stage 1 authorization IDs. Known cleanup locations use
+  a finite metadata-only policy. Roots are checked again at execution; traversal, network/unsupported,
+  other-user, sensitive and reparse paths fail closed.
+- Browser passwords, cookies, sessions, history and complete profiles are never read. Dumps, logs,
+  databases, configuration and user documents are not opened.
+- Windows Update, Delivery Optimization, WinSxS and Installer Cache are not estimated from raw directory
+  size. Missing reliable evidence becomes protected or unavailable.
+- Access failures are partial results, not zero size. Audit stores aggregate counts/bytes only and redacts
+  the free-form request because it may contain local paths.
+- Export is a separate user-selected report creation, uses `open("x")`, refuses network/existing targets
+  and does not grant cleanup authority.
+
 ## Stage 4X3 privileged capability controls
 
 - Real execution requires both an immutable R3 manifest and a concrete typed handler. The allowlist is

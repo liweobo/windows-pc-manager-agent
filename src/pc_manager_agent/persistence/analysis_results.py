@@ -404,6 +404,41 @@ class AnalysisResultRepository:
         except SQLAlchemyError as exc:
             raise AnalysisResultStoreError("Candidate page query failed") from exc
 
+    def recent_matching_candidates(
+        self,
+        authorized_roots: Sequence[Path],
+        *,
+        limit: int = 5_000,
+    ) -> tuple[StoredFileRecord, ...]:
+        """Return recent Stage 1 report candidates for exact currently authorized roots.
+
+        The caller must still revalidate filesystem identity. This read-only query does not
+        make a historical candidate current or executable.
+        """
+        self._require_initialized()
+        roots = tuple(str(path) for path in authorized_roots)
+        if not roots:
+            return ()
+        statement = (
+            select(FileRecordRow)
+            .where(
+                FileRecordRow.scan_root.in_(roots),
+                FileRecordRow.matches_plan.is_(True),
+            )
+            .order_by(FileRecordRow.record_id.desc())
+            .limit(max(1, min(limit, 25_000)))
+        )
+        try:
+            with self._sessions() as session:
+                rows = tuple(session.scalars(statement))
+        except SQLAlchemyError as exc:
+            raise AnalysisResultStoreError("Recent Stage 1 candidate query failed") from exc
+        deduplicated: dict[str, StoredFileRecord] = {}
+        for row in rows:
+            record = self._row_to_record(row)
+            deduplicated.setdefault(str(record.metadata.path).casefold(), record)
+        return tuple(deduplicated.values())
+
     def matching_totals(self, session_id: UUID) -> tuple[int, int]:
         """Return final candidate count and total bytes."""
         statement = select(

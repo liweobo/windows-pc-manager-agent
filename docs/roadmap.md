@@ -175,6 +175,22 @@ attempt. Automated tests use synthetic adapters only.
 Machine-wide Vendor uninstall is deliberately deferred. Production release remains blocked on trusted
 installation and pinned Authenticode release signing, plus explicit disposable-system manual tests.
 
+## Stage 4E1 — read-only system optimization analysis (complete)
+
+The application now provides an isolated R0 snapshot, bounded known-location and authorized-root metadata
+analysis, candidate safety/protection/confidence classification, multi-factor performance findings,
+non-executable recommendations, aggregate audit, cancellation, export and a seven-view dashboard. No cleanup,
+tuning, service/startup/process action, uninstall, shell, elevation or Broker call is reachable.
+
+Reliable non-elevated Windows Update, Delivery Optimization and disk-I/O detail remains intentionally
+unavailable rather than guessed. Stage 4E2 cleanup execution is not started and cannot reuse a Stage 4E1
+report or confirmation.
+
+## Stage 4E2 — controlled cleanup execution (not started)
+
+Each cleanup category will require separate Fresh revalidation, Preview, risk classification, independent
+confirmation, exact tool allow-list, verification and truthful recovery. No Stage 4E1 artifact is authority.
+
 ## Stage 4X4+ — additional privileged actions (not started)
 
 Any startup, service-configuration, installer, registry or other R3 adapter needs its own narrow stage,

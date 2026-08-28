@@ -40,6 +40,12 @@ class AppSettings(BaseModel):
     diagnostic_sample_interval_seconds: float = Field(default=1.5, ge=0.1, le=2.0)
     diagnostic_max_processes: int = Field(default=500, ge=1, le=2_000)
     diagnostic_max_items: int = Field(default=5_000, ge=1, le=20_000)
+    optimization_max_objects: int = Field(default=25_000, ge=1, le=100_000)
+    optimization_timeout_seconds: float = Field(default=60.0, gt=0, le=600.0)
+    optimization_large_file_bytes: int = Field(default=1024**3, ge=1024**2)
+    optimization_inactive_days: int = Field(default=90, ge=1, le=3_650)
+    optimization_sample_count: int = Field(default=3, ge=2, le=10)
+    optimization_sample_interval_seconds: float = Field(default=0.5, ge=0.1, le=2.0)
     process_action_max_applications: int = Field(default=5, ge=1, le=10)
     process_action_max_processes: int = Field(default=20, ge=1, le=50)
     process_graceful_timeout_seconds: float = Field(default=10.0, ge=5.0, le=30.0)
@@ -171,6 +177,18 @@ class AppSettings(BaseModel):
             ),
             "diagnostic_max_processes": os.getenv("PC_MANAGER_DIAGNOSTIC_MAX_PROCESSES", "500"),
             "diagnostic_max_items": os.getenv("PC_MANAGER_DIAGNOSTIC_MAX_ITEMS", "5000"),
+            "optimization_max_objects": os.getenv("PC_MANAGER_OPTIMIZATION_MAX_OBJECTS", "25000"),
+            "optimization_timeout_seconds": os.getenv(
+                "PC_MANAGER_OPTIMIZATION_TIMEOUT_SECONDS", "60"
+            ),
+            "optimization_large_file_bytes": os.getenv(
+                "PC_MANAGER_OPTIMIZATION_LARGE_FILE_BYTES", str(1024**3)
+            ),
+            "optimization_inactive_days": os.getenv("PC_MANAGER_OPTIMIZATION_INACTIVE_DAYS", "90"),
+            "optimization_sample_count": os.getenv("PC_MANAGER_OPTIMIZATION_SAMPLE_COUNT", "3"),
+            "optimization_sample_interval_seconds": os.getenv(
+                "PC_MANAGER_OPTIMIZATION_SAMPLE_INTERVAL_SECONDS", "0.5"
+            ),
             "process_action_max_applications": os.getenv(
                 "PC_MANAGER_PROCESS_ACTION_MAX_APPLICATIONS", "5"
             ),

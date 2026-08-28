@@ -1,5 +1,37 @@
 # Architecture
 
+## Stage 4E1 read-only optimization analysis
+
+Stage 4E1 uses an isolated `ToolRegistry` containing exactly five R0 tools:
+
+```text
+local goal + Stage 1 authorized-root IDs
+  -> deterministic OptimizationPlan
+  -> independent registry/scope/risk review
+  -> digest-bound plan confirmation
+  -> optimization.snapshot
+  -> [storage goal] optimization.storage.analyze -> optimization.cleanup_candidates.analyze
+  -> [performance goal] optimization.performance.analyze
+  -> optimization.recommendations
+  -> aggregate-only audit + non-authoritative report
+```
+
+`SystemOptimizationPlatform` is query-only: it exposes system snapshot and storage metadata methods but
+no mutation method. The Windows implementation composes Stage 3 query APIs, documented
+`SHQueryRecycleBinW` totals and a bounded `pathlib` metadata walker. Personal roots are resolved from
+opaque Stage 1 authorization IDs; known system roots use a separate finite scope policy. Every entry is
+revalidated with `lstat`; reparse targets and protected roots are not followed.
+
+The plan is a canonical subset of the five-tool registry and binds a minimal `SystemCollector` tuple.
+Disk-space questions collect disk plus storage evidence without CPU/services; slow-PC questions collect
+CPU/memory/disk/process evidence without storage walking; boot questions collect process/startup evidence.
+Only a general check uses the full query surface.
+
+Raw storage observations are separated from candidate policy, performance rules and recommendations.
+This prevents a file name or model explanation from becoming safety evidence. The GUI calls only the
+orchestrator on a worker thread. Reports remain in memory until an explicit exclusive-create export and
+cannot be passed to any write guard. Stage 4E2 has no implementation or authority edge.
+
 ## Stage 4X3 dedicated privileged integration boundary
 
 Stage 4X3 adds no generic administrator interface. A standard-user business workflow first resolves an

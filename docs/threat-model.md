@@ -1,5 +1,19 @@
 # Threat model
 
+## Stage 4E1 threats and mitigations
+
+| Threat | Mitigation | Residual risk |
+|---|---|---|
+| A prompt asks for one-click cleanup | Finite five-tool R0 registry; no clean/fix/boost/apply or existing writer | A future stage needs a new threat model and authority path |
+| Old report or selected UUID is replayed | All artifacts are non-executable and the authority guard always rejects them | Users may manually act outside the Agent |
+| Filename/document prompt injection expands scope | File contents are never read; names are untrusted display data; roots derive locally from authorization IDs/allowlists | A malicious name may still be visible locally in the report |
+| Junction or symlink reaches credentials/another user | `lstat` entry revalidation, reparse rejection and exact-root containment | Concurrent external replacement yields partial/failed analysis |
+| Browser cache scan reaches passwords/cookies/sessions | Only exact cache leaf allowlists; sensitive component denylist; no profile-content scan | Non-default profiles can be omitted and reported as incomplete |
+| System-managed storage is overestimated | Update/DO/WinSxS/Installer Cache return protected or unavailable without reliable API evidence | Windows may provide less detail to a standard user |
+| Momentary CPU/process load is called a root cause | Multiple samples, multi-factor thresholds, explicit limitations and confidence | Short sampling cannot diagnose intermittent workload |
+| Audit leaks paths or file lists | Aggregate counts/bytes only; free-form Stage 4E1 request is redacted | Explicit user report export intentionally contains local report data |
+| Analysis silently modifies state | Query-only interface, isolated registry, zero-modification tests and no Broker/shell imports | OS counter access can update unrelated system telemetry outside Agent control |
+
 ## Stage 4X3 threats and mitigations
 
 | Threat | Mitigation | Residual risk |
