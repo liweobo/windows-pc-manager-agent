@@ -121,6 +121,14 @@ jobs:
           --cov=pc_manager_agent.safety.cleanup_candidate_policy
           --cov=pc_manager_agent.confirmation.system_optimization
           --cov-report=term-missing --cov-fail-under=95 -q
+      - name: Stage 4E2 synthetic controlled-cleanup boundary
+        if: matrix.python-version == '3.13'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          uv run pytest tests/integration/test_system_cleanup_workflow.py
+          tests/security/test_stage4e2_cleanup_security.py
+          tests/gui/test_system_cleanup_dialog.py -q
       - name: Stage 4D1 uninstall-analysis zero-execution boundary
         if: matrix.python-version == '3.13'
         run: >-
@@ -465,6 +473,9 @@ jobs:
       - name: 5,001-object selected-only Fresh residual benchmark
         if: matrix.python-version == '3.13'
         run: uv run pytest tests/performance/test_residual_cleanup_performance.py -q -s
+      - name: Stage 4E2 Fresh-discovery hard-limit benchmark
+        if: matrix.python-version == '3.13'
+        run: uv run pytest tests/performance/test_system_cleanup_limits.py -q -s
       - name: Python security scan
         run: uv run bandit -q -r src
       - name: Dependency vulnerability scan

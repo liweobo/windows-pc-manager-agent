@@ -25,9 +25,14 @@ from PySide6.QtWidgets import (
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, SystemOptimizationServices
 from pc_manager_agent.confirmation.models import ConfirmationRequest
+from pc_manager_agent.domain.system_cleanup_execution import SystemCleanupRequest
 from pc_manager_agent.domain.system_optimization import OptimizationPlan, SystemOptimizationReport
 from pc_manager_agent.reporting.exporter import ReportFormat
 from pc_manager_agent.tools.manifest import CancellationToken
+from pc_manager_agent.ui.system_cleanup_dialog import (
+    RecycleBinEmptyDialog,
+    SystemCleanupDialog,
+)
 
 
 def _bytes_text(value: int | None) -> str:
@@ -72,7 +77,7 @@ class _OptimizationWorker(QRunnable):
 
 
 class SystemOptimizationTab(QWidget):
-    """Present plan confirmation and reports without exposing an execution control."""
+    """Present Stage 4E1 reports and open separate controlled Stage 4E2 workflows."""
 
     status_message = Signal(str)
 
@@ -90,8 +95,8 @@ class SystemOptimizationTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "Stage 4E1 只读分析：不会清理文件、清空回收站、终止进程、修改启动项/服务，"
-            "也不会请求管理员权限。"
+            "Stage 4E1 先进行只读分析。Stage 4E2 只能对重新验证且再次勾选的对象执行"
+            "回收站移动；清空回收站使用独立的不可逆双重确认。两者都不请求管理员权限。"
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -122,21 +127,28 @@ class SystemOptimizationTab(QWidget):
         self.run_button = QPushButton("开始只读分析")
         self.cancel_button = QPushButton("取消")
         self.export_button = QPushButton("导出报告")
+        self.cleanup_button = QPushButton("对勾选候选进行 Fresh 安全评估")
+        self.empty_bin_button = QPushButton("独立检查并清空回收站")
         for button in (
             self.confirm_button,
             self.run_button,
             self.cancel_button,
             self.export_button,
+            self.cleanup_button,
+            self.empty_bin_button,
         ):
             actions.addWidget(button)
         self.confirm_button.clicked.connect(self.confirm)
         self.run_button.clicked.connect(self.run_analysis)
         self.cancel_button.clicked.connect(self.cancel)
         self.export_button.clicked.connect(self.export_report)
+        self.cleanup_button.clicked.connect(self.open_controlled_cleanup)
+        self.empty_bin_button.clicked.connect(self.open_recycle_bin_empty)
         self.confirm_button.setEnabled(False)
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(False)
         self.export_button.setEnabled(False)
+        self.cleanup_button.setEnabled(False)
         layout.addLayout(actions)
 
         self.progress = QProgressBar()
@@ -148,7 +160,17 @@ class SystemOptimizationTab(QWidget):
         self.overview_table = self._table(("项目", "结果"))
         self.storage_table = self._table(("来源", "类别", "已观察大小", "项目数", "状态"))
         self.candidate_table = self._table(
-            ("类别", "来源", "已观察", "潜在空间", "安全分类", "保护", "置信度", "路径")
+            (
+                "选择",
+                "类别",
+                "来源",
+                "已观察",
+                "潜在空间",
+                "安全分类",
+                "保护",
+                "置信度",
+                "路径",
+            )
         )
         self.startup_table = self._table(("名称", "来源", "范围", "启用"))
         self.process_table = self._table(("PID", "名称", "CPU %", "内存 %", "状态"))
@@ -210,6 +232,7 @@ class SystemOptimizationTab(QWidget):
         self._report = None
         self.run_button.setEnabled(False)
         self.export_button.setEnabled(False)
+        self.cleanup_button.setEnabled(False)
         self.confirm_button.setEnabled(review.approved)
         issue_text = "无" if review.approved else "；".join(item.message for item in review.issues)
         self.plan_view.setPlainText(
@@ -287,6 +310,7 @@ class SystemOptimizationTab(QWidget):
         self._report = value
         self.export_button.setEnabled(True)
         self._populate(value)
+        self.cleanup_button.setEnabled(bool(value.cleanup_candidates))
         self.status_message.emit("Stage 4E1 只读分析完成；系统和用户数据修改数量为 0")
 
     @Slot(str)
@@ -325,22 +349,7 @@ class SystemOptimizationTab(QWidget):
                 for item in report.snapshot.storage_observations
             ),
         )
-        self._fill(
-            self.candidate_table,
-            tuple(
-                (
-                    item.category.value,
-                    item.source,
-                    _bytes_text(item.observed_size_bytes),
-                    _bytes_text(item.potential_reclaim_bytes),
-                    item.safety_classification.value,
-                    item.protection_level.value,
-                    item.confidence.value,
-                    str(item.path) if item.path else "不提供对象路径",
-                )
-                for item in report.cleanup_candidates
-            ),
-        )
+        self._populate_candidates(report)
         self._fill(
             self.startup_table,
             tuple(
@@ -413,6 +422,69 @@ class SystemOptimizationTab(QWidget):
             self._show_error(f"报告未导出：{exc}")
             return
         self.status_message.emit(f"报告已创建：{result.path}；不会覆盖已有文件")
+
+    def _populate_candidates(self, report: SystemOptimizationReport) -> None:
+        """Display intent-only candidate checkboxes, all unchecked by default."""
+        self.candidate_table.setSortingEnabled(False)
+        self.candidate_table.setRowCount(len(report.cleanup_candidates))
+        for row, candidate in enumerate(report.cleanup_candidates):
+            selector = QTableWidgetItem()
+            selector.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            selector.setCheckState(Qt.CheckState.Unchecked)
+            selector.setData(Qt.ItemDataRole.UserRole, str(candidate.candidate_id))
+            selector.setToolTip("这只是 Stage 4E1 意向选择；不会直接授权清理")
+            self.candidate_table.setItem(row, 0, selector)
+            values = (
+                candidate.category.value,
+                candidate.source,
+                _bytes_text(candidate.observed_size_bytes),
+                _bytes_text(candidate.potential_reclaim_bytes),
+                candidate.safety_classification.value,
+                candidate.protection_level.value,
+                candidate.confidence.value,
+                str(candidate.path) if candidate.path else "不提供对象路径",
+            )
+            for column, text in enumerate(values, start=1):
+                self.candidate_table.setItem(row, column, QTableWidgetItem(text))
+        self.candidate_table.setSortingEnabled(True)
+        self.candidate_table.resizeColumnsToContents()
+
+    def _selected_candidate_ids(self) -> tuple[UUID, ...]:
+        selected: list[UUID] = []
+        for row in range(self.candidate_table.rowCount()):
+            item = self.candidate_table.item(row, 0)
+            if item is not None and item.checkState() is Qt.CheckState.Checked:
+                selected.append(UUID(str(item.data(Qt.ItemDataRole.UserRole))))
+        return tuple(selected)
+
+    @Slot()
+    def open_controlled_cleanup(self) -> None:
+        """Open a new Fresh workflow; the report selection is intent only."""
+        if self._report is None:
+            return
+        selected = self._selected_candidate_ids()
+        if not selected:
+            self._show_error("请先勾选至少一个报告候选；默认不会选择任何对象。")
+            return
+        dialog = SystemCleanupDialog(
+            self._runtime,
+            SystemCleanupRequest(
+                source_report_id=self._report.report_id,
+                selected_candidate_ids=selected,
+            ),
+            self,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+        self.status_message.emit("已开始独立 Fresh 安全评估；旧报告没有执行权限")
+
+    @Slot()
+    def open_recycle_bin_empty(self) -> None:
+        """Open the independent R2_HIGH_IMPACT exact-volume workflow."""
+        dialog = RecycleBinEmptyDialog(self._runtime, self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+        self.status_message.emit("正在独立检查回收站；尚未授权清空")
 
     def shutdown(self) -> None:
         """Cancel pending reads during controlled application shutdown."""

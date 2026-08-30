@@ -1,6 +1,36 @@
 # Changelog
 
-## Unreleased — Stage 4E1
+## Unreleased — Stage 4E2
+
+### Added
+
+- Session-local, expiring Stage 4E1 report intent store plus a new Fresh item discovery pipeline that
+  revalidates exact identity, bounded material tree, classification, protection, activity and Recycle Bin
+  capability before any executable plan exists.
+- Four isolated Stage 4E2 tools: R0 `optimization.cleanup.prepare`, controlled
+  `optimization.cleanup.trash`, R0 `optimization.recycle_bin.inspect`, and independently irreversible
+  `optimization.recycle_bin.empty`.
+- Durable SQLite transactions, per-item state, digest-bound plan/runtime confirmations, atomic single-use
+  write authority, restart interruption, aggregate-only audit, MANUAL recovery records and separate NONE
+  irreversibility records.
+- Default-unchecked Fresh selection UI, R2/R2_HIGH_IMPACT Preview, fail-stop sequential execution,
+  cooperative cancellation, exact result verification, and a separate Recycle Bin empty dialog.
+- Synthetic unit/integration/security/GUI/performance coverage; tests never empty the host Recycle Bin.
+
+### Security
+
+- Direct V1 scope is limited to exact children of current-user Temp, DirectX shader cache and current-user
+  crash dumps. Recent, locked, protected, sensitive, reparse, network, other-user, shared or ambiguous
+  objects fail closed.
+- Stage 1 personal-file evidence routes to Stage 2B and Stage 4D3 residual evidence routes to Stage 4D4;
+  neither report is reused as Stage 4E2 write authority. Mixed selected batches are blocked.
+- There is no permanent-delete, raw-path, force, shell, Broker, elevation, process/service control,
+  registry cleanup or automatic resume/fallback path. Moving to the Recycle Bin does not claim reclaimed
+  disk space.
+- Recycle Bin emptying is exact-system-volume, separately twice-confirmed, R2_HIGH_IMPACT and recovery
+  NONE. Any inventory change invalidates the action; one Shell call is followed by independent inspection.
+
+## Stage 4E1
 
 ### Added
 

@@ -1,5 +1,32 @@
 # Security model
 
+## Stage 4E2 controlled-cleanup controls
+
+- Old Stage 4E1 plans, confirmations, reports, candidate IDs and selections grant no mutation authority.
+  Reports live only in a bounded session TTL store; restart/clear forces a new R0 analysis.
+- Direct sources are a finite current-user known-root map. Only exact children are considered; roots,
+  siblings, parent widening, free-form paths, Stage 1 personal files and Stage 4D3 residuals cannot enter
+  the direct writer.
+- Fresh checks independently bind file identity, complete bounded material digest, deterministic category,
+  protection signals, recent metadata, ordinary delete access, active installer status and exact-volume
+  Recycle Bin capability. Any missing or changed evidence blocks regardless of confirmation.
+- The GUI defaults every Fresh item to unchecked and has no Select All. Only ELIGIBLE rows can be selected;
+  mixed eligible/blocked selections fail as one batch in the deterministic builder.
+- R2/R2_HIGH_IMPACT plans require durable plan and runtime confirmations. Both bind plan/Preview/item-set,
+  identity/material/classification/protection/eligibility/adapter/recovery/risk/count digests, expire and
+  are consumed once atomically before mutation.
+- The item writer accepts references only. The guard resolves SQLite state and reserves exactly one call;
+  final identity/tree TOCTOU checks precede the shared Recycle Bin primitive. Failure stops later items.
+- Ordinary cleanup never claims permanent deletion or freed disk space. Verified results mean the original
+  identity disappeared and Shell evidence identifies a Recycle Bin item; recovery is truthful MANUAL.
+- Recycle Bin emptying has a separate exact-volume plan, Preview and confirmations, always
+  R2_HIGH_IMPACT/recovery NONE. Aggregate and namespace inventories must remain identical. No null/all-drive
+  call, fallback, retry or recovery record exists.
+- Main remains a standard-user process. No Broker, UAC, PowerShell/CMD, generic executable, registry write,
+  process/service control, unlock, uninstall or permanent-delete API is reachable.
+- Audit stores IDs, digests, categories, counts, bytes, result and recovery truth. Paths are hashed and file
+  contents/names are excluded. Untrusted filenames are local display only.
+
 ## Stage 4E1 zero-modification controls
 
 - The Stage 4E1 registry contains exactly five R0, read-only, rollback-NONE tools. No existing writer or

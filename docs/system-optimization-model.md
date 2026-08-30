@@ -1,4 +1,25 @@
-# Stage 4E1 system optimization model
+# Stage 4E1 analysis and Stage 4E2 controlled-cleanup model
+
+## Stage 4E2 authority hand-off
+
+Stage 4E1 output remains evidence only. `CleanupSourceReference` records one of `KNOWN_LOCATION`,
+`STAGE1_REPORT` or `STAGE4D3_REPORT` so Stage 4E2 can deterministically choose Fresh direct analysis or an
+existing safe hand-off. The source reference never contains a path command and never grants write access.
+
+`SystemCleanupRequest` carries only a session-local report UUID and explicit candidate UUIDs. A Fresh
+assessment discovers exact children and emits `CleanupExecutionCandidate` rows containing separate
+identity, material, path-safety, activity, protection, eligibility, adapter and recoverability evidence.
+Only `ELIGIBLE + RECYCLE_BIN_ITEM + MANUAL` can enter a `CleanupExecutionPlan`; blocked/deferred rows remain
+visible and mixed selected batches fail as a whole.
+
+The plan and runtime Preview bind all item digests, totals and R2/R2_HIGH_IMPACT classification. Durable
+confirmations are non-interchangeable by scope and tier, expire and are atomically consumed. The write
+request contains only durable UUID references. Result models deliberately separate bytes moved out of the
+original location from verified reclaimed disk bytes, which remain `None` while objects stay in the Bin.
+
+`RecycleBinEmptyPlan` and `RecycleBinEmptyPreview` use a different transaction kind, action, confirmation
+scope and recovery value. A complete non-empty exact-volume snapshot needs count, size, oldest/newest
+deletion times and a canonical digest. The resulting irreversibility record is not an Undo record.
 
 ## Boundary
 
@@ -95,6 +116,7 @@ local directory, exclusive creation and no overwrite. The export file is not exe
 
 ## Deferred work
 
-Stage 4E2 is not implemented. Any cleanup must define a category-specific Fresh scan, Preview, risk,
-confirmation, execution adapter, postcondition and recovery model. It cannot reuse the Stage 4E1 plan,
-confirmation, report, candidate UUID or UI selection.
+Stage 4E2 V1 directly supports only the three documented current-user known locations. Browser cache,
+system Temp, Windows Update, Delivery Optimization and other Windows-managed maintenance require separate
+supported APIs and safety reviews. Permanent deletion, automatic Bin restore and generic optimization
+remain prohibited/deferred.

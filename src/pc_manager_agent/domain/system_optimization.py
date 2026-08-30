@@ -50,6 +50,7 @@ class CleanupCategory(StrEnum):
     DELIVERY_OPTIMIZATION_CACHE = "DELIVERY_OPTIMIZATION_CACHE"
     INSTALLER_CACHE_CANDIDATE = "INSTALLER_CACHE_CANDIDATE"
     PROGRAM_RESIDUAL = "PROGRAM_RESIDUAL"
+    OBSOLETE_SHORTCUT = "OBSOLETE_SHORTCUT"
     LARGE_FILE = "LARGE_FILE"
     INACTIVE_LARGE_FILE = "INACTIVE_LARGE_FILE"
     DUPLICATE_FILE = "DUPLICATE_FILE"
@@ -141,6 +142,49 @@ class ObservationAvailability(StrEnum):
     PARTIAL = "PARTIAL"
     UNAVAILABLE = "UNAVAILABLE"
     SKIPPED = "SKIPPED"
+
+
+class CleanupEvidenceOrigin(StrEnum):
+    """Local provenance retained for safe hand-off; it grants no execution authority."""
+
+    KNOWN_LOCATION = "KNOWN_LOCATION"
+    STAGE1_REPORT = "STAGE1_REPORT"
+    STAGE4D3_REPORT = "STAGE4D3_REPORT"
+
+
+class CleanupSourceReference(BaseModel):
+    """Opaque upstream references used to reopen an existing safe workflow."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    origin: CleanupEvidenceOrigin
+    upstream_report_id: UUID | None = None
+    upstream_candidate_id: UUID | None = None
+    upstream_record_id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_reference(self) -> CleanupSourceReference:
+        """Require only the identifiers meaningful for the declared source."""
+        if self.origin is CleanupEvidenceOrigin.STAGE4D3_REPORT:
+            if self.upstream_report_id is None or self.upstream_candidate_id is None:
+                raise ValueError("Stage 4D3 provenance requires report and candidate IDs")
+            if self.upstream_record_id is not None:
+                raise ValueError("Stage 4D3 provenance cannot contain a Stage 1 record ID")
+        elif self.origin is CleanupEvidenceOrigin.STAGE1_REPORT:
+            if self.upstream_record_id is None:
+                raise ValueError("Stage 1 provenance requires a record ID")
+            if self.upstream_candidate_id is not None:
+                raise ValueError("Stage 1 provenance cannot contain a residual candidate ID")
+        elif any(
+            value is not None
+            for value in (
+                self.upstream_report_id,
+                self.upstream_candidate_id,
+                self.upstream_record_id,
+            )
+        ):
+            raise ValueError("Known-location provenance cannot contain upstream IDs")
+        return self
 
 
 class ScanScopeDecision(StrEnum):
@@ -280,6 +324,7 @@ class StorageObservation(BaseModel):
     source_confidence: OptimizationConfidence | None = None
     source_reason_codes: tuple[CleanupReasonCode, ...] = ()
     warnings: tuple[str, ...] = ()
+    source_reference: CleanupSourceReference | None = None
 
 
 class CleanupCandidate(BaseModel):
@@ -302,6 +347,7 @@ class CleanupCandidate(BaseModel):
     evidence: tuple[OptimizationEvidence, ...] = Field(min_length=1)
     reason_codes: tuple[CleanupReasonCode, ...] = Field(min_length=1)
     future_admin_requirement: bool | None = None
+    source_reference: CleanupSourceReference | None = None
     stage4e1_executable: bool = False
 
     @model_validator(mode="after")

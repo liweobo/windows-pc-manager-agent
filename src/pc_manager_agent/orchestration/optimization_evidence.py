@@ -17,8 +17,10 @@ from pc_manager_agent.domain.software_residuals import (
 )
 from pc_manager_agent.domain.system_optimization import (
     CleanupCategory,
+    CleanupEvidenceOrigin,
     CleanupReasonCode,
     CleanupSafetyClassification,
+    CleanupSourceReference,
     ObservationAvailability,
     OptimizationConfidence,
     OptimizationEvidence,
@@ -179,6 +181,10 @@ class RepositoryOptimizationEvidenceSource:
             source_protection_level=ProtectionLevel.CAUTION,
             source_confidence=OptimizationConfidence.HIGH,
             source_reason_codes=(reason,),
+            source_reference=CleanupSourceReference(
+                origin=CleanupEvidenceOrigin.STAGE1_REPORT,
+                upstream_record_id=record.record_id,
+            ),
         )
 
     @staticmethod
@@ -204,6 +210,7 @@ class RepositoryOptimizationEvidenceSource:
         confidence = OptimizationConfidence(ownership.value)
         ordinary = category in {
             CleanupCategory.PROGRAM_RESIDUAL,
+            CleanupCategory.OBSOLETE_SHORTCUT,
             CleanupCategory.APPLICATION_CACHE,
             CleanupCategory.LOG,
             CleanupCategory.USER_TEMP,
@@ -238,6 +245,11 @@ class RepositoryOptimizationEvidenceSource:
             source_protection_level=protection,
             source_confidence=confidence,
             source_reason_codes=(reason,),
+            source_reference=CleanupSourceReference(
+                origin=CleanupEvidenceOrigin.STAGE4D3_REPORT,
+                upstream_report_id=candidate.report_id,
+                upstream_candidate_id=candidate.candidate_id,
+            ),
         )
 
 
@@ -256,6 +268,7 @@ def _residual_category(value: ResidualClassification) -> CleanupCategory:
         ResidualClassification.LOG: CleanupCategory.LOG,
         ResidualClassification.TEMPORARY_DATA: CleanupCategory.USER_TEMP,
         ResidualClassification.CRASH_DUMP: CleanupCategory.CRASH_DUMP,
+        ResidualClassification.SHORTCUT: CleanupCategory.OBSOLETE_SHORTCUT,
     }.get(value, CleanupCategory.UNKNOWN)
 
 

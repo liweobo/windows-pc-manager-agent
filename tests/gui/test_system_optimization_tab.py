@@ -8,7 +8,7 @@ from pc_manager_agent.domain.system_optimization import OptimizationToolName
 from pc_manager_agent.ui.system_optimization_tab import SystemOptimizationTab
 
 
-def test_dashboard_exposes_analysis_controls_but_no_cleanup_action(
+def test_dashboard_keeps_stage4e1_registry_isolated_and_stage4e2_unselected(
     qtbot: QtBot, runtime: ApplicationRuntime
 ) -> None:
     tab = SystemOptimizationTab(runtime)
@@ -16,6 +16,8 @@ def test_dashboard_exposes_analysis_controls_but_no_cleanup_action(
     labels = {button.text().casefold() for button in tab.findChildren(QPushButton)}
     assert "生成只读计划" in labels
     assert "开始只读分析" in labels
+    assert "对勾选候选进行 fresh 安全评估" in labels
+    assert "独立检查并清空回收站" in labels
     assert all(
         token not in label for label in labels for token in ("一键清理", "boost", "fix", "apply")
     )

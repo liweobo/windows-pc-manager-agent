@@ -1,5 +1,29 @@
 # Windows PC Manager Agent
 
+## Stage 4E2：受控系统清理与独立回收站清空
+
+Stage 4E2 在 Stage 4E1 只读报告之后增加一个新的安全边界。旧报告、旧候选和第一次勾选只表达
+意向：应用会重新枚举精确对象，重新验证文件身份、完整元数据树、分类、保护信号、近期活动、
+普通删除访问权、安装器活动和目标卷回收站能力。Fresh 评估结果默认全部不勾选，用户必须再次
+逐项选择；被阻止或转交其他流程的行不能混入直接清理计划。
+
+V1 直接清理只允许当前用户 Temp、DirectX Shader Cache 和当前用户 CrashDumps 三个已知根下的
+精确子对象，并且必须足够旧、无配置/数据库/用户数据等保护信号、无重解析点、未锁定且可使用
+Windows 回收站。Stage 1 个人大文件/闲置/重复候选转交 Stage 2B；Stage 4D3 软件残留转交
+Stage 4D4；浏览器缓存、系统 Temp、Windows Update、Delivery Optimization、Installer Cache、
+WinSxS 和回收站内容不进入普通批次。
+
+普通清理为 R2 或 R2_HIGH_IMPACT，要求计划确认和短时即时确认，执行前后重复 Fresh/TOCTOU
+验证。写工具只接受 SQLite 中的对象引用，不接受路径、force 或任意命令；真实操作逐项复用
+Windows Recycle Bin primitive，没有永久删除、shell、Broker、UAC、服务停止或进程终止后备
+方式。成功项恢复等级为 `MANUAL`，必须从 Windows 回收站手动还原；移入回收站只表示对象离开
+原位置，不代表磁盘空间已经释放。
+
+“清空回收站”是完全独立的 R2_HIGH_IMPACT 流程：只针对当前用户的系统盘回收站，使用
+`SHQueryRecycleBinW` 与 Shell namespace 得到完整数量、大小和删除时间范围，经过独立计划与即时
+确认后才调用一次指定卷 `SHEmptyRecycleBinW`。任何内容变化都会使确认失效。恢复等级为 `NONE`，
+Agent 无法还原清空后的对象。自动化测试全部使用合成适配器，从不清空真实回收站。
+
 ## Stage 4E1：只读系统清理与性能优化分析
 
 Stage 4E1 新增独立的“系统优化分析”页面，但不会执行清理或调优。用户先查看并确认一个绑定摘要的

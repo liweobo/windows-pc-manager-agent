@@ -183,13 +183,21 @@ non-executable recommendations, aggregate audit, cancellation, export and a seve
 tuning, service/startup/process action, uninstall, shell, elevation or Broker call is reachable.
 
 Reliable non-elevated Windows Update, Delivery Optimization and disk-I/O detail remains intentionally
-unavailable rather than guessed. Stage 4E2 cleanup execution is not started and cannot reuse a Stage 4E1
-report or confirmation.
+unavailable rather than guessed. Stage 4E2 cannot reuse a Stage 4E1 report or confirmation as authority;
+it starts from the separate Fresh workflow described below.
 
-## Stage 4E2 — controlled cleanup execution (not started)
+## Stage 4E2 — controlled cleanup execution (complete, narrow V1)
 
-Each cleanup category will require separate Fresh revalidation, Preview, risk classification, independent
-confirmation, exact tool allow-list, verification and truthful recovery. No Stage 4E1 artifact is authority.
+Implemented session-only report intent, exact known-root child rediscovery, Fresh identity/material/
+classification/protection/activity/recoverability evidence, a second default-unchecked selection,
+R2/R2_HIGH_IMPACT Preview, durable two-level confirmation, single-use reference-only execution, fail-stop
+Recycle Bin placement, verification, audit and MANUAL recovery. Recycle Bin inspection/emptying is a
+separate exact-volume R2_HIGH_IMPACT/recovery-NONE workflow.
+
+Direct V1 sources are current-user Temp, DirectX shader cache and current-user crash dumps. Stage 1 personal
+file candidates route to Stage 2B and Stage 4D3 residual candidates route to Stage 4D4. Browser/system Temp,
+Windows Update, Delivery Optimization and broader Windows-managed cleanup remain deferred. There is no
+permanent delete, shell, elevation/Broker, service/process action or automatic resume/restore.
 
 ## Stage 4X4+ — additional privileged actions (not started)
 

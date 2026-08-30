@@ -37,6 +37,7 @@ _REASON_BY_CATEGORY = {
     CleanupCategory.INACTIVE_LARGE_FILE: CleanupReasonCode.POSSIBLY_INACTIVE,
     CleanupCategory.DUPLICATE_FILE: CleanupReasonCode.VERIFIED_DUPLICATE_GROUP,
     CleanupCategory.PROGRAM_RESIDUAL: CleanupReasonCode.EXACT_UNINSTALL_CONTEXT,
+    CleanupCategory.OBSOLETE_SHORTCUT: CleanupReasonCode.EXACT_UNINSTALL_CONTEXT,
 }
 
 
@@ -87,6 +88,7 @@ class CleanupCandidatePolicy:
                 reason_codes=observation.source_reason_codes
                 or (CleanupReasonCode.EXACT_UNINSTALL_CONTEXT,),
                 future_admin_requirement=None,
+                source_reference=observation.source_reference,
             )
         if observation.category is CleanupCategory.INSTALLER_CACHE_CANDIDATE:
             return self._blocked(
@@ -134,7 +136,10 @@ class CleanupCandidatePolicy:
                 reclaim=None,
                 recoverability=RollbackLevel.MANUAL,
             )
-        if observation.category is CleanupCategory.PROGRAM_RESIDUAL:
+        if observation.category in {
+            CleanupCategory.PROGRAM_RESIDUAL,
+            CleanupCategory.OBSOLETE_SHORTCUT,
+        }:
             return self._candidate(
                 observation,
                 safety=CleanupSafetyClassification.CAUTION,
@@ -196,6 +201,7 @@ class CleanupCandidatePolicy:
             evidence=evidence,
             reason_codes=(reason,),
             future_admin_requirement=None,
+            source_reference=observation.source_reference,
         )
 
     @staticmethod
@@ -224,4 +230,5 @@ class CleanupCandidatePolicy:
             evidence=observation.evidence,
             reason_codes=(reason,),
             future_admin_requirement=False,
+            source_reference=observation.source_reference,
         )

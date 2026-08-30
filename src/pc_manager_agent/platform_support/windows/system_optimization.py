@@ -20,6 +20,8 @@ from pc_manager_agent.domain.system_diagnostics import (
 )
 from pc_manager_agent.domain.system_optimization import (
     CleanupCategory,
+    CleanupEvidenceOrigin,
+    CleanupSourceReference,
     ObservationAvailability,
     OptimizationEvidence,
     OwnershipConfidence,
@@ -314,6 +316,7 @@ class WindowsSystemOptimizationPlatform:
             ownership_confidence=OwnershipConfidence.HIGH,
             evidence=tuple(evidence),
             warnings=tuple(warnings[:20]),
+            source_reference=CleanupSourceReference(origin=CleanupEvidenceOrigin.KNOWN_LOCATION),
         )
 
     def _scan_large_files(
@@ -478,6 +481,7 @@ class WindowsSystemOptimizationPlatform:
             ownership_confidence=OwnershipConfidence.HIGH,
             evidence=(OptimizationEvidence.KNOWN_LOCATION_ALLOWLIST,),
             warnings=("Known location is not present",),
+            source_reference=CleanupSourceReference(origin=CleanupEvidenceOrigin.KNOWN_LOCATION),
         )
 
     @staticmethod
@@ -494,6 +498,7 @@ class WindowsSystemOptimizationPlatform:
                 OptimizationEvidence.ACCESS_DENIED,
             ),
             warnings=(type(exc).__name__,),
+            source_reference=CleanupSourceReference(origin=CleanupEvidenceOrigin.KNOWN_LOCATION),
         )
 
     @staticmethod

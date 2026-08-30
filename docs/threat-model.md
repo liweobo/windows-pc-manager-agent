@@ -1,5 +1,22 @@
 # Threat model
 
+## Stage 4E2 threats and mitigations
+
+| Threat | Mitigation | Residual risk |
+|---|---|---|
+| Replay an old report/selection as cleanup authority | Session-only TTL lookup followed by Fresh discovery, new plan/Preview and two new durable confirmations | User can still manipulate files outside the Agent |
+| Candidate path is replaced after scan | File identity and complete material digest are checked at assessment, runtime Preview, final batch and per-item Shell boundary | A kernel-level race after the final handle check is outside user-mode control; result becomes uncertain |
+| Junction/symlink expands scope | Component reparse checks, no-follow identity inspection, exact-root containment and tree traversal rejection | Environments without synthetic-link permission rely on mocked branch tests plus production code review |
+| Temp contains database/config/user data | Independent suffix/component/category protection signals block even under an allowed root | Novel sensitive formats may need additional protection rules |
+| Locked/recent/in-use installer data is moved | Age threshold, DELETE-access probe and global uninstall-transaction exclusion | Another process can begin using an item after final validation; Shell failure stops the batch |
+| UI silently drops blocked rows | Complete assessment retains all decisions; blocked rows cannot be checked; mixed-batch builder rejects all | User must create a new smaller selection |
+| Raw path, force flag or model tool name reaches writer | `extra=forbid` reference-only Schema, exact four-tool registry and durable write guard | A future tool addition needs a new manifest/security review |
+| Recycle operation fails then permanently deletes | Shared Recycle Bin primitive is the only adapter; source tests forbid delete APIs and there is no fallback | Some volumes may be unsupported, which safely blocks cleanup |
+| Moving to Recycle Bin is reported as reclaimed space | Result separates bytes removed from original paths from verified reclaimed bytes (`None`) | Windows may later empty the Bin outside the Agent |
+| Empty confirmation applies to changed/all-volume contents | Exact system-volume scope, complete count/size/age digest, reinspection, no null scope and one-use authority | Shell completion followed by inspection failure yields an irreversible uncertain result |
+| Crash resumes partial mutation | Active transactions become `INTERRUPTED`, approvals expire, and no redispatch path exists | User must inspect audit and Recycle Bin manually |
+| Audit leaks local names/content | Aggregate-only events and SHA-256 path digests; no content reads/model upload | Counts, timings and categories remain local security metadata |
+
 ## Stage 4E1 threats and mitigations
 
 | Threat | Mitigation | Residual risk |

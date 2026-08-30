@@ -46,6 +46,17 @@ class AppSettings(BaseModel):
     optimization_inactive_days: int = Field(default=90, ge=1, le=3_650)
     optimization_sample_count: int = Field(default=3, ge=2, le=10)
     optimization_sample_interval_seconds: float = Field(default=0.5, ge=0.1, le=2.0)
+    system_cleanup_report_ttl_seconds: int = Field(default=1_800, ge=60, le=3_600)
+    system_cleanup_max_selected: int = Field(default=20, ge=1, le=100)
+    system_cleanup_max_discovered: int = Field(default=1_000, ge=1, le=10_000)
+    system_cleanup_max_contained_objects: int = Field(default=10_000, ge=1, le=100_000)
+    system_cleanup_max_total_bytes: int = Field(default=50 * 1024**3, ge=1)
+    system_cleanup_minimum_age_days: int = Field(default=7, ge=1, le=365)
+    system_cleanup_normal_item_count: int = Field(default=5, ge=1, le=100)
+    system_cleanup_normal_object_count: int = Field(default=100, ge=1)
+    system_cleanup_normal_total_bytes: int = Field(default=1 * 1024**3, ge=1)
+    system_cleanup_normal_single_item_bytes: int = Field(default=512 * 1024**2, ge=1)
+    system_cleanup_runtime_confirmation_ttl_seconds: int = Field(default=60, ge=15, le=300)
     process_action_max_applications: int = Field(default=5, ge=1, le=10)
     process_action_max_processes: int = Field(default=20, ge=1, le=50)
     process_graceful_timeout_seconds: float = Field(default=10.0, ge=5.0, le=30.0)
@@ -188,6 +199,39 @@ class AppSettings(BaseModel):
             "optimization_sample_count": os.getenv("PC_MANAGER_OPTIMIZATION_SAMPLE_COUNT", "3"),
             "optimization_sample_interval_seconds": os.getenv(
                 "PC_MANAGER_OPTIMIZATION_SAMPLE_INTERVAL_SECONDS", "0.5"
+            ),
+            "system_cleanup_report_ttl_seconds": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_REPORT_TTL_SECONDS", "1800"
+            ),
+            "system_cleanup_max_selected": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_MAX_SELECTED", "20"
+            ),
+            "system_cleanup_max_discovered": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_MAX_DISCOVERED", "1000"
+            ),
+            "system_cleanup_max_contained_objects": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_MAX_CONTAINED_OBJECTS", "10000"
+            ),
+            "system_cleanup_max_total_bytes": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_MAX_TOTAL_BYTES", str(50 * 1024**3)
+            ),
+            "system_cleanup_minimum_age_days": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_MINIMUM_AGE_DAYS", "7"
+            ),
+            "system_cleanup_normal_item_count": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_NORMAL_ITEM_COUNT", "5"
+            ),
+            "system_cleanup_normal_object_count": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_NORMAL_OBJECT_COUNT", "100"
+            ),
+            "system_cleanup_normal_total_bytes": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_NORMAL_TOTAL_BYTES", str(1 * 1024**3)
+            ),
+            "system_cleanup_normal_single_item_bytes": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_NORMAL_SINGLE_ITEM_BYTES", str(512 * 1024**2)
+            ),
+            "system_cleanup_runtime_confirmation_ttl_seconds": os.getenv(
+                "PC_MANAGER_SYSTEM_CLEANUP_RUNTIME_CONFIRMATION_TTL_SECONDS", "60"
             ),
             "process_action_max_applications": os.getenv(
                 "PC_MANAGER_PROCESS_ACTION_MAX_APPLICATIONS", "5"

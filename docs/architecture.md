@@ -1,5 +1,51 @@
 # Architecture
 
+## Stage 4E2 controlled cleanup boundary
+
+Stage 4E2 does not extend the Stage 4E1 registry. `ApplicationRuntime` creates a second isolated
+`ToolRegistry` with exactly four tools and a `SystemCleanupExecutionGuard`:
+
+```text
+session-local Stage 4E1 report + explicit candidate UUIDs (intent only)
+  -> optimization.cleanup.prepare (R0 Fresh discovery)
+  -> second exact item selection (default unchecked)
+  -> CleanupExecutionPlanBuilder + independent safety review
+  -> durable plan + plan confirmation
+  -> Fresh selected-item revalidation + runtime Preview
+  -> object-specific immediate confirmation
+  -> atomic consumption in SystemCleanupRepository
+  -> optimization.cleanup.trash, one reference-only item at a time
+  -> Windows Recycle Bin primitive + original-identity verification
+  -> aggregate audit + MANUAL recovery record
+```
+
+`FreshCleanupCandidateRevalidator` resolves a report only from a bounded in-memory TTL store cleared at
+shutdown. It never accepts a report body or path from the UI/model. Known-location candidates must exactly
+match a finite source/category/root tuple; Stage 1 and Stage 4D3 provenance routes to existing Stage 2B/4D4
+workflows. Direct roots are rediscovered as exact children, then each tree is walked without following
+reparse points under item/object/byte limits. Identity is read before and after the tree, while protection,
+recency, lock, installer activity and Recycle Bin evidence remain independent.
+
+The writer request contains only transaction, plan, Preview and validated-item UUIDs. The guard resolves
+immutable local state, checks the consumed confirmation and argument digest, reserves one call, then
+`VerifiedRecycleBinExecutor` repeats identity/material checks immediately before the Shell primitive.
+Failure or cancellation stops future objects. Restart marks active state `INTERRUPTED`; it never resumes.
+
+Recycle Bin emptying is a separate graph and cannot join an item plan:
+
+```text
+exact current-user system-volume inspection
+  -> complete aggregate + namespace snapshot
+  -> independent R2_HIGH_IMPACT plan and confirmation
+  -> exact snapshot reinspection + immediate confirmation
+  -> atomic one-use capability
+  -> SHEmptyRecycleBinW(exact volume) once
+  -> exact-volume reinspection + NONE irreversibility record
+```
+
+The adapter never passes a null/all-volume scope. Ordinary cleanup recovery is MANUAL; Bin empty recovery
+is NONE. There is no elevation/Broker edge, shell, generic runner, permanent delete or automatic restore.
+
 ## Stage 4E1 read-only optimization analysis
 
 Stage 4E1 uses an isolated `ToolRegistry` containing exactly five R0 tools:
@@ -29,8 +75,8 @@ Only a general check uses the full query surface.
 
 Raw storage observations are separated from candidate policy, performance rules and recommendations.
 This prevents a file name or model explanation from becoming safety evidence. The GUI calls only the
-orchestrator on a worker thread. Reports remain in memory until an explicit exclusive-create export and
-cannot be passed to any write guard. Stage 4E2 has no implementation or authority edge.
+orchestrator on a worker thread. Reports also enter a bounded session-only intent store for Stage 4E2 Fresh
+discovery. They still cannot pass a write guard or replace a new plan, Preview, safety review or confirmation.
 
 ## Stage 4X3 dedicated privileged integration boundary
 

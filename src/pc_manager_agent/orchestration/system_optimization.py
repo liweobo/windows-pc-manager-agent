@@ -19,6 +19,9 @@ from pc_manager_agent.domain.system_optimization import (
     StorageAnalysisResult,
     SystemOptimizationReport,
 )
+from pc_manager_agent.orchestration.optimization_report_store import (
+    OptimizationReportSessionStore,
+)
 from pc_manager_agent.orchestration.system_optimization_planner import (
     SystemOptimizationPlanCompiler,
 )
@@ -41,12 +44,14 @@ class SystemOptimizationOrchestrator:
         safety: SystemOptimizationSafetyValidator,
         confirmation: OptimizationConfirmationService,
         audit: SystemOptimizationAuditLogger,
+        report_store: OptimizationReportSessionStore | None = None,
     ) -> None:
         self._registry = registry
         self._compiler = compiler
         self._safety = safety
         self._confirmation = confirmation
         self._audit = audit
+        self._report_store = report_store
 
     def prepare(
         self, user_goal: str, authorized_root_ids: tuple[UUID, ...] = ()
@@ -210,4 +215,6 @@ class SystemOptimizationOrchestrator:
             skipped_sources=storage.skipped_sources,
         )
         self._audit.report_completed(report)
+        if self._report_store is not None:
+            self._report_store.save(report)
         return report

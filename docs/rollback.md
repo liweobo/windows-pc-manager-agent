@@ -1,5 +1,26 @@
 # Rollback design
 
+## Stage 4E2 recovery
+
+Ordinary Stage 4E2 cleanup has recovery level `MANUAL`, not FULL. A verified success means Windows Shell
+reported a Recycle Bin item and the original filesystem identity is no longer present. The application
+stores transaction/operation IDs, before identity, result verification and the opaque Recycle Bin
+identifier; it does not claim a reliable automatic restore API.
+
+To recover, open Windows Recycle Bin, identify the object and choose **Restore**. If the original path now
+contains another object, do not overwrite it; decide manually where to keep each copy. Partial/cancelled
+batches may have some objects in the Bin and later objects untouched. Check the result and audit counts.
+Moving objects to the Bin does not free their disk space, so the result intentionally reports reclaimed
+space as unknown.
+
+Recycle Bin emptying is `NONE`. Once the exact-volume Shell action succeeds, the Agent has no restore or
+Undo mechanism. A durable irreversibility record states the volume, pre-action count/bytes and NONE recovery
+but is not a rollback record. The UI therefore uses an independent plan and immediate confirmation.
+
+Application restart never rolls either workflow forward or backward automatically. Active work becomes
+`INTERRUPTED`, all reusable approvals expire, and the user must run a new Fresh analysis. There is no
+permanent-delete fallback, automatic restore, shadow-copy claim or conflict overwrite.
+
 ## Stage 4E1 recovery
 
 Stage 4E1 is R0 and performs no cleanup, tuning or configuration change, so its truthful rollback level is

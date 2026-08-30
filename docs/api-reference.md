@@ -1,5 +1,226 @@
 # API reference
 
+## Stage 4E2 controlled system-cleanup API
+
+本节逐项说明 Stage 4E2 新增或改变的生产函数。调用顺序是安全契约的一部分：UI 只能调用
+orchestration；报告、模型输出和路径文本均不能直接调用写工具。
+
+### `domain.system_cleanup_execution`：不可变执行证据
+
+| 函数 / 类型 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `CleanupEligibilityDecision` | 有限决策枚举：只有 `ELIGIBLE` 可进入写计划；`BLOCKED`、`MANUAL_REVIEW`、`DEFERRED` 都保留在评估中。 |
+| `CleanupAdapterType` | 固定 direct Recycle Bin、独立 Bin empty、Stage 2B/4D4 hand-off、Windows-supported maintenance 或 deferred 路由；没有 generic delete。 |
+| `CleanupAction` | 只表示 `MOVE_TO_RECYCLE_BIN` 与独立 `EMPTY_RECYCLE_BIN`；刻意没有 DELETE。 |
+| `CleanupRecoveryLevel` | 用户可见 FULL/PARTIAL/MANUAL/UNKNOWN/NONE；本阶段普通清理固定 MANUAL，清空固定 NONE。 |
+| `CleanupTransactionState` / `CleanupItemState` | 持久化批次和逐项状态；包括 INTERRUPTED/BLOCKED/SKIPPED，进程重启不会自动恢复。 |
+| `CleanupVerificationStatus` | 区分原 identity 消失、同路径新对象、原对象仍在、已验证 Bin 空和 UNKNOWN；Shell 返回值不是单独成功证据。 |
+| `SystemCleanupRequest.require_unique_selection()` | 校验 session report UUID 与 1–100 个唯一 candidate UUID；Schema 不含路径、force 或命令，重复项抛 `ValidationError`。 |
+| `CleanupObjectIdentity.validate_identity()` | 要求 resolved path/volume 为绝对路径、与 handle-derived `FileState.path` 一致且非 reparse；否则拒绝。 |
+| `CleanupObjectIdentity.canonical_digest()` | 对路径、卷、kind、File ID 和元数据做规范 SHA-256；无 I/O。 |
+| `CleanupMaterialSnapshot.validate_counts()` | 要求文件数+目录数等于完整 tree object count，并核对 hidden/reparse 计数。 |
+| `CleanupMaterialSnapshot.canonical_digest()` | 绑定完整树摘要、大小、分类计数和保护信号。 |
+| `CleanupPathSafetyDecision.canonical_digest()` | 绑定 current-user、known-root、other-user/shared/sensitive/reparse/network 信号。 |
+| `CleanupActivityDecision.canonical_digest()` | 绑定近期修改、DELETE access 和活动安装器结果。 |
+| `CleanupRecoverabilityDecision.validate_recovery()` | 只有可用的本地固定可写 NTFS 回收站能力才能构造，并强制 recovery MANUAL。 |
+| `CleanupRecoverabilityDecision.canonical_digest()` | 绑定卷/文件系统/序列/可用性与 recovery 原因。 |
+| `CleanupExecutionCandidate.validate_execution_evidence()` | ELIGIBLE 时要求 path、identity、material、path safety、activity、recoverability 全部存在并互相一致；Stage4D4 hand-off 还要求准确上游 UUID。 |
+| `CleanupExecutionCandidate.invariant_digest()` | 排除生成时间后绑定所有可执行证据；Fresh 重检用它识别任何 material/policy 漂移。 |
+| `SystemCleanupAssessment.validate_totals()` | 核对四种 eligibility 数量与完整 row tuple；禁止静默丢弃 blocked 行。 |
+| `SystemCleanupAssessment.invariant_digest()` | 排除临时 ID/时间后摘要完整 request 和所有 item evidence。 |
+| `PlannedCleanupItem.require_eligible_candidate()` | 固定一个 ELIGIBLE/RECYCLE_BIN_ITEM 为 `optimization.cleanup.trash`、MANUAL、MOVE_TO_RECYCLE_BIN。 |
+| `PlannedCleanupItem.canonical_digest()` | 绑定 operation ID、顺序、完整候选、固定动作/工具/恢复。 |
+| `CleanupExecutionPlan.validate_plan()` | 校验 R2/R2_HIGH_IMPACT、双确认、MANUAL、唯一连续 items/paths，以及 object/byte totals 与 material 一致。 |
+| `CleanupExecutionPlan.canonical_digest()` | 生成持久化、确认和 guard 共同使用的计划摘要。 |
+| `CleanupExecutionPreview.validate_preview()` | 校验 Preview 未过期、项目数一致并拒绝任何 `permanent_delete_available=true`。 |
+| `CleanupExecutionPreview.canonical_digest()` | 绑定实际向用户显示的 item set、数量、大小、risk 和 recovery。 |
+| `SystemCleanupTrashRequest` | 唯一普通写入 Schema，只含 transaction/plan/Preview/validated-item UUID；数据库本地解析真实对象。 |
+| `SystemCleanupTrashResult` | 返回原 identity 与共享 Recycle Bin primitive 的 Shell evidence，供 orchestration 独立验证。 |
+| `CleanupItemResult` / `CleanupResult` | 保存每项及批次终态；明确区分从原位置移走的字节与“已验证释放空间”，后者普通清理为 `None`。 |
+| `RecycleBinInventorySnapshot.validate_snapshot()` | 要求绝对 volume；完整非空清单必须同时有 oldest/newest deletion time。 |
+| `RecycleBinInventorySnapshot.canonical_digest()` | 排除 collection time，绑定 exact volume、count、bytes、age range、completeness 和 warning。 |
+| `RecycleBinInventoryRequest` | path-free R0 request，scope 必须为 `CURRENT_USER_SYSTEM_VOLUME`。 |
+| `RecycleBinEmptyPlan.validate_empty_plan()` | 要求完整且非空的 exact-volume snapshot、正确 digest、R2_HIGH_IMPACT、NONE 和双确认。 |
+| `RecycleBinEmptyPlan.canonical_digest()` | 绑定独立 irreversible plan，包括 operation ID 和 exact snapshot。 |
+| `RecycleBinEmptyPreview.canonical_digest()` | 绑定用户看到的 irreversible scope/impact/recovery/expiry。 |
+| `RecycleBinEmptyRequest` | 唯一清空写 Schema，只含 transaction/plan/Preview UUID。 |
+| `RecycleBinEmptyResult` | 保存 HRESULT、before/after inventory、验证状态、NONE 和说明；不创建 Undo。 |
+| `CleanupIrreversibilityRecord` | 持久化 exact volume、pre-count/bytes 和 NONE 真相；它不是 recovery record。 |
+
+`domain.system_optimization` 同时新增 `CleanupEvidenceOrigin`、`CleanupSourceReference.validate_reference()`
+和 observation/candidate 的 `source_reference`。KNOWN_LOCATION 不得带上游 ID；Stage 1 必须有 record ID；
+Stage 4D3 必须有 report/candidate UUID。该 provenance 只选择 Fresh/handoff 路由，不是 authority。
+
+### session report、Fresh scope 与 policy
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `OptimizationReportSessionStore.__init__(ttl_seconds, max_reports)` | 创建有锁、LRU、有限容量的内存 intent store；非正限制抛 `ValueError`。 |
+| `save(report)` | 先清过期项，再保存 immutable non-executable report 并淘汰最旧项；拒绝 executable/change report。 |
+| `get(report_id)` | 只解析当前会话未过期 report；unknown/expired 抛 `OptimizationReportUnavailableError`。 |
+| `clear()` | 关闭应用时清空所有 intent，保证重启不能复用旧报告。 |
+| `_purge_expired(now)` | 按 report `generated_at + TTL` 删除过期内存项；无磁盘 I/O。 |
+| `SystemCleanupPathPolicy.__init__(known_roots, network_detector, user_profile)` | 防御性规范化有限 source→root map 和 current-user profile；保存 detector dependency。 |
+| `known_roots` | 返回 allow-list 副本，调用方不能修改内部边界。 |
+| `validate_report_root(source, path, category)` | 要求 source/category/root 三元组精确匹配、位于 current user 且通过 `PathPolicy.validate_scan_root`。 |
+| `validate_item(item, root)` | 规范化一个发现的 child，拒绝 scope escape/reparse/protected/network，并返回可摘要的 path-safety evidence。 |
+| `validate_entry(path, root)` | 树遍历每个 entry 前重复 no-follow、containment 和 network 检查。 |
+| `CleanupRecentActivityPolicy.__init__(minimum_age_days)` | 保存正数 age threshold；非正值拒绝。 |
+| `evaluate(material, delete_access_available, active_installer_detected)` | 任一 recent/locked/installer signal 都产生 blocked activity decision。 |
+| `cutoff(now)` | 返回统一 UTC age cutoff，供完整 material traversal 计数。 |
+| `SystemCleanupEligibilityPolicy.evaluate(...)` | 先处理 deferred/Stage2B routes，再同时检查 source/category、HIGH fresh confidence、protection NONE、safe path、activity、reparse/sensitive signal 和 Bin capability；返回 decision、adapter、原因。 |
+| `SystemCleanupRiskPolicy.__init__(...)` | 保存 item/object/total/single normal thresholds；任一非正拒绝。 |
+| `classify(...)` | 任一 normal threshold 超过即 R2_HIGH_IMPACT，否则 R2；hard limits 由 Fresh builder 更早拒绝。 |
+
+### `FreshCleanupCandidateRevalidator`
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `__init__(...)` | 注入 report store、path/eligibility/activity policy、identity/Bin/activity adapters、active-installer callback 和四个 hard limits；不接受 writer。 |
+| `assess(request, cancellation)` | 从 session report 解析 exact candidate IDs，在剩余 item budget 内 Fresh 发现，累计 object/bytes，保留所有 decision；取消/越限/unknown ID fail closed。 |
+| `require_unchanged(expected, cancellation)` | 只重扫 expected exact path，重新构建 candidate 并比较 stable item-ref 与 invariant digest；变化抛 `SystemCleanupRevalidationError`。 |
+| `_assess_report_candidate(..., item_budget)` | Stage1→Stage2B、Stage4D3→Stage4D4、Bin→独立流程；direct known root 有界枚举 exact children；空根 deferred。 |
+| `_assess_object(...)` | 验证 path，identity-before，完整 material，identity-after，保护/activity/Bin capability，再组合独立 eligibility；错误返回 blocked row。 |
+| `_snapshot(...)` | 使用 no-follow identity 与 `os.scandir` 遍历完整 tree；读取元数据而非内容，累计 sizes/attributes/signals，应用 object/byte/cancellation 上限并生成 canonical tree/classification digest。 |
+| `_protected_signal(path, category, kind)` | 以有限 sensitive component、database/config suffix 和 crash-dump extension 规则返回保护 signal；不根据 LLM 猜测。 |
+| `_item_ref(report_id, candidate_id, state)` | 用 report/candidate/path/volume/File ID/kind 的 UUID5 产生稳定 session item reference。 |
+| `_handoff(...)` | 构造 non-direct deferred row，保留精确 Stage1/Stage4D3 upstream identifiers。 |
+| `_non_direct(...)` | 为 blocked/deferred/unsupported source 构造不可执行 row，不伪造 Fresh identity/material。 |
+| `_placeholder_material/_placeholder_path_safety/_placeholder_activity` | 仅供非-direct deterministic policy routing 的安全占位证据；不能进入 ELIGIBLE plan。 |
+
+### Preview、独立 safety review 与确认
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `CleanupExecutionPlanBuilder.__init__(...)` | 注入 Fresh revalidator/risk policy、selection/TTL limits。 |
+| `compile(assessment, selected_item_refs)` | 执行第二次 exact selection；拒绝空/重复/unknown/blocked/mixed/overlap，计算 totals/risk 并返回 immutable plan+Preview。 |
+| `revalidate(plan, cancellation)` | plan expiry 前逐项 `require_unchanged`，然后生成新的 runtime Preview；任何变化包装为 `SystemCleanupPreviewError`。 |
+| `require_current(plan, preview)` | 比较 plan digest、transaction/plan IDs、item-set digest 和 expiry，供 confirmation service 防 stale binding。 |
+| `_preview_for(plan)` | 从计划创建短时 Preview，不增加对象或改变 risk/recovery。 |
+| `_item_set_digest(items)` | 对规范 item digest tuple 做 SHA-256。 |
+| `_reject_overlapping(candidates)` | 拒绝相同、祖先/后代路径组合，避免批次双重处理。 |
+| `SystemCleanupSafetyValidator.__init__(registry)` | 注入隔离 Stage4E2 registry。 |
+| `review(plan)` | 独立检查 risk、MANUAL、action、eligibility/evidence，以及 `optimization.cleanup.trash` manifest 的 confirmation/Preview/rollback/risk 契约；unknown/unsafe tool 产生 issues。 |
+| `RecycleBinEmptyPlanBuilder.__init__(platform, TTLs)` | 注入 exact-volume adapter 和正 TTL。 |
+| `prepare()` | 获取 system volume 完整非空 inventory，创建独立 plan+Preview；partial/empty 拒绝。 |
+| `revalidate(plan)` | 要求 plan current，并重新检查 canonical inventory 完全相同。 |
+| `_preview(plan, snapshot)` | 验证 snapshot model 并生成受 plan/preview TTL 共同限制的 irreversible Preview。 |
+| `_system_volume()` | 从 `SYSTEMROOT` 得到一个 explicit drive root；缺失拒绝，永不返回 null/all-volume。 |
+| `SystemCleanupConfirmationService.__init__(store, item_previews, TTLs, now)` | 注入 durable store、Preview checker、clock 和两个 TTL。 |
+| `request_plan(plan, preview)` | 先检查 current binding，再持久化 scope-specific PLAN/PENDING confirmation。 |
+| `resolve(id, approved, plan, preview)` | 重新计算 binding/expiry并把 pending 变 APPROVED/REJECTED；重复、错 scope、错 Preview 均拒绝。 |
+| `request_runtime(parent_id, plan, preview)` | 仅 approved PLAN parent 可创建短时 RUNTIME child；item 与 Bin scope 不可交换。 |
+| `consume_runtime(id, plan, preview)` | 重新检查 parent/child/current binding，再由 store 原子消费 confirmation pair；返回 CONSUMED child。 |
+| `_create(...)` | 根据 plan 类型构造 scope、tier、parent、binding、object summary 和 expiry。 |
+| `_require_binding(...)` | 比较所有持久化 digest/count/recovery/risk 字段，防参数替换。 |
+| `_require_current(...)` | item plan 交给 Preview builder 检查；Bin plan直接检查 IDs/digest/expiry。 |
+| `_require_not_expired(...)` | confirmation 到期后 fail closed。 |
+| `_binding(plan, preview)` | 生成 plan/preview/item/identity/material/classification/protection/eligibility/adapter/recovery/risk/count 绑定字典。 |
+| `_summary(plan)` | 生成具体对象数、大小、risk、MANUAL/NONE 文本，不使用模糊“危险操作”。 |
+
+### 持久化与单次写 guard
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `SystemCleanupRepository.__init__(database_path)` | 创建独立 SQLAlchemy engine/session factory，尚未授权任何执行。 |
+| `initialize()` | 建表；把非终态 transaction 标为 INTERRUPTED，把 pending/approved confirmation 标为 EXPIRED；返回 interrupted UUIDs。 |
+| `create_item_cleanup(plan, preview)` | 在一个事务中检查无 active cleanup，并保存完整 item plan、Preview 与每项 reference-only argument digest。 |
+| `create_empty(plan, preview)` | 保存独立 RECYCLE_BIN_EMPTY transaction、operation ID、snapshot/item-set digest 和 request digest。 |
+| `bind_runtime_preview(...)` / `bind_empty_runtime_preview(...)` | 将 Fresh runtime Preview 替换到同一 transaction；item 版本还更新每项 immutable evidence。 |
+| `_bind_preview(...)` | 共用 ID/state/current binding 检查与 Preview payload 更新。 |
+| `save_confirmation/get_confirmation/update_confirmation` | 持久化、解析和更新 confirmation model；缺失、store error 或非法 state 均抛 `SystemCleanupStoreError`。 |
+| `consume_confirmation_pair(...)` | SQLite transaction 内核对 parent/child binding/state/expiry并一起改为 CONSUMED，保存 runtime confirmation ID。 |
+| `begin_item_validation(...)` | 将 exact pending item 变 VALIDATING；错误顺序拒绝。 |
+| `begin_empty_validation(...)` | 将 confirmed Bin transaction 变 VALIDATING。 |
+| `mark_item_verifying(item_ref)` | 写工具返回后将 exact TRASHING item 变 VERIFYING。 |
+| `prepare_recovery(item_ref, record)` | Shell 调用前保存 before-state recovery record/digest；数据库失败时不派发。 |
+| `complete_item(result, recovery)` | 保存 terminal item result 和真实 recovery status；不把 UNKNOWN 冒充 AVAILABLE。 |
+| `skip_pending(transaction_id, message)` | fail-stop/cancel 后把所有未来 PENDING 项标 SKIPPED。 |
+| `transition(transaction_id, state, error_message)` | 只允许合法 durable transaction transition 并更新时间。 |
+| `state/load_plan/load_preview/load_empty_plan/load_empty_preview/load_item` | 从 durable JSON 重新验证 Pydantic model；ID 不匹配或损坏 fail closed。 |
+| `list_results/list_recovery` | 按 sequence 返回已保存结果或 recovery records。 |
+| `complete_empty(result, irreversibility)` | 同一事务保存 NONE result 与 irreversibility record；不创建 recovery。 |
+| `close()` | dispose SQLite engine。 |
+| `request_for_item(...)` / `request_for_empty(...)` | 从 durable plan/Preview 构造 path-free write request，调用方不能增加参数。 |
+| `_load_transaction/_item_row/_confirmation_row` | 内部读取 exact row 并检查归属/存在。 |
+| `_planned_item/_transaction/_item` | 将 payload 重验为 model，或在一个 guard transaction 内加载 row。 |
+| `_require_no_active/_require_initialized` | 数据库未初始化或已有活动清理时拒绝创建新 authority。 |
+| `SystemCleanupExecutionGuard.__init__(repository)` | 把 registry 写边界绑定到 durable repository。 |
+| `require(authorization, tool_name, arguments)` | 只路由两个 exact writer；store error 脱敏包装为 `WriteAuthorizationError`。 |
+| `_require_item(...)` | 原子核对 transaction/operation/plan/Preview/tool/argument/runtime confirmation/item state，随后只把该项预留为 TRASHING。 |
+| `_require_empty(...)` | 原子核对独立 Bin transaction/operation/request/confirmation 后预留为 EXECUTING。 |
+| `_runtime_confirmation(...)` | 在同一 SQLite session 查找 exact consumed runtime row；缺失返回 None 并由 guard 拒绝。 |
+
+### 注册工具、Windows adapters、audit 与 orchestration
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `OptimizationCleanupPrepareTool.manifest/execute` | 注册 R0 bounded Fresh assessment；execute 只把 strict request 交给 revalidator。 |
+| `OptimizationCleanupTrashTool.manifest/execute` | 声明 max-risk R2_HIGH_IMPACT/MANUAL writer；从 repository 解析一项，最终 Fresh snapshot 后只调用 shared Recycle Bin primitive。 |
+| `OptimizationRecycleBinInspectTool.manifest/execute` | R0 exact-current-user-system-volume inventory；request 无 path，取消时停止。 |
+| `OptimizationRecycleBinEmptyTool.manifest/execute` | 独立 R2_HIGH_IMPACT/NONE writer；再次核对 inventory，调用一次 exact-volume empty，再 inspect 验证；没有 fallback。 |
+| `tools.system_tools.system_cleanup._system_volume()` | 返回 explicit system drive root，不能返回 null/empty。 |
+| `CleanupActivityProbe.delete_access_available(path)` | 平台协议：只探测普通 DELETE access，不 unlock/kill。 |
+| `RecycleBinEmptyPlatform.inspect/empty(volume_root)` | 平台协议：exact-volume inventory 与一次 empty；不表示通用 delete。 |
+| `WindowsCleanupActivityProbe.__init__()` | 仅 Windows 构造并加载 kernel32。 |
+| `delete_access_available(path)` | 以 DELETE、share read/write/delete、open-reparse flags 打开 object；sharing/access failure 返回 false，成功立即 CloseHandle。 |
+| `WindowsRecycleBinEmptyPlatform.__init__(capability)` | 仅 Windows 构造并注入普通 Bin capability adapter。 |
+| `inspect(volume_root)` | 校验 exact system volume，结合 `SHQueryRecycleBinW` aggregate 与 current-user Shell namespace count/size/age；不一致/异常返回 incomplete。 |
+| `empty(volume_root)` | 再查 capability，调用一次 `SHEmptyRecycleBinW(hwnd=None, exact_root, no-UI flags)`；root 参数永不为 None。 |
+| `_query(root)` | 调用 `SHQueryRecycleBinW` 返回非负 count/size；HRESULT 失败抛 `OSError`。 |
+| `_enumerate(root)` | COM 枚举 current-user Recycle Bin items，按 DeletedFrom drive 过滤，读取 Size/DateDeleted property；总是 CoUninitialize。 |
+| `_validate_scope(volume_root)` | 要求规范 absolute path 精确等于 `SYSTEMROOT` drive root；其他 path 拒绝。 |
+| `SystemCleanupAuditLogger.assessed/previewed/empty_previewed` | 分别记录 Fresh counts/digests、普通 Preview aggregates 和 independent NONE Preview；不保存 literal paths。 |
+| `confirmation_resolved` | 记录 scope/tier/state/expiry 和 binding digests，不保存 object list。 |
+| `item_started/item_completed/transaction_completed` | 记录 pre-dispatch、verification、fail-stop totals、MANUAL recovery truth 和 `permanent_delete_calls=0`。 |
+| `empty_started/empty_completed` | 记录 irreversible pre-dispatch 与 exact-volume post-verification，recovery 固定 NONE。 |
+| `blocked(...)` | 记录 transaction/plan/phase 与异常类型，不记录异常文本中的路径。 |
+| `_record(event)` | 交给 mandatory redacting AuditRepository；失败向上传播并阻止安全继续。 |
+| `_path_digest(path)` | 对规范 case-folded path 做 SHA-256，避免 audit 暴露名称。 |
+| `_item_result_payload(result)` | 生成 path-digest、state、verification/recovery ID 等脱敏 result。 |
+| `SystemCleanupService.assess` | 通过注册 R0 tool Fresh 评估并 audit；拒绝错误 output type。 |
+| `prepare` | 从第二 selection 编译/独立审查，持久化 plan/Preview，创建 plan confirmation。 |
+| `resolve_plan_confirmation` / `resolve_runtime_confirmation` | 持久化并 audit 两级普通清理决策；approval 本身不调用工具。 |
+| `request_runtime_confirmation` | 要求 PLAN_CONFIRMED，Fresh 重扫 exact items，绑定 runtime Preview 并创建 immediate confirmation。 |
+| `execute` | 最终 batch Fresh、原子消费、逐项 pre-audit/recovery/guarded tool/identity verification；失败/取消停止未来项并给出 truthful result。 |
+| `prepare_recycle_bin_empty` | 创建并保存完全独立的 irreversible plan/Preview 与 plan confirmation。 |
+| `resolve_empty_plan_confirmation/resolve_empty_runtime_confirmation` | 只处理 Bin scope confirmation，不能复用 item approval。 |
+| `request_empty_runtime_confirmation` | 重查 exact inventory，相同才绑定新 Preview 和 immediate confirmation。 |
+| `execute_recycle_bin_empty` | 最终 revalidate、消费、pre-audit、guarded one-call、persist irreversibility、verify/audit；失败持久化 FAILED，绝不 retry。 |
+| `recovery_records(transaction_id)` | 只返回 status AVAILABLE 且有 Recycle Bin identifier 的 MANUAL records。 |
+| `_verify_item(...)` | 比较 Shell evidence 与 original identity disappearance；同路径新对象不被覆盖，证据不足为 UNKNOWN。 |
+| `_pre_dispatch_failure(...)` | 在缺失 Fresh evidence 时保存 BLOCKED_CHANGED，不调用 writer。 |
+| `_finalize(...)` | 汇总 verified/failed/blocked/skipped 和 moved bytes；reclaimed bytes 固定 unknown。 |
+| `_block(...)` | Fresh/TOCTOU 失败时持久化 BLOCKED 并记录脱敏 phase/error type。 |
+
+### Runtime 与 Qt UI
+
+| 函数 / 方法 | 详细作用、输入输出、失败语义与副作用 |
+|---|---|
+| `ApplicationRuntime.create_system_cleanup_services()` | 组合三个 exact current-user roots、所有 policies/adapters/repository/guard/four-tool registry/audit/service；不注入 Broker。 |
+| `create_system_optimization_services()`（修订） | 将完成的 Stage4E1 report 保存到 session intent store；仍使用独立五工具 R0 registry。 |
+| `ApplicationRuntime.close()`（修订） | 先 clear report intent 并 close cleanup repository，再关闭其他 persistence。 |
+| `_CancellableWorker.cancel()` | 设置 cooperative token，不强杀 Shell 或线程。 |
+| `SystemCleanupAssessmentWorker.run()` | 后台创建 isolated services 并执行 R0 Fresh assessment。 |
+| `SystemCleanupRuntimeWorker.run()` | 后台生成 runtime Fresh item Preview。 |
+| `SystemCleanupExecuteWorker.run()` | 后台执行 sequential guarded item cleanup。 |
+| `RecycleBinEmptyPrepareWorker.run()` | 后台检查 exact inventory 并准备 independent plan。 |
+| `RecycleBinEmptyRuntimeWorker.run()` | 后台重复 exact inventory before immediate confirmation。 |
+| `RecycleBinEmptyExecuteWorker.run()` | 后台执行一次 irreversible guarded call；不 retry。 |
+| `require_assessment/require_runtime_cleanup/require_cleanup_result` | 验证 Qt object payload type，错误抛 `TypeError`。 |
+| `require_prepared_empty/require_runtime_empty/require_empty_result` | 验证独立 Bin worker payload type。 |
+| `SystemCleanupDialog._start_assessment/_assessment_completed` | 启动 Fresh worker并展示全部 decision；eligible 行默认 unchecked。 |
+| `_populate_assessment/_selection_changed/_selected_item_refs` | 构建无 Select All 的逐项 UI，只让 eligible checkbox 产生 UUID selection。 |
+| `_primary_clicked` | 按 SELECTION→PLAN→RUNTIME→EXECUTING→DONE 状态推进；只调用 orchestration。 |
+| `_runtime_completed/_execution_completed` | 显示 exact immediate impact 和 truthful moved/reclaimed/recovery result。 |
+| `_require_item_plan/_failed/_cancel_clicked/closeEvent` | 缺状态 fail closed；拒绝 confirmation 或 cooperative stop future items；窗口关闭不强杀任务。 |
+| `RecycleBinEmptyDialog._start_prepare/_prepared_completed` | 在独立窗口后台检查完整 inventory并显示第一次 NONE confirmation。 |
+| `RecycleBinEmptyDialog._primary_clicked/_runtime_completed/_execution_completed` | 推进独立双确认和 one-call result，不复用 item state。 |
+| `RecycleBinEmptyDialog._require_plan/_failed/_cancel_clicked/closeEvent` | 缺失/变化/取消均停止，执行期间不提供误导性的 kill/undo。 |
+| `_risk_text/_format_size/_cleanup_completion_html` | 纯展示辅助函数；明确 R2_HIGH_IMPACT、二进制大小、MANUAL 和 reclaimed unknown。 |
+| `SystemOptimizationTab._populate_candidates/_selected_candidate_ids` | Stage4E1 report checkbox 默认 unchecked，只收集 UUID intent。 |
+| `open_controlled_cleanup/open_recycle_bin_empty` | 分别打开 Fresh item workflow 和 independent irreversible workflow；不直接执行工具。 |
+
 ## Stage 4E1 system optimization API
 
 本节覆盖 Stage 4E1 新增的每个函数、公开方法和关键内部安全辅助函数。所有带“执行”的方法只执行

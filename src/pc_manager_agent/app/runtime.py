@@ -26,6 +26,7 @@ from pc_manager_agent.audit.software_uninstall_analysis import (
 )
 from pc_manager_agent.audit.software_uninstall_execution import MsiUninstallAuditLogger
 from pc_manager_agent.audit.startup_actions import StartupActionAuditLogger
+from pc_manager_agent.audit.system_cleanup import SystemCleanupAuditLogger
 from pc_manager_agent.audit.system_diagnostics import DiagnosticAuditLogger
 from pc_manager_agent.audit.system_optimization import SystemOptimizationAuditLogger
 from pc_manager_agent.audit.trash import TrashAuditLogger
@@ -62,6 +63,7 @@ from pc_manager_agent.confirmation.software_uninstall_execution import (
 )
 from pc_manager_agent.confirmation.startup_actions import StartupActionConfirmationService
 from pc_manager_agent.confirmation.state_machine import ConfirmationService
+from pc_manager_agent.confirmation.system_cleanup import SystemCleanupConfirmationService
 from pc_manager_agent.confirmation.system_diagnostics import DiagnosticConfirmationService
 from pc_manager_agent.confirmation.system_optimization import OptimizationConfirmationService
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
@@ -110,6 +112,9 @@ from pc_manager_agent.orchestration.optimization_evidence import (
 )
 from pc_manager_agent.orchestration.optimization_recommendation_engine import (
     OptimizationRecommendationEngine,
+)
+from pc_manager_agent.orchestration.optimization_report_store import (
+    OptimizationReportSessionStore,
 )
 from pc_manager_agent.orchestration.performance_diagnostic_engine import (
     PerformanceDiagnosticEngine,
@@ -160,6 +165,7 @@ from pc_manager_agent.orchestration.software_uninstall_router import SoftwareUni
 from pc_manager_agent.orchestration.software_uninstall_verifier import MsiUninstallVerifier
 from pc_manager_agent.orchestration.startup_actions import StartupActionService
 from pc_manager_agent.orchestration.startup_target_resolver import StartupTargetResolver
+from pc_manager_agent.orchestration.system_cleanup import SystemCleanupService
 from pc_manager_agent.orchestration.system_diagnostic_planner import DiagnosticPlanCompiler
 from pc_manager_agent.orchestration.system_diagnostics import (
     DiagnosticOrchestrator,
@@ -231,6 +237,10 @@ from pc_manager_agent.persistence.startup_actions import (
     StartupBackupVault,
     StartupExecutionGuard,
 )
+from pc_manager_agent.persistence.system_cleanup import (
+    SystemCleanupExecutionGuard,
+    SystemCleanupRepository,
+)
 from pc_manager_agent.persistence.vendor_uninstall import (
     VendorUninstallExecutionGuard,
     VendorUninstallRepository,
@@ -270,6 +280,9 @@ from pc_manager_agent.platform_support.windows.process_management import (
     WindowsProcessManagementPlatform,
 )
 from pc_manager_agent.platform_support.windows.recycle_bin import WindowsRecycleBinPlatform
+from pc_manager_agent.platform_support.windows.recycle_bin_empty import (
+    WindowsRecycleBinEmptyPlatform,
+)
 from pc_manager_agent.platform_support.windows.residual_explorer import (
     WindowsResidualExplorerService,
 )
@@ -285,6 +298,9 @@ from pc_manager_agent.platform_support.windows.software_inventory import (
 )
 from pc_manager_agent.platform_support.windows.startup_management import (
     WindowsStartupManagementPlatform,
+)
+from pc_manager_agent.platform_support.windows.system_cleanup import (
+    WindowsCleanupActivityProbe,
 )
 from pc_manager_agent.platform_support.windows.system_diagnostics import (
     WindowsSystemDiagnosticsPlatform,
@@ -331,6 +347,7 @@ from pc_manager_agent.safety.plan_reviewer import SafetyReviewer
 from pc_manager_agent.safety.process_policy import ProcessSafetyPolicy
 from pc_manager_agent.safety.process_preview import ProcessPreviewEngine
 from pc_manager_agent.safety.process_validator import ProcessActionSafetyValidator
+from pc_manager_agent.safety.recycle_bin_empty import RecycleBinEmptyPlanBuilder
 from pc_manager_agent.safety.residual_classification import ResidualClassifier
 from pc_manager_agent.safety.residual_cleanup_policy import (
     CleanupEligibilityPolicy,
@@ -369,6 +386,17 @@ from pc_manager_agent.safety.software_zero_execution import SoftwareZeroExecutio
 from pc_manager_agent.safety.startup_policy import StartupSafetyPolicy
 from pc_manager_agent.safety.startup_preview import StartupPreviewEngine
 from pc_manager_agent.safety.startup_validator import StartupActionSafetyValidator
+from pc_manager_agent.safety.system_cleanup_policy import (
+    CleanupRecentActivityPolicy,
+    SystemCleanupEligibilityPolicy,
+    SystemCleanupPathPolicy,
+    SystemCleanupRiskPolicy,
+)
+from pc_manager_agent.safety.system_cleanup_preview import CleanupExecutionPlanBuilder
+from pc_manager_agent.safety.system_cleanup_revalidation import (
+    FreshCleanupCandidateRevalidator,
+)
+from pc_manager_agent.safety.system_cleanup_validator import SystemCleanupSafetyValidator
 from pc_manager_agent.safety.system_diagnostics import DiagnosticSafetyValidator
 from pc_manager_agent.safety.system_optimization import SystemOptimizationSafetyValidator
 from pc_manager_agent.safety.trash_policy import TrashPathPolicy
@@ -442,6 +470,12 @@ from pc_manager_agent.tools.system_tools.startup_actions import (
     DisableStartupTool,
     RestoreStartupTool,
 )
+from pc_manager_agent.tools.system_tools.system_cleanup import (
+    OptimizationCleanupPrepareTool,
+    OptimizationCleanupTrashTool,
+    OptimizationRecycleBinEmptyTool,
+    OptimizationRecycleBinInspectTool,
+)
 from pc_manager_agent.tools.system_tools.system_optimization import (
     OptimizationCleanupCandidateTool,
     OptimizationPerformanceTool,
@@ -508,6 +542,15 @@ class SystemOptimizationServices:
     compiler: SystemOptimizationPlanCompiler
     orchestrator: SystemOptimizationOrchestrator
     exporter: SystemOptimizationReportExporter
+
+
+@dataclass(frozen=True, slots=True)
+class SystemCleanupServices:
+    """Isolated Stage 4E2 registry, durable repository, and controlled service."""
+
+    registry: ToolRegistry
+    repository: SystemCleanupRepository
+    service: SystemCleanupService
 
 
 @dataclass(frozen=True, slots=True)
@@ -686,6 +729,9 @@ class ApplicationRuntime:
         self.optimization_confirmation = OptimizationConfirmationService(
             settings.confirmation_ttl_seconds
         )
+        self.optimization_report_store = OptimizationReportSessionStore(
+            ttl_seconds=settings.system_cleanup_report_ttl_seconds
+        )
         self.process_confirmation = ProcessActionConfirmationService(
             settings.confirmation_ttl_seconds,
             settings.process_runtime_confirmation_ttl_seconds,
@@ -732,6 +778,8 @@ class ApplicationRuntime:
         self.software_residual_repository.initialize()
         self.residual_cleanup_repository = ResidualCleanupRepository(settings.database_path)
         self.interrupted_residual_cleanup_ids = self.residual_cleanup_repository.initialize()
+        self.system_cleanup_repository = SystemCleanupRepository(settings.database_path)
+        self.interrupted_system_cleanup_ids = self.system_cleanup_repository.initialize()
         self.uninstall_context_recorder = UninstallContextRecorder(
             self.software_residual_repository
         )
@@ -739,6 +787,8 @@ class ApplicationRuntime:
         self.residual_explorer = WindowsResidualExplorerService()
         self.file_operation_platform = WindowsFileOperationPlatform()
         self.recycle_bin_platform = WindowsRecycleBinPlatform()
+        self.recycle_bin_empty_platform = WindowsRecycleBinEmptyPlatform(self.recycle_bin_platform)
+        self.cleanup_activity_probe = WindowsCleanupActivityProbe()
         self.process_management_platform = WindowsProcessManagementPlatform()
         self.startup_management_platform = WindowsStartupManagementPlatform(
             settings.data_directory / "disabled_startup"
@@ -1142,12 +1192,116 @@ class ApplicationRuntime:
             safety=SystemOptimizationSafetyValidator(registry, self.authorized_paths),
             confirmation=self.optimization_confirmation,
             audit=audit,
+            report_store=self.optimization_report_store,
         )
         return SystemOptimizationServices(
             registry=registry,
             compiler=compiler,
             orchestrator=orchestrator,
             exporter=SystemOptimizationReportExporter(),
+        )
+
+    def create_system_cleanup_services(self) -> SystemCleanupServices:
+        """Build the isolated Stage 4E2 Fresh-check and Recycle Bin workflow."""
+        local_app_data = Path(
+            os.environ.get(
+                "LOCALAPPDATA",
+                str(Path.home() / "AppData" / "Local"),
+            )
+        )
+        known_roots = {
+            "current-user-temp": local_app_data / "Temp",
+            "directx-shader-cache": local_app_data / "D3DSCache",
+            "current-user-crash-dumps": local_app_data / "CrashDumps",
+        }
+        path_policy = SystemCleanupPathPolicy(
+            known_roots,
+            network_path_detector=is_network_path,
+        )
+        revalidator = FreshCleanupCandidateRevalidator(
+            self.optimization_report_store,
+            path_policy,
+            SystemCleanupEligibilityPolicy(),
+            CleanupRecentActivityPolicy(
+                minimum_age_days=self.settings.system_cleanup_minimum_age_days
+            ),
+            self.file_operation_platform,
+            self.recycle_bin_platform,
+            self.cleanup_activity_probe,
+            active_installer=lambda: any(
+                (
+                    self.msi_uninstall_repository.has_active_uninstall(),
+                    self.vendor_uninstall_repository.has_active_uninstall(),
+                    self.winget_uninstall_repository.has_active_uninstall(),
+                    self.msix_uninstall_repository.has_active_uninstall(),
+                )
+            ),
+            max_selected_candidates=self.settings.system_cleanup_max_selected,
+            max_discovered_items=self.settings.system_cleanup_max_discovered,
+            max_contained_objects=self.settings.system_cleanup_max_contained_objects,
+            max_total_bytes=self.settings.system_cleanup_max_total_bytes,
+        )
+        plan_builder = CleanupExecutionPlanBuilder(
+            revalidator,
+            SystemCleanupRiskPolicy(
+                max_normal_items=self.settings.system_cleanup_normal_item_count,
+                max_normal_objects=self.settings.system_cleanup_normal_object_count,
+                max_normal_total_bytes=self.settings.system_cleanup_normal_total_bytes,
+                max_normal_single_item_bytes=(
+                    self.settings.system_cleanup_normal_single_item_bytes
+                ),
+            ),
+            max_selected_items=self.settings.system_cleanup_max_selected,
+            plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            preview_ttl_seconds=self.settings.system_cleanup_runtime_confirmation_ttl_seconds,
+        )
+        empty_plan_builder = RecycleBinEmptyPlanBuilder(
+            self.recycle_bin_empty_platform,
+            plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            preview_ttl_seconds=self.settings.system_cleanup_runtime_confirmation_ttl_seconds,
+        )
+        guard = SystemCleanupExecutionGuard(self.system_cleanup_repository)
+        registry = ToolRegistry(write_guard=guard)
+        for tool in (
+            OptimizationCleanupPrepareTool(revalidator),
+            OptimizationCleanupTrashTool(
+                self.system_cleanup_repository,
+                revalidator,
+                self.file_operation_platform,
+                self.recycle_bin_platform,
+            ),
+            OptimizationRecycleBinInspectTool(self.recycle_bin_empty_platform),
+            OptimizationRecycleBinEmptyTool(
+                self.system_cleanup_repository,
+                self.recycle_bin_empty_platform,
+            ),
+        ):
+            registry.register(tool)
+        confirmation = SystemCleanupConfirmationService(
+            self.system_cleanup_repository,
+            plan_builder,
+            plan_ttl_seconds=self.settings.confirmation_ttl_seconds,
+            runtime_ttl_seconds=self.settings.system_cleanup_runtime_confirmation_ttl_seconds,
+        )
+        audit = SystemCleanupAuditLogger(
+            self.audit,
+            app_version=__version__,
+            git_commit=os.getenv("GITHUB_SHA"),
+        )
+        service = SystemCleanupService(
+            registry,
+            plan_builder,
+            empty_plan_builder,
+            SystemCleanupSafetyValidator(registry),
+            confirmation,
+            self.system_cleanup_repository,
+            self.file_operation_platform,
+            audit,
+        )
+        return SystemCleanupServices(
+            registry=registry,
+            repository=self.system_cleanup_repository,
+            service=service,
         )
 
     def create_software_analysis_services(self) -> SoftwareAnalysisServices:
@@ -1946,6 +2100,8 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.optimization_report_store.clear()
+        self.system_cleanup_repository.close()
         self.privileged_action_repository.close()
         self.residual_cleanup_repository.close()
         self.software_residual_repository.close()

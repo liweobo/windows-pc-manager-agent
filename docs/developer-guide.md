@@ -1,5 +1,40 @@
 # Developer guide
 
+## Stage 4E2 development
+
+Stage 4E2 must keep the Stage 4E1 report registry and its writer registry separate. Do not make a report,
+candidate UUID, UI checkbox or R0 confirmation implement `ExecutionAuthorization`. Direct execution must
+flow through `OptimizationReportSessionStore`, `FreshCleanupCandidateRevalidator`, exact second selection,
+`CleanupExecutionPlanBuilder`, `SystemCleanupSafetyValidator`, durable plan/runtime confirmation,
+`SystemCleanupExecutionGuard` and the shared `VerifiedRecycleBinExecutor` in that order.
+
+New direct sources require an exact source/category/current-user-root tuple, metadata-only and no-follow
+discovery, independent protection/activity/recoverability rules, hard limits, cancellation, risk thresholds,
+Preview text, audit redaction and synthetic tests. Do not add browser profiles, system Temp, WinSxS,
+Installer Cache, SoftwareDistribution, registry cleanup, service/process actions or a generic maintenance
+adapter. Stage 1 and Stage 4D3 references must route to Stage 2B/4D4, not duplicate their safety logic.
+
+The only ordinary writer is `optimization.cleanup.trash`; its input stays reference-only and recovery stays
+MANUAL. The only irreversible writer is `optimization.recycle_bin.empty`; it stays in a separate plan,
+targets one explicit system volume, uses recovery NONE and must never receive null to mean all volumes.
+Tests inject `SyntheticRecycleBinPlatform` and `SyntheticRecycleBinEmptyPlatform`; never call the real empty
+adapter in automated tests.
+
+Focused checks:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+uv run pytest tests/integration/test_system_cleanup_workflow.py `
+  tests/security/test_stage4e2_cleanup_security.py `
+  tests/gui/test_system_cleanup_dialog.py -q
+uv run pytest tests/performance/test_system_cleanup_limits.py -q -s
+uv run ruff check src tests
+uv run mypy src
+```
+
+Any behavior change must update the Stage 4E2 API section, security/threat/rollback documentation and the
+source guard that proves there is no permanent-delete or shell fallback.
+
 ## Stage 4E1 development
 
 Stage 4E1 production code may depend only on query interfaces, strict Pydantic evidence models, local

@@ -109,6 +109,32 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4E2 retains the Stage 4E1 five-tool R0 registry unchanged and adds one separate registry with exactly
+four tools: `optimization.cleanup.prepare`, `optimization.cleanup.trash`,
+`optimization.recycle_bin.inspect`, and `optimization.recycle_bin.empty`. A Stage 4E1 report/candidate/UI
+selection is session-local intent only. Direct cleanup requires Fresh discovery, a second exact default-
+unchecked selection, deterministic eligibility and risk review, a new durable R2/R2_HIGH_IMPACT plan,
+plan confirmation, runtime Fresh Preview, object-specific immediate confirmation, atomic single-use
+authority, final TOCTOU checks, sequential execution, verification and audit.
+
+V1 direct roots are exact children of current-user Temp, DirectX shader cache and current-user CrashDumps.
+Stage 1 personal large/inactive/duplicate evidence routes to Stage 2B; Stage 4D3 residual evidence routes to
+Stage 4D4. Browser cache, system Temp, Windows Update, Delivery Optimization, Installer Cache, WinSxS,
+SoftwareDistribution raw cleanup and other Windows-managed locations remain blocked/deferred. Recent,
+locked, active-installer, protected, database/config/user-data, reparse, network, shared, other-user,
+ambiguous or changed objects fail closed; confirmation cannot override them. Mixed selected batches block.
+
+Ordinary cleanup invokes only the shared Windows Recycle Bin primitive, one item at a time, with MANUAL
+recovery. It accepts only durable UUID references, never paths/force/commands. Failure or cancellation stops
+future items; restart marks active work INTERRUPTED and never resumes. Moving to the Bin is not verified
+space reclamation. There is no permanent-delete, shell, Broker/elevation, process/service action, registry
+cleanup, automatic restore, retry or fallback.
+
+Recycle Bin emptying is an independent exact-current-user-system-volume workflow, always
+R2_HIGH_IMPACT/recovery NONE, with its own complete count/size/deletion-age snapshot and two confirmations.
+Any inventory change invalidates authority. The adapter calls `SHEmptyRecycleBinW` only with one explicit
+volume and never null/all-volumes. Automated tests must use fakes and must never empty the host Recycle Bin.
+
 Stage 4E1 adds exactly five isolated R0 tools: `optimization.snapshot`,
 `optimization.storage.analyze`, `optimization.cleanup_candidates.analyze`,
 `optimization.performance.analyze`, and `optimization.recommendations`. They collect bounded current state,
