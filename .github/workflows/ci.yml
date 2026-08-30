@@ -128,6 +128,7 @@ jobs:
         run: >-
           uv run pytest tests/integration/test_system_cleanup_workflow.py
           tests/security/test_stage4e2_cleanup_security.py
+          tests/security/test_stage4e2_safety_coverage.py
           tests/gui/test_system_cleanup_dialog.py -q
       - name: Stage 4D1 uninstall-analysis zero-execution boundary
         if: matrix.python-version == '3.13'

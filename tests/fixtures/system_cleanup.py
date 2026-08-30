@@ -162,6 +162,11 @@ class SyntheticSystemCleanupEnvironment:
     recycle: SyntheticRecycleBinPlatform
     empty_platform: SyntheticRecycleBinEmptyPlatform
     activity: SyntheticCleanupActivityProbe
+    revalidator: FreshCleanupCandidateRevalidator
+    plans: CleanupExecutionPlanBuilder
+    empty_plans: RecycleBinEmptyPlanBuilder
+    confirmations: SystemCleanupConfirmationService
+    validator: SystemCleanupSafetyValidator
 
     def close(self) -> None:
         """Release the two isolated SQLite engines."""
@@ -280,11 +285,12 @@ def build_system_cleanup_environment(
         OptimizationRecycleBinEmptyTool(repository, empty_platform),
     ):
         registry.register(tool)
+    validator = SystemCleanupSafetyValidator(registry)
     service = SystemCleanupService(
         registry,
         plans,
         empty_plans,
-        SystemCleanupSafetyValidator(registry),
+        validator,
         confirmations,
         repository,
         identity,
@@ -301,4 +307,9 @@ def build_system_cleanup_environment(
         recycle=recycle,
         empty_platform=empty_platform,
         activity=activity,
+        revalidator=revalidator,
+        plans=plans,
+        empty_plans=empty_plans,
+        confirmations=confirmations,
+        validator=validator,
     )
