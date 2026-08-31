@@ -1,6 +1,15 @@
 # Stage 5A Office API 逐函数说明
 
-本文件对应 `src/pc_manager_agent` 中的 Stage 5A Office 实现，逐一列出 **208 个函数/方法**，包括私有辅助函数和具名回调。Pydantic 自动生成的方法、Qt 信号及第三方库内部方法不属于本项目函数，未重复列出。
+本文件对应 `src/pc_manager_agent` 中的 Stage 5A Office 实现，逐一列出 **209 个函数/方法**，包括 Stage 5B 加入的取消入口、私有辅助函数和具名回调。Pydantic 自动生成的方法、Qt 信号及第三方库内部方法不属于本项目函数，未重复列出。
+
+### `OfficeTab.cancel_current_work`
+
+```python
+OfficeTab.cancel_current_work(self) -> None
+```
+
+作用：供当前关联的文字/语音请求使用现有 Office 取消入口。只停止当前工作的后续步骤或丢弃
+尚未执行的准备状态，不确认、不保存、不恢复文件，也不终止 Word/Excel；既有事务恢复条件不变。
 
 ## 阅读约定
 

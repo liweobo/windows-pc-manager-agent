@@ -7,6 +7,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
 dist/
@@ -26,6 +27,8 @@ build/
 *.db-wal
 *.sqlite
 *.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 logs/
 reports/
 user-data/

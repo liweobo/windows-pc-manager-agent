@@ -1,5 +1,19 @@
 # Roadmap
 
+## Stage 5B — bounded voice input/output (implemented; real-device validation pending)
+
+Visible PTT, independent upload disclosure, provider-neutral STT/TTS, mandatory final review, shared
+text/voice preparation, metadata-only single-use journal, safe finite summaries, cancellation and fake
+device/SDK/GUI/security tests. All existing domain permissions remain unchanged. Exact default-device
+24kHz PCM only; no ambient listening or biometrics. Some domain receipts remain text-only/unverified.
+Complete the separately authorized real Windows microphone/output/network-cost checklist before release.
+
+## Stage 5C — proposed only, not started
+
+Design a separate browser domain with exact origin/tab scope, read-only-first actions, untrusted page
+content, independent external-send/purchase confirmations, secret protection and no inherited voice or
+Office authority. No browser controller, extension, background task or auto-click is added by Stage 5B.
+
 ## Stage 0 — secure foundation (complete)
 
 GUI/tray, provider boundary, structured plans, tool registry, risk review,

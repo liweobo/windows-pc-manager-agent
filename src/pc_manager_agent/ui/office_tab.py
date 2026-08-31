@@ -628,6 +628,10 @@ class OfficeTab(QWidget):
         else:
             self._discard()
 
+    def cancel_current_work(self) -> None:
+        """Accept a current-page cancellation request, never approval or automatic Undo."""
+        self._cancel_work()
+
     def _ask(self, title: str, text: str) -> bool:
         dialog = QMessageBox(
             QMessageBox.Icon.Warning,

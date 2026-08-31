@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
+from uuid import UUID, uuid4
 
-from PySide6.QtCore import Qt, QThreadPool, Slot
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QEvent, QObject, Qt, QThreadPool, Slot
+from PySide6.QtGui import QCloseEvent, QHideEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
+    QDialog,
+    QDockWidget,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -25,8 +31,10 @@ from PySide6.QtWidgets import (
 )
 
 from pc_manager_agent.app.runtime import ApplicationRuntime
+from pc_manager_agent.app.voice import audio_process_is_elevated, build_voice_services
 from pc_manager_agent.audit.repository import AuditUnavailableError
 from pc_manager_agent.confirmation.models import ConfirmationRequest
+from pc_manager_agent.domain.optimization_receipts import OptimizationTransactionReference
 from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.domain.process_actions import (
     ProcessTargetQuery,
@@ -34,8 +42,14 @@ from pc_manager_agent.domain.process_actions import (
 )
 from pc_manager_agent.domain.reports import ScanReport
 from pc_manager_agent.domain.software_uninstall_analysis import SoftwareTargetQuery
+from pc_manager_agent.domain.user_requests import (
+    RequestChannel,
+    RequestDomain,
+    RequestRoute,
+    UserRequest,
+    VoiceInteractionContext,
+)
 from pc_manager_agent.orchestration.process_action_planner import (
-    is_process_action_request,
     process_target_query,
 )
 from pc_manager_agent.orchestration.service import ScanOrchestrator
@@ -45,21 +59,34 @@ from pc_manager_agent.orchestration.service_action_planner import (
 )
 from pc_manager_agent.orchestration.software_uninstall_analysis import (
     extract_software_target_name,
-    is_software_uninstall_analysis_request,
 )
 from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnostic_request
-from pc_manager_agent.orchestration.system_optimization_planner import is_optimization_request
 from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
+from pc_manager_agent.orchestration.user_requests import (
+    UserRequestDispatcher,
+    diagnostic_preparation_goal,
+    optimization_preparation_goal,
+)
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
+from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.office_tab import OfficeTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
+from pc_manager_agent.ui.service_action_dialog import ServiceActionDialog
 from pc_manager_agent.ui.service_management_tab import ServiceManagementTab
+from pc_manager_agent.ui.service_startup_dialog import ServiceStartupActionDialog
+from pc_manager_agent.ui.stage4x3_action_dialog import Stage4X3ActionDialog
 from pc_manager_agent.ui.startup_management_tab import StartupManagementTab
 from pc_manager_agent.ui.system_diagnostics_tab import SystemDiagnosticsTab
 from pc_manager_agent.ui.system_optimization_tab import SystemOptimizationTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
 from pc_manager_agent.ui.trash_tab import TrashTab
+from pc_manager_agent.ui.voice_audio import QtAudioCapture, QtAudioPlayback
+from pc_manager_agent.ui.voice_controller import VoiceUiController
+from pc_manager_agent.ui.voice_controls import VoiceControls
 from pc_manager_agent.ui.workers import ScanWorker, require_scan_report
+from pc_manager_agent.voice.audio import MicrophonePermissionService
+from pc_manager_agent.voice.results import VoiceResultSummaryService
+from pc_manager_agent.voice.speech import SpeechOutcome, SpeechSummaryFacts
 
 
 class MainWindow(QMainWindow):
@@ -76,7 +103,15 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
         self._last_service_reference: tuple[str, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 5A 结构化办公自动化")
+        self._request_dispatcher = UserRequestDispatcher()
+        self._voice: VoiceUiController | None = None
+        self._voice_context_id = uuid4()
+        self._voice_dialogs: dict[UUID, QDialog] = {}
+        self._voice_receipts: dict[UUID, OptimizationTransactionReference] = {}
+        self._voice_results = VoiceResultSummaryService(
+            runtime.optimization_result_reader.read, datetime.now(UTC)
+        )
+        self.setWindowTitle("Windows PC Manager Agent — Stage 5B 受控语音交互")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -93,6 +128,8 @@ class MainWindow(QMainWindow):
         self._build_settings_tab()
         self._office_tab = OfficeTab(runtime.office)
         self._tabs.addTab(self._office_tab, "办公文档")
+        self._build_voice()
+        self._tabs.currentChanged.connect(self._voice_surface_changed)
         self.statusBar().showMessage("就绪：写操作默认不执行，必须先 Preview 并确认")
 
     def attach_tray(self, tray: SystemTrayController) -> None:
@@ -110,6 +147,7 @@ class MainWindow(QMainWindow):
         )
         input_row = QHBoxLayout()
         self._chat_input = QLineEdit()
+        self._chat_input.setMaxLength(4000)
         self._chat_input.setPlaceholderText(
             "输入文件分析、系统诊断、系统优化分析或一个明确的软件卸载分析目标"
         )
@@ -282,13 +320,17 @@ class MainWindow(QMainWindow):
         text = self._chat_input.text().strip()
         if not text:
             return
-        self._conversation.append(f"你：{text}")
         self._chat_input.clear()
-        office_text = text.casefold()
-        if any(
-            term in office_text
-            for term in ("文档", "工作表", "xlsx", "docx", "csv", "pdf", "markdown")
-        ) and not any(term in office_text for term in ("卸载", "删除", "终止", "服务", "进程")):
+        request = UserRequest(channel=RequestChannel.TEXT, text=text)
+        self._route_request(request, self._request_dispatcher.route(request))
+
+    def _dispatch_domain(self, request: UserRequest, route: RequestRoute) -> None:
+        """Enter existing domain preparation only; all confirmations remain domain-owned."""
+        text = request.text
+        voice = request.channel is not RequestChannel.TEXT
+        domain = route.domain
+        self._conversation.append(f"你：{escape(text)}")
+        if domain is RequestDomain.OFFICE:
             self._tabs.setCurrentWidget(self._office_tab)
             self._office_tab.set_user_goal(text)
             self._conversation.append(
@@ -296,7 +338,7 @@ class MainWindow(QMainWindow):
                 "不会执行宏、脚本或自动控制 Word/Excel。"
             )
             return
-        if is_software_uninstall_analysis_request(text):
+        if domain is RequestDomain.SOFTWARE:
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             target_name = extract_software_target_name(text)
             if target_name is None:
@@ -309,17 +351,21 @@ class MainWindow(QMainWindow):
                 "双确认流程；不会执行原始 UninstallString。"
             )
             self._system_diagnostics_tab.open_routed_uninstall(
-                text,
+                "审查软件卸载能力" if voice else text,
                 query=SoftwareTargetQuery(display_name=target_name),
             )
             return
         service_intent_value = service_action_intent(text)
-        if service_intent_value is not None:
+        if domain is RequestDomain.SERVICE and service_intent_value is not None:
             self._tabs.setCurrentWidget(self._service_management_tab)
             try:
                 target_query = service_target_query(text)
             except ValueError as exc:
-                if _references_previous_service(text) and self._last_service_reference is not None:
+                if (
+                    not voice
+                    and _references_previous_service(text)
+                    and self._last_service_reference is not None
+                ):
                     target_query, display_name = self._last_service_reference
                 else:
                     self._conversation.append(f"Agent：未执行。{exc}")
@@ -336,19 +382,25 @@ class MainWindow(QMainWindow):
                 display_name=display_name,
             )
             return
-        if is_optimization_request(text):
+        if domain is RequestDomain.OPTIMIZATION:
             self._tabs.setCurrentWidget(self._system_optimization_tab)
-            self._system_optimization_tab.goal_input.setText(text)
+            self._system_optimization_tab.goal_input.setText(
+                optimization_preparation_goal(text) if voice else text
+            )
             self._conversation.append(
                 "Agent：已转到 Stage 4E1 系统优化分析。这里仅生成 R0 计划、空间候选、"
                 "性能发现和建议，不提供一键清理、Boost、Fix 或 Apply。"
             )
             self._system_optimization_tab.prepare()
             return
-        if is_process_action_request(text):
+        if domain is RequestDomain.PROCESS:
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             query: ProcessTargetQuery | None = None
-            if _references_previous_process(text) and self._last_process_reference is not None:
+            if (
+                not voice
+                and _references_previous_process(text)
+                and self._last_process_reference is not None
+            ):
                 pid, name = self._last_process_reference
                 query = ProcessTargetQuery(
                     query_type=ProcessTargetQueryType.SELECTED_PROCESS,
@@ -361,7 +413,9 @@ class MainWindow(QMainWindow):
                 )
             else:
                 try:
-                    process_target_query(text)
+                    parsed_query = process_target_query(text)
+                    if voice:
+                        query = parsed_query
                 except ValueError as exc:
                     if is_diagnostic_request(text):
                         self._conversation.append(
@@ -375,15 +429,19 @@ class MainWindow(QMainWindow):
                     "Agent：正在本地解析具体进程并生成 Stage 4A Preview。"
                     "必须完成计划确认和即时确认才可能执行。"
                 )
-            self._system_diagnostics_tab.open_process_action(text, query=query)
+            self._system_diagnostics_tab.open_process_action(
+                "审查进程正常退出" if voice else text, query=query
+            )
             return
-        if is_diagnostic_request(text):
+        if domain is RequestDomain.DIAGNOSTICS:
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             self._conversation.append(
                 "Agent：已转到系统诊断。将先展示 R0 只读计划，确认后才查询；"
                 "不会终止进程、修改服务/启动项、卸载软件或请求管理员权限。"
             )
-            self._system_diagnostics_tab.start_planning(text)
+            self._system_diagnostics_tab.start_planning(
+                diagnostic_preparation_goal(text) if voice else text
+            )
             return
         trash_intent = classify_trash_intent(text)
         if trash_intent is TrashIntentDecision.PROHIBITED_PERMANENT_DELETE:
@@ -407,8 +465,7 @@ class MainWindow(QMainWindow):
                 "或在该页面手动添加对象，然后生成 R2 Preview 并完成两次确认。"
             )
             return
-        operation_terms = ("移动", "重命名", "改名", "整理", "撤销", "回滚")
-        if any(term in text for term in operation_terms):
+        if domain is RequestDomain.FILE_OPERATIONS:
             self._tabs.setCurrentWidget(self._operation_tab)
             if any(term in text for term in ("撤销", "回滚")):
                 self._conversation.append(
@@ -421,8 +478,18 @@ class MainWindow(QMainWindow):
                     "Agent：已转到 Stage 2A。模型只生成受限意图；具体路径由本地代码计算，"
                     "写操作必须经过真实 Preview 和明确确认。"
                 )
-                self._operation_tab.start_planning(text)
+                if voice:
+                    self._conversation.append(
+                        "Agent：请在页面选择确切文件和规则；语音不会授权路径。"
+                    )
+                else:
+                    self._operation_tab.start_planning(text)
             return
+        if domain is not RequestDomain.FILES:
+            self._conversation.append("Agent：请在对应页面明确目标和操作，尚未执行。")
+            return
+        if voice:
+            text = "只读分析大文件、疑似闲置文件和重复候选"
         self._analysis_tab.goal_input.setText(text)
         self._tabs.setCurrentWidget(self._analysis_tab)
         if not self._runtime.authorized_paths.list_authorized():
@@ -436,6 +503,217 @@ class MainWindow(QMainWindow):
             "扫描仍需结构化计划、安全审查和计划确认。"
         )
         self._analysis_tab.start_planning(text)
+
+    def _build_voice(self) -> None:
+        """Compose exactly one microphone owner without opening or probing any device."""
+        try:
+            services = build_voice_services(
+                self._runtime.settings.data_directory, self._runtime.audit
+            )
+            capture = QtAudioCapture(services.coordinator.settings, self)
+            playback = QtAudioPlayback(self)
+            self._voice = VoiceUiController(
+                services,
+                capture,
+                playback,
+                MicrophonePermissionService(audio_process_is_elevated),
+                self,
+            )
+        except Exception:
+            self.statusBar().showMessage("语音配置或日志不可用；已停用语音，请使用文字输入。")
+            return
+        capture.failed.connect(self._voice.hardware_error)
+        capture.progress.connect(self._voice.capture_progress)
+        playback.failed.connect(self._voice.hardware_error)
+        playback.finished.connect(self._voice.playback_finished)
+        self._voice.request_ready.connect(self._route_request)
+        dock = QDockWidget("语音输入：默认不录音、不上传、不播报", self)
+        dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        dock.setWidget(
+            VoiceControls(
+                self._voice,
+                self._voice_context,
+                dock,
+                summary=lambda: self._voice_summary(self._voice_context_id),
+            )
+        )
+        self._operation_tab.domain_preview_ready.connect(self._voice_tab_preview)
+        self._trash_tab.domain_preview_ready.connect(self._voice_tab_preview)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.installEventFilter(self)
+            app.applicationStateChanged.connect(self._voice_application_state)
+
+    def _voice_application_state(self, state: Qt.ApplicationState) -> None:
+        if self._voice is not None and state != Qt.ApplicationState.ApplicationActive:
+            self._voice.cancel()
+
+    def _voice_summary(self, context_id: UUID) -> SpeechSummaryFacts:
+        reference = self._voice_receipts.get(context_id)
+        if reference is None:
+            return SpeechSummaryFacts(outcome=SpeechOutcome.UNVERIFIED)
+        return self._voice_results.summarize(reference)
+
+    def _voice_tab_preview(self, value: object) -> None:
+        if isinstance(value, OptimizationTransactionReference):
+            self._voice_receipts[self._voice_context_id] = value
+
+    def _voice_surface_changed(self, index: int) -> None:
+        self._voice_context_id = uuid4()
+
+    def _voice_context(self) -> VoiceInteractionContext:
+        surfaces = {
+            1: RequestDomain.FILES,
+            2: RequestDomain.FILE_OPERATIONS,
+            3: RequestDomain.TRASH,
+            4: RequestDomain.DIAGNOSTICS,
+            5: RequestDomain.OPTIMIZATION,
+            6: RequestDomain.STARTUP,
+            7: RequestDomain.SERVICE,
+            11: RequestDomain.OFFICE,
+        }
+        return VoiceInteractionContext(
+            active_surface=surfaces.get(self._tabs.currentIndex()),
+            conversation_id=self._voice_context_id,
+        )
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """Mirror voice controls in existing review dialogs; no new session or authority."""
+        if (
+            event.type() == QEvent.Type.Show
+            and self._voice is not None
+            and isinstance(
+                watched,
+                (
+                    ObservedDomainDialog,
+                    ServiceActionDialog,
+                    ServiceStartupActionDialog,
+                    Stage4X3ActionDialog,
+                ),
+            )
+            and self._owns_voice_dialog(watched)
+            and watched not in self._voice_dialogs.values()
+            and watched.layout() is not None
+        ):
+            reference = uuid4()
+            self._voice_dialogs[reference] = watched
+            controls = VoiceControls(
+                self._voice,
+                lambda: VoiceInteractionContext(conversation_id=reference),
+                watched,
+                summary=lambda: self._voice_summary(reference),
+            )
+            layout = watched.layout()
+            if layout is not None:
+                layout.addWidget(controls)
+            watched.finished.connect(lambda _result: self._voice_dialogs.pop(reference, None))
+            if isinstance(watched, ObservedDomainDialog):
+                watched.domain_preview_ready.connect(
+                    lambda value: self._voice_bind_receipt(reference, value)
+                )
+        return super().eventFilter(watched, event)
+
+    def _owns_voice_dialog(self, dialog: QDialog) -> bool:
+        parent = dialog.parent()
+        while parent is not None:
+            if parent is self:
+                return True
+            parent = parent.parent()
+        return False
+
+    def _voice_bind_receipt(self, context_id: UUID, value: object) -> None:
+        if isinstance(value, OptimizationTransactionReference):
+            self._voice_receipts[context_id] = value
+
+    @Slot(object, object)
+    def _route_request(self, request: UserRequest, route: RequestRoute) -> None:
+        """Use one finite dispatcher for both channels; speech can never resolve a confirmation."""
+        if route != self._request_dispatcher.route(request):
+            self.statusBar().showMessage("请求路由已变化，请重新提交；尚未执行。")
+            return
+        voice = request.channel is not RequestChannel.TEXT
+        domain = route.domain
+        context_id = request.context.conversation_id
+        dialog = self._voice_dialogs.get(context_id) if voice and context_id is not None else None
+        if voice and not dialog and request.context.conversation_id != self._voice_context_id:
+            self.statusBar().showMessage("录音时的页面已变化；请重新明确当前目标。")
+            return
+        if domain is RequestDomain.CONFIRMATION:
+            self._conversation.append(
+                "Agent：语音/聊天文字不能代替业务确认，请检查屏幕上的具体对象。"
+            )
+            self.statusBar().showMessage("未批准任何计划、即时确认或 UAC。")
+            return
+        if domain is RequestDomain.STATUS:
+            self._conversation.append("Agent：请查看当前业务页的真实状态；语音不推断操作成功。")
+            return
+        if domain is RequestDomain.CANCEL:
+            if dialog and dialog.isVisible():
+                # Existing closeEvent owns cancellation, including leave-installer-alive semantics.
+                dialog.close()
+            elif not voice or request.context.conversation_id == self._voice_context_id:
+                self._cancel_current_surface()
+            self.statusBar().showMessage(
+                "已请求停止当前页面的后续工作；不是撤销，不终止外部卸载器。"
+            )
+            return
+        if domain is RequestDomain.BLOCKED:
+            try:
+                self._runtime.audit_prohibited_request(
+                    "[redacted user request]", "REQUEST_BLOCKED_BY_INPUT_POLICY"
+                )
+            except AuditUnavailableError:
+                self.statusBar().showMessage("请求已拒绝；审计不可用，请停止写操作并检查本地数据。")
+            self._conversation.append(
+                "Agent：已拒绝永久删除、敏感数据或绕过安全规则的请求；未执行。"
+            )
+            return
+        if dialog or QApplication.activeModalWidget() is not None:
+            self.statusBar().showMessage("先完成或取消当前审查；语音不能替换待确认计划。")
+            return
+        if domain in {RequestDomain.AMBIGUOUS, RequestDomain.UNSUPPORTED}:
+            self._conversation.append(
+                "Agent：目标不明确或不支持。请明确对象，并在原业务页选择；尚未执行。"
+            )
+            return
+        if domain is RequestDomain.STARTUP:
+            self._tabs.setCurrentWidget(self._startup_management_tab)
+            self._conversation.append("Agent：请从当前启动项清单选择确切对象，再生成独立 Preview。")
+            return
+        if domain is RequestDomain.CLEANUP:
+            self._tabs.setCurrentWidget(self._system_optimization_tab)
+            self._conversation.append(
+                "Agent：请先完成只读分析并明确勾选，再点击受控清理；不能全选或自动清理。"
+            )
+            return
+        if domain is RequestDomain.RECYCLE_BIN_EMPTY:
+            self._tabs.setCurrentWidget(self._system_optimization_tab)
+            self._system_optimization_tab.open_recycle_bin_empty()
+            return
+        self._dispatch_domain(request, route)
+
+    def _cancel_current_surface(self) -> None:
+        current = self._tabs.currentWidget()
+        if current is self._analysis_tab:
+            self._analysis_tab.cancel()
+        elif current is self._operation_tab:
+            self._operation_tab.cancel()
+        elif current is self._trash_tab:
+            self._trash_tab.cancel()
+        elif current is self._system_diagnostics_tab:
+            self._system_diagnostics_tab.cancel()
+        elif current is self._system_optimization_tab:
+            self._system_optimization_tab.cancel()
+        elif current is self._office_tab:
+            self._office_tab.cancel_current_work()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Stop audio before hiding to tray; no background or invisible microphone session."""
+        if self._voice is not None:
+            self._voice.cancel()
+        super().hideEvent(event)
 
     @Slot(object)
     def _open_move_for_paths(self, value: object) -> None:
@@ -651,6 +929,9 @@ class MainWindow(QMainWindow):
 
     def shutdown(self) -> bool:
         """Request cancellation and wait a bounded time for workers."""
+        if self._voice is not None and not self._voice.shutdown():
+            self.statusBar().showMessage("正在取消语音网络请求，请稍后再次退出。")
+            return False
         if not self._office_tab.shutdown():
             return False
         self._analysis_tab.shutdown()

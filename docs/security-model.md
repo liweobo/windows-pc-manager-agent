@@ -1,5 +1,22 @@
 # Security model
 
+## Stage 5B untrusted speech boundary
+
+Explicit visible user activation, standard-user token check, fixed-format input, bounded recording,
+mandatory pre-capture audit, exact single-use outbound consent, final review, atomic request consumption
+and unchanged domain safety checks are separate gates. Speech recognition never authenticates a person.
+ALL business approvals remain visual. Fresh identity, object scope, risk, UAC and recovery remain domain-owned.
+Background/inactive UI and cancellation stop native audio before journal operations. Cancelled or stale
+callbacks cannot route text or restart playback. Restart interrupts pending input/disclosures.
+
+Known-secret detection blocks text but is not a complete privacy filter; untranscribed raw audio cannot
+be inspected for secrets before a cloud upload. The upload dialog states the actual endpoint/model,
+duration/bytes, potential fees and cloud retention caveat. API secrets, PCM and transcript bodies are not
+journal fields. Shared request routing supplies canonical voice goals to legacy audited planners.
+Safe speech uses aggregate facts only, never arbitrary UI/document/chat text or raw provider errors.
+Speech dispatch refuses OpenAI/httpx/httpcore DEBUG logging because SDK request-option logging can
+contain multipart audio. It does not alter the user's global logging configuration.
+
 ## Stage 5A Office controls
 
 Exact READ/OUTPUT UUID grants, finite structured operations, full file identity/hash revalidation,

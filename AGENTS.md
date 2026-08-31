@@ -109,6 +109,29 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 5B is an input/output layer, never a voice executor. Use one visible, explicit Push-to-Talk
+owner with bounded memory-only 24 kHz mono signed PCM. Startup, hide, background/inactive state, cancel,
+device failure and quit must never leave live capture or queued speech. No wake word, ambient listening,
+global keyboard hook, biometrics, voice identity, cloning, generic decoder/shell or Broker audio dependency.
+
+Audio upload and safe-summary TTS each require exact expiring single-use external-disclosure consent.
+Never inherit the legacy LLM endpoint or log PCM, raw provider errors or transcript bodies. Known secrets
+block transcript routing and speech; this is not comprehensive DLP and cannot pre-filter raw cloud STT.
+Every final transcript is editable and requires visual review. Atomic SQLite consumption permits at most
+one UserRequest per recording, including edited versions. Restart interrupts pending work and never replays.
+
+Text and voice share the finite UserRequestDispatcher. Both enter existing domain preparation, Fresh
+resolution, Preview, confirmations, execution, verification and recovery; voice changes no risk/privilege
+boundary. V1 ALL business confirmations, including R0, are visual. Saying yes, assuming risk or recognizing
+a speaker cannot approve R1/R2/R3, force, UAC or a transaction. Context is only a stale-checked UI hint.
+Cancel targets the current associated UI; it is not Undo and never kills an external uninstaller.
+
+Speak only finite aggregate facts; verified success requires fresh durable domain verification and consumed
+confirmation lineage. Unsupported receipt types remain UNVERIFIED. Do not infer from closed windows,
+process exit, arbitrary chat text or lack of an exception. Keep new voice core and native audio safety
+coverage at 95%; fakes/synthetic PCM only in automated tests. No real mic, playback, paid speech call or
+UAC in CI. Maintain docs/voice-interaction-model.md, docs/api-voice-interaction.md and the manual checklist.
+
 Stage 5A is an independent, finite Office domain. Read exact user-selected files only after an R0 plan;
 READ and OUTPUT grants never imply parent-directory scope. Keep document bodies, edit values, Diff and
 provider payloads volatile and out of audit. Use bounded static parsers/serializers and typed operations,

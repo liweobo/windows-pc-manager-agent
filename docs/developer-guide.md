@@ -1,5 +1,30 @@
 # Developer guide
 
+## Stage 5B verification
+
+No extra dependency was introduced: PySide6 QtMultimedia, official OpenAI SDK and the existing SQLAlchemy
+stack are reused. Speech adapters are independent of user-edited LLM adapters and their endpoint settings.
+Do not run microphone/playback/API tests on the host without separate informed user consent.
+
+```powershell
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src
+$env:QT_QPA_PLATFORM = 'offscreen'
+uv run pytest tests/unit/voice tests/integration/test_voice_request_flow.py tests/security/test_voice_boundaries.py tests/gui/test_voice_interaction.py tests/gui/test_voice_audio.py -q
+uv run pytest -m 'not performance' --cov=pc_manager_agent --cov-fail-under=85
+uv run bandit -q -r src
+uv run pip-audit
+uv build
+uv run python -m pc_manager_agent --smoke-test
+```
+
+CI additionally uses `.coveragerc-stage5b` to include native Qt audio code in the critical 95% gate;
+it must not silently inherit the general GUI coverage omission. See the workflow's explicit module list.
+The exact manual device checklist and limitations live in [voice-manual-tests.md](voice-manual-tests.md).
+Actual local results, isolated coverage commands and unverified items are recorded in
+[stage5b-validation.md](stage5b-validation.md).
+
 ## Stage 5A development and verification
 
 Dependencies are locked by `uv.lock`: defusedxml, openpyxl, python-docx and pypdf. Core tests do not need

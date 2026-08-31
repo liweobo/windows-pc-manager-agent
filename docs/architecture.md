@@ -1,5 +1,22 @@
 # Architecture
 
+## Stage 5B voice boundaries
+
+`app/voice.py` composes one application-local coordinator, metadata store, provider service and router.
+`ui/voice_audio.py` owns bounded Qt hardware; `ui/voice_controller.py` owns private cancellable workers.
+Mirrored `VoiceControls` share that same instance. No device is opened at import or construction.
+`domain/user_requests.py` and `orchestration/user_requests.py` form the shared text/voice request boundary.
+The Main window only navigates/prepares existing domains; each domain retains its own authority.
+
+The pipeline is `explicit PTT → stopped PCM → exact disclosure → STT → editable visual review → atomic
+request claim → shared route → domain Fresh/Preview/confirm/execute/verify`. Input COMPLETED means delivered,
+never executed. TTS is an independent `read-only verified facts → finite summary → exact disclosure →
+bounded synthesis → visible playback`; PTT first resets output and invalidates late synthesis.
+
+The Broker imports neither this composition nor voice/speech/Qt modules. The separate additive
+`voice.sqlite3` has only state/reference/revision/digests; raw audio/transcripts stay volatile.
+See [contracts and limitations](voice-interaction-model.md) and [API](api-voice-interaction.md).
+
 ## Stage 5A Office boundary
 
 `app/office.py` composes independent read and write registries, exact-file grants, bounded parsing,

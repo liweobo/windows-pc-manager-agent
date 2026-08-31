@@ -1,5 +1,17 @@
 # Rollback design
 
+## Stage 5B code and voice recovery
+
+Close the application normally and wait for provider cancellation before reverting the Stage 5B commit
+with `git revert <Stage-5B-commit>`. Keep the existing project, user provider customizations, database and
+all previous-stage recovery evidence. Reverting code does not undo a file/service/uninstall operation.
+The additive voice journal can remain; older code does not consume it. No destructive migration is required.
+
+Voice cancellation discards volatile input and stops future playback/request work. It cannot retract an
+already uploaded payload, restore a completed business change or terminate an external uninstaller.
+Use the original domain's separately reviewed Undo/manual recovery. Pending voice work becomes INTERRUPTED
+after restart; there is no automatic rerecord, resubmit, replay or retry. Discarded audio cannot be recovered.
+
 ## Stage 5A Office recovery
 
 Code rollback uses `git revert <Stage-5A-commit>` on the same project; it does not restore user documents.

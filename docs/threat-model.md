@@ -1,5 +1,24 @@
 # Threat model
 
+## Stage 5B speech threats
+
+| Threat | Enforced control / residual risk |
+|---|---|
+| Ambient speech, accent, homophone or hallucinated final text | Explicit bounded PTT and mandatory editable review; confidence absent means UNKNOWN |
+| Replay, duplicate final callback, double click or edited replay | Session revision CAS and one durable request UUID; restart never replays |
+| Spoofed voice saying yes or requesting administrator | No voice identity/approval primitive; original visual confirmations and Windows UAC unchanged |
+| Hidden/background recording or TTS feedback into mic | One owner; explicit activation; hide/inactive/quit stop; reset output before PTT |
+| Exfiltration to unexpected provider | Exact independent expiring digest-bound destination/model/payload consent; official adapter never inherits legacy proxy |
+| Sensitive dictation | Warn before upload; known-secret transcript/output block; raw audio privacy needs user judgment |
+| Slow provider or late callback | Finite timeout, cancellation event, request ID comparison, no automatic retry; sent data cannot be recalled |
+| Malicious transcript, file name or fake command | Finite shared preparation router and independent domain validation; no shell/tool execution in voice |
+| Changed selection/target after recording | Context epoch invalidation and fresh original-domain resolution; vague references require explicit selection |
+| Corrupt journal or missing audit | Fail closed before capture/dispatch/request delivery; hardware stop does not depend on database success |
+| False spoken success/recovery | Aggregate readback with consumed confirmation lineage; unsupported/incomplete receipts remain UNVERIFIED |
+
+Python/Qt/OS may retain temporary memory copies; this implementation makes no secure-erasure or
+cloud-zero-retention guarantee. It also provides no resistance to malware already controlling this user process.
+
 ## Stage 5A document threats
 
 | Threat | Control / remaining limitation |

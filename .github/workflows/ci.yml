@@ -41,6 +41,7 @@ jobs:
         if: matrix.python-version == '3.13'
         run: >-
           uv run pytest tests/security tests/unit/test_confirmation.py
+          tests/unit/voice
           tests/unit/office tests/integration/office
           tests/unit/test_system_optimization_confirmation.py
           tests/unit/test_system_diagnostic_confirmation.py
@@ -466,7 +467,7 @@ jobs:
           $broker = Resolve-Path 'dist/pc-manager-privileged-broker/pc-manager-privileged-broker.exe'
           $manifest = "$broker.manifest"
           if (-not (Test-Path -LiteralPath $manifest)) { throw 'Adjacent asInvoker manifest missing' }
-          $forbidden = Select-String -Path 'build/pc-manager-privileged-broker/xref-pc-manager-privileged-broker.html' -Pattern 'PySide6|openai|pc_manager_agent.providers|pc_manager_agent.ui'
+          $forbidden = Select-String -Path 'build/pc-manager-privileged-broker/xref-pc-manager-privileged-broker.html' -Pattern 'PySide6|openai|pc_manager_agent.providers|pc_manager_agent.ui|pc_manager_agent.voice|speech_to_text|text_to_speech'
           if ($forbidden) { throw 'Broker package contains a forbidden GUI/model/provider module' }
           $process = Start-Process -FilePath $broker -PassThru -Wait -WindowStyle Hidden
           if ($process.ExitCode -ne 20) { throw "Broker no-argument guard returned $($process.ExitCode)" }
@@ -517,6 +518,24 @@ jobs:
       - name: Stage 5A synthetic document budgets
         if: matrix.python-version == '3.13'
         run: uv run pytest tests/performance/test_office_document_budget.py -q -s
+      - name: Stage 5B synthetic voice and native audio critical boundary
+        if: matrix.python-version == '3.13'
+        run: >-
+          uv run pytest tests/unit/voice tests/gui/test_voice_audio.py
+          tests/gui/test_voice_interaction.py tests/integration/test_voice_request_flow.py
+          tests/security/test_voice_boundaries.py
+          --cov-config=.coveragerc-stage5b
+          --cov=pc_manager_agent.voice
+          --cov=pc_manager_agent.domain.voice
+          --cov=pc_manager_agent.domain.user_requests
+          --cov=pc_manager_agent.safety.voice
+          --cov=pc_manager_agent.confirmation.voice_disclosure
+          --cov=pc_manager_agent.persistence.voice
+          --cov=pc_manager_agent.audit.voice
+          --cov=pc_manager_agent.orchestration.user_requests
+          --cov=pc_manager_agent.ui.voice_audio
+          --cov=pc_manager_agent.providers.speech_logging
+          --cov-report=term-missing --cov-fail-under=95 -q
       - name: Python security scan
         run: uv run bandit -q -r src
       - name: Dependency vulnerability scan

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — Stage 5B
+
+### Added
+
+- Explicit visible Push-to-Talk, bounded memory-only PCM capture, shared modal/main controls, separate
+  upload disclosure, reviewed editable final transcripts and atomic at-most-once normal request delivery.
+- Replaceable async STT/TTS ports, isolated official OpenAI adapters with no automatic retries, finite
+  aggregate speech summaries, cancellation/late-callback guards and reset-based playback interruption.
+- Shared finite text/voice preparation router; no new Windows tool or business confirmation authority.
+- Metadata-only restart-interrupted voice journal, disclosure audit, fake-device/SDK/GUI/security tests,
+  dedicated critical coverage gate, per-function API and manual-device validation documentation.
+
+### Safety and limitations
+
+- All business confirmation remains visual, including R0. No wake word, voice biometrics, always-on
+  recording, arbitrary code, additional elevation, voice Broker or automatic retry/resume exists.
+- V1 supports only the default device's exact 24kHz mono PCM format. Every final text requires review;
+  OpenAI confidence is UNKNOWN, not an invented percentage. UI settings apply to this app run only.
+- Raw audio cannot be reliably secret-filtered before cloud STT. Local volatile storage is not a cloud
+  zero-retention promise. Cancellation cannot retract a sent payload or reverse a completed business action.
+- Service/Office/privileged receipts without a supported aggregate readback remain UNVERIFIED in speech;
+  use their original visual result/recovery pages. SHORT/NORMAL both use bounded finite V1 summaries.
+
 ## Unreleased — Stage 5A
 
 ### Added
