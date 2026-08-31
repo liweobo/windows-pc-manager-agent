@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from pc_manager_agent import __version__
+from pc_manager_agent.app.office import OfficeServices, build_office_services
 from pc_manager_agent.app.optimization_reviews import (
     OptimizationReviewServices,
     build_optimization_review_services,
@@ -810,6 +811,9 @@ class ApplicationRuntime:
             on_export=self._audit_report_export,
         )
         self.explorer = WindowsExplorerService(self.authorized_paths)
+        self.office: OfficeServices = build_office_services(
+            settings, self.audit, self.authorized_paths.forbidden_roots
+        )
 
     def create_scan_orchestrator(self, root: Path) -> ScanOrchestrator:
         """为一个用户选择的根目录创建独立路径策略、注册表和扫描编排器。"""
@@ -2116,6 +2120,7 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.office.close()
         self.optimization_report_store.clear()
         if self._optimization_reviews is not None:
             self._optimization_reviews.handoffs.clear()

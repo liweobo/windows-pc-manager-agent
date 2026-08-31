@@ -51,6 +51,7 @@ from pc_manager_agent.orchestration.system_diagnostic_planner import is_diagnost
 from pc_manager_agent.orchestration.system_optimization_planner import is_optimization_request
 from pc_manager_agent.orchestration.trash_planner import TrashIntentDecision, classify_trash_intent
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
+from pc_manager_agent.ui.office_tab import OfficeTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
 from pc_manager_agent.ui.service_management_tab import ServiceManagementTab
 from pc_manager_agent.ui.startup_management_tab import StartupManagementTab
@@ -75,7 +76,7 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._last_process_reference: tuple[int, str] | None = None
         self._last_service_reference: tuple[str, str] | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 4E1 只读系统优化分析")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 5A 结构化办公自动化")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -90,6 +91,8 @@ class MainWindow(QMainWindow):
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
+        self._office_tab = OfficeTab(runtime.office)
+        self._tabs.addTab(self._office_tab, "办公文档")
         self.statusBar().showMessage("就绪：写操作默认不执行，必须先 Preview 并确认")
 
     def attach_tray(self, tray: SystemTrayController) -> None:
@@ -281,6 +284,18 @@ class MainWindow(QMainWindow):
             return
         self._conversation.append(f"你：{text}")
         self._chat_input.clear()
+        office_text = text.casefold()
+        if any(
+            term in office_text
+            for term in ("文档", "工作表", "xlsx", "docx", "csv", "pdf", "markdown")
+        ) and not any(term in office_text for term in ("卸载", "删除", "终止", "服务", "进程")):
+            self._tabs.setCurrentWidget(self._office_tab)
+            self._office_tab.set_user_goal(text)
+            self._conversation.append(
+                "Agent：已转到办公文档。请明确选择文件；读取、模型发送和编辑各自确认。"
+                "不会执行宏、脚本或自动控制 Word/Excel。"
+            )
+            return
         if is_software_uninstall_analysis_request(text):
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             target_name = extract_software_target_name(text)
@@ -623,16 +638,21 @@ class MainWindow(QMainWindow):
             for column, value in enumerate(values):
                 self._audit_table.setItem(row_index, column, QTableWidgetItem(value))
 
-    def request_quit(self) -> None:
+    def request_quit(self) -> bool:
         """Cancel work, hide tray, and close the window for application shutdown."""
+        if not self.shutdown():
+            self.statusBar().showMessage("办公任务正在安全退出，请稍后再次退出；不会强杀任务。")
+            return False
         self._quitting = True
-        self.shutdown()
         if self._tray:
             self._tray.hide()
         self.close()
+        return True
 
-    def shutdown(self) -> None:
+    def shutdown(self) -> bool:
         """Request cancellation and wait a bounded time for workers."""
+        if not self._office_tab.shutdown():
+            return False
         self._analysis_tab.shutdown()
         self._operation_tab.shutdown()
         self._trash_tab.shutdown()
@@ -646,6 +666,7 @@ class MainWindow(QMainWindow):
         # configured 30-second service timeout plus a small cleanup margin so
         # the database is not closed while a service worker is still auditing.
         QThreadPool.globalInstance().waitForDone(35_000)
+        return True
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Hide to tray unless a controlled application exit is in progress."""
@@ -654,8 +675,9 @@ class MainWindow(QMainWindow):
             self.hide()
             self.statusBar().showMessage("应用仍在托盘运行")
             return
-        if not self._quitting:
-            self.shutdown()
+        if not self._quitting and not self.shutdown():
+            event.ignore()
+            return
         event.accept()
 
     def _show_error(self, message: str) -> None:

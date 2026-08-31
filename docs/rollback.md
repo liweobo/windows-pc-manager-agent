@@ -1,5 +1,22 @@
 # Rollback design
 
+## Stage 5A Office recovery
+
+Code rollback uses `git revert <Stage-5A-commit>` on the same project; it does not restore user documents.
+Office Restore/Undo are separate application operations and require fresh authorization/confirmation.
+
+- Existing-document edit: verified DPAPI backup plus retained original; conditional FULL Restore returns
+  the original file object only when the current result has not changed. Preserve newer files on conflict.
+- New / Save As output: conditional FULL Undo moves the unchanged result to a unique retained sibling,
+  never permanently deletes it. The journal contains the exact recovery location.
+- Failure/interruption: inspect metadata history for `.pending`, `.original`, `.recovered` and backup UUID.
+  Do not delete or rename those files blindly. No automatic retry, overwrite, commit or recovery on restart.
+- If recovery evidence is damaged or unavailable, automatic FULL recovery is unavailable and must be refused.
+  Keep the data directory and current Windows user profile for DPAPI backup access; never promise password bypass.
+
+Backups remain when code is reverted. Database tables are additive; code rollback must not erase them.
+See [Office transaction details](office-automation-model.md#事务备份与恢复).
+
 ## Stage 4E3 has no global Undo
 
 A review session only links original domain results; cancelling or reverting E3 code does not reverse

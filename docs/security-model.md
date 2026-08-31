@@ -1,5 +1,16 @@
 # Security model
 
+## Stage 5A Office controls
+
+Exact READ/OUTPUT UUID grants, finite structured operations, full file identity/hash revalidation,
+reparse/network/protected-path exclusion, format preflight, resource-limited parsing, explicit Preview,
+verified current-user encrypted backup, atomic single-use approvals and no-replace commits form an
+independent security boundary. Existing document replacement requires R2 confirmations. R1 new files
+support conditional Undo by retaining the unchanged output, never deleting it. Restore refuses newer files.
+No macros/VBA/COM/shell, Office process control, elevation, forced overwrite or automatic resume exists.
+Model disclosure is separate and source-bounded; audit excludes bodies, Diff, keys and provider payloads.
+See [detailed policies and real limitations](office-automation-model.md), including the non-atomic rename gap.
+
 ## Stage 4E3 review controls
 
 - Source report and recommendation UUIDs resolve locally under a canonical digest and bounded expiry.

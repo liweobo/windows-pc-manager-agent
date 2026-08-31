@@ -1,5 +1,17 @@
 # Windows PC Manager Agent
 
+## Stage 5A：可预览、备份和恢复的办公文档操作
+
+新增“办公文档”页面：明确选择文件后只读解析，支持 TXT/Markdown/JSON/CSV，以及保守的
+DOCX/XLSX 文件级创建和编辑；PDF 仅提取文本或生成派生报告。默认另存为、不覆盖已有目标。
+原地修改必须通过已验证备份、精确 Preview、计划确认和即时确认，再重新验证最终文件。
+恢复只处理未被用户再次修改的 Agent 结果；中断不自动继续。没有宏、COM、Shell 或鼠标键盘控制。
+
+可选 OpenAI 仅接收单独确认的最小片段，返回没有执行权限的结构化建议/原文摘录。
+复杂 Word、受保护或含外部内容的 Office 包只读，公式不自动计算，OCR/PPTX 编辑/网络写入未实现。
+详见 [实际能力与安全模型](docs/office-automation-model.md)、[逐函数 API](docs/api-office-automation.md)。
+本地测试、性能、跳过项及复现方法见 [Stage 5A 验证记录](docs/stage5a-validation.md)。
+
 ## Stage 4E3：建议逐项复查与业务结果核验
 
 “系统优化分析”的建议现在可以默认不勾选地加入复查清单，再逐项进入既有启动项、进程、

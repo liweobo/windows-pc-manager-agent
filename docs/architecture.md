@@ -1,5 +1,14 @@
 # Architecture
 
+## Stage 5A Office boundary
+
+`app/office.py` composes independent read and write registries, exact-file grants, bounded parsing,
+metadata persistence, confirmation, audit and recovery. `office/*` operates on structured bytes/models;
+only `platform_support/windows/office_files.py` owns held-handle filesystem changes. The UI delegates to
+`OfficeDocumentService`, `OfficeEditService` and optional `OfficeModelService`, never directly to a writer.
+No Stage 4 tool, global consent or Broker capability is inherited. See [full data flow](office-automation-model.md)
+and [function contracts](api-office-automation.md). R0 discovery and R1 backup approvals are not R2 authority.
+
 ## Stage 4E3 review orchestration boundary
 
 `app.optimization_reviews` composes the finite policy/resolver, sealed preparation registry, expiring

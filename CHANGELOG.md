@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Stage 5A
+
+### Added
+
+- Independent Office identities, exact READ/OUTPUT grants, bounded structured adapters and a private
+  Job-limited parser/serializer process; TXT/Markdown/JSON/CSV, conservative DOCX/XLSX and read-only PDF.
+- Finite edit plans, local Diff, current-user encrypted verified backup, two-level expiring confirmation,
+  atomic authority consumption, no-replace handle commits, readback verification and independent recovery.
+- Background Office GUI, metadata-only history, source-addressed minimal external disclosure, extractive
+  model suggestions and a separate official OpenAI adapter; legacy user-edited providers are untouched.
+- Synthetic format, native Windows lease, transaction, confirmation, corruption, injection and GUI tests.
+
+### Security and limitations
+
+- No macro/VBA/COM/shell/desktop control, external-link refresh, elevation, force unlock or permanent deletion.
+  Original files and recovery copies are retained; incomplete two-rename commits never auto-resume.
+- FULL restore is conditional on unchanged current results plus intact backup and retained original object.
+  Complex formatting, OCR, PDF/PPTX editing, network writes and general multi-output batches remain deferred.
+- Decimal JSON edits do not round untouched values through binary floating point. CSV formula-like text is
+  escaped; spreadsheet text remains text and existing formulas are never silently flattened.
+
 ## Unreleased — Stage 4E3
 
 ### Added

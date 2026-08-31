@@ -1,5 +1,31 @@
 # Developer guide
 
+## Stage 5A development and verification
+
+Dependencies are locked by `uv.lock`: defusedxml, openpyxl, python-docx and pypdf. Core tests do not need
+Microsoft Office, real API calls, elevation or actual user documents. New Office OpenAI code lives in
+`providers/llm/openai_office.py`; do not overwrite a user's existing provider customizations.
+
+```powershell
+uv sync --all-groups --locked
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src
+$env:QT_QPA_PLATFORM = 'offscreen'
+uv run pytest tests/unit/office tests/integration/office tests/security/test_office_boundaries.py tests/security/test_office_failure_paths.py tests/gui/test_office_tab.py -q
+uv run pytest -m 'not performance' --cov=pc_manager_agent --cov-fail-under=85
+uv run bandit -q -r src
+uv run pip-audit
+uv build
+uv run python -m pc_manager_agent --smoke-test
+```
+
+CI additionally uses `tests/office-coverage.ini` to include native Office Windows code in the dedicated
+95% gate. Do not omit native code to make this gate pass. Keep fakes at provider/OS failure boundaries and
+real synthetic temp-file tests for handle locks, no-replace commits, ADS protection and original-object restore.
+The normal suite's symlink tests may skip without Windows Developer Mode; never elevate merely to run them.
+Per-function contracts, parameters, outputs and side effects are in [Office API reference](api-office-automation.md).
+
 ## Stage 4E3 development
 
 Read [routing architecture](optimization-action-routing.md) and [per-function API](api-optimization-actions.md)

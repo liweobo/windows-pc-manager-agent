@@ -1,5 +1,26 @@
 # Threat model
 
+## Stage 5A document threats
+
+| Threat | Control / remaining limitation |
+|---|---|
+| Document/file-name prompt injection | Data-only context, no tools/code, finite local validation, source-bound quotes, independent consent |
+| Macro, DDE, external connection, embedded content | Static inspection only; risky structures read-only or rejected; no native Office activation |
+| ZIP/XML/PDF resource abuse | ZIP limits, defused XML, bounded private parser/serializer process and Job memory/process limits |
+| Same-path replacement, junction or race | Exact grants, pinned ancestors, exclusive source lease, full hash/ID checks, no-replace handle rename |
+| Save clobbers user work | Default absent-target Save As, immutable Preview, revalidation, preserved original, verified encrypted backup |
+| Confirmation replay or stale UI | Exact digest/purpose/expiry binding, atomic SQLite single-use consumption, restart invalidation |
+| Restore overwrites a later revision | Current identity must equal Agent result; retained original identity and backup must remain exact |
+| Credential/body leakage | Explicit selected spans only, known-secret denial, no body/Diff audit, safe error codes and separate provider endpoint display |
+| Excel/CSV changes data types or calculations | Tagged scalars, finite formula policy, text escaping, Decimal transformations, semantic reopen verification |
+| Crash between renames | Journal first, retain all material, INTERRUPTED without auto-commit; no claim of a globally atomic swap |
+
+The parser Job limits resources but is not a fully restricted-token/AppContainer sandbox. A malicious same-user
+process able to tamper with the application, database or libraries is outside this MVP's trust boundary.
+Keep dependencies patched. DPAPI does not protect against malware already executing as the same user.
+Cloud sync and antivirus can cause safe denials; no lock bypass or download/hydration fallback is attempted.
+Test fixtures are synthetic; no real user documents or host cleanup operations are used by automated tests.
+
 ## Stage 4E3 threats and mitigations
 
 | Threat | Mitigation | Remaining limitation |

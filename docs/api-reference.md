@@ -1,5 +1,15 @@
 # API reference
 
+## Stage 5A Office API
+
+Every named function and method added for Office (including nested worker callbacks) is indexed with its
+signature, purpose, output and security side effects in [api-office-automation.md](api-office-automation.md).
+`ApplicationRuntime.__init__/close` now compose/close isolated Office services; `AppSettings.from_environment`
+accepts bounded `PC_MANAGER_OFFICE_LIMITS`. `MainWindow.__init__` adds the Office tab; `_handle_chat` routes
+document intent without granting authority. `MainWindow.shutdown/request_quit` return a completion boolean
+so pending Office work prevents premature database shutdown. `main.run_application.controlled_quit` respects
+that result, and `__main__` guards multiprocessing startup with `freeze_support`.
+
 ## Stage 4E3 optimization review API
 
 See [Stage 4E3 per-function reference](api-optimization-actions.md) for models, routing, handoffs, session

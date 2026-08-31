@@ -8,6 +8,8 @@ from pathlib import Path
 from platformdirs import user_data_path
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from pc_manager_agent.config.office import OfficeLimits
+
 
 class AppSettings(BaseModel):
     """Runtime settings with safe defaults; BaseModel validates interaction data."""
@@ -16,6 +18,7 @@ class AppSettings(BaseModel):
     # extra="forbid" 不允许传入未定义字段; frozen=True 使实例创建后不可修改.
 
     app_name: str = "WindowsPCManagerAgent"
+    office_limits: OfficeLimits = Field(default_factory=OfficeLimits)
     llm_provider: str = "disabled"
     openai_model: str | None = None
     openai_api_key: SecretStr | None = Field(
@@ -329,6 +332,9 @@ class AppSettings(BaseModel):
             ),
         }
         data_directory = os.getenv("PC_MANAGER_DATA_DIRECTORY")
+        office_limits = os.getenv("PC_MANAGER_OFFICE_LIMITS")
+        if office_limits:
+            raw["office_limits"] = OfficeLimits.model_validate_json(office_limits)
         if data_directory:
             raw["data_directory"] = Path(data_directory)
         return cls.model_validate(raw)  # 按字段类型校验并转换 raw, 然后返回 Pydantic 模型.

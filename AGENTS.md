@@ -109,6 +109,27 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 5A is an independent, finite Office domain. Read exact user-selected files only after an R0 plan;
+READ and OUTPUT grants never imply parent-directory scope. Keep document bodies, edit values, Diff and
+provider payloads volatile and out of audit. Use bounded static parsers/serializers and typed operations,
+never model Python, VBA, macros, generic COM, shell, desktop control, external-link refresh or Office killing.
+Macro/complex/protected/external-content documents are read-only or rejected. PDF extraction is read-only.
+Use the Office registry and service authority boundary; no previous-stage consent, Broker or elevation.
+
+Save As defaults to an absent target. In-place edits require a separately confirmed verified DPAPI backup,
+an exact new Preview, plan and short-lived immediate consent, atomic SQLite authority consumption, held
+source/parent handles, final SHA-256/identity checks, exclusive temporary output and no-replace renames.
+The two-rename sequence is not globally atomic: failures retain original/temp/backup, never auto-fix/delete.
+Reopen/verify the final object before success. Conditional FULL restore returns the retained original object
+only while the current result and recovery evidence remain exact; new-file Undo retains rather than deletes.
+Restart interrupts all pending work. No retry/resume. Keep original Windows/Stage 4 registries unchanged.
+
+Model disclosure is independent, exact, expiring and single-use, shows provider/endpoint/model and only
+explicit selected source spans. Known secret patterns block. A model proposal is never execution authority;
+quotes must match their sources and numerical aggregates belong to deterministic Decimal code.
+Preserve Office's dedicated 95% security gate including its native Windows file implementation. Tests use
+synthetic documents only. Update docs/office-automation-model.md and docs/api-office-automation.md on changes.
+
 Stage 4E3 adds exactly four isolated R0 review tools: `optimization.recommendation.inspect`,
 `optimization.recommendation.prepare_action`, `optimization.session.create`, and
 `optimization.session.refresh`. Keep the Stage 4E1 five-tool and Stage 4E2 four-tool registries unchanged.

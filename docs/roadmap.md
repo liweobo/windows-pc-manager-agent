@@ -211,14 +211,25 @@ and subsequent Force/Restore actions remain in their original business UI. Metri
 independent window, not a persistent causal-benefit time series. Production signing and isolated manual
 Windows validation from earlier stages remain outstanding; this is not a production-ready release claim.
 
-## Proposed Stage 5A — Office / desktop office automation foundation (not started)
+## Stage 5A — structured Office automation (narrow V1 implemented; local checks passed)
 
-Next design a narrow, independently reviewed Office/desktop automation foundation. Start with explicit
-user-selected document scope, structured task plans, bounded read-only inspection and previews; any
-document write needs its own registered tool, confirmation, verified backup and conflict-safe recovery.
-Do not inherit system-optimization consent or add arbitrary scripts, macros, shell commands, broad
-mouse/keyboard control, external sends or uploads. Specific Office adapters and supported operations
-require the separate Stage 5A plan and approval; no Stage 5A implementation is part of Stage 4E3.
+Exact document authorization, handle identity, bounded static parsing, finite edit plans, Preview/Diff,
+verified encrypted backup, independent confirmations, conflict-safe commits, verification and conditional
+recovery are implemented. The GUI and optional minimum-context OpenAI capability are separate from system
+management. See [the actual format matrix and limitations](office-automation-model.md). No macro, COM,
+shell, Office UI control or privileged route exists. Final quality/CI results are reported separately;
+this is not a production-signing or full Microsoft Office compatibility claim. See the
+[local verification record](stage5a-validation.md); remote CI must be checked against the final commit.
+
+## Stage 5B — Voice Interaction (planned, not started)
+
+Push-to-talk, replaceable STT/TTS, editable transcription and voice cancellation need a separate plan.
+Voice recognition must never substitute for destructive confirmation. Do not start automatically.
+
+## Stage 5C / 5D / 5E (planned, not started)
+
+Structured browser automation, memory/multi-agent integration and the final cross-domain orchestrator
+remain independently designed future stages; Stage 5A grants none of their capabilities.
 
 ## Stage 4X4+ — additional privileged actions (not started)
 

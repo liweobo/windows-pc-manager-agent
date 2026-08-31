@@ -30,6 +30,10 @@ logs/
 reports/
 user-data/
 audit-exports/
+office-backups/
+.pcma-*.pending.*
+.pcma-*.original.*
+.pcma-*.recovered.*
 
 # IDE and OS
 .idea/

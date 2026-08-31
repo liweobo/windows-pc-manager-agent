@@ -55,8 +55,8 @@ def run_application(settings: AppSettings, *, smoke_test: bool = False) -> int:
     window = MainWindow(runtime)
 
     def controlled_quit() -> None:
-        window.request_quit()
-        application.quit()
+        if window.request_quit():
+            application.quit()
 
     tray = SystemTrayController(window, controlled_quit)
     window.attach_tray(tray)
