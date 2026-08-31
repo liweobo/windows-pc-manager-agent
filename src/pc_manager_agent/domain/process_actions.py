@@ -164,12 +164,19 @@ class ProcessTargetQuery(FrozenModel):
     text: str | None = Field(default=None, min_length=1, max_length=500)
     pid: int | None = Field(default=None, ge=1)
     include_application_group: bool = True
+    expected_create_time: datetime | None = None
+    expected_executable_path: Path | None = None
 
     @model_validator(mode="after")
     def require_one_query_value(self) -> Self:
         """Require exactly the value appropriate for the selected query type."""
         if self.query_type is ProcessTargetQueryType.NAME:
-            if self.text is None or self.pid is not None:
+            if (
+                self.text is None
+                or self.pid is not None
+                or self.expected_create_time is not None
+                or self.expected_executable_path is not None
+            ):
                 raise ValueError("Name queries require text and cannot include a PID")
         elif self.pid is None or self.text is not None:
             raise ValueError("PID and selected-process queries require only a PID")

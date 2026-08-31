@@ -1,5 +1,18 @@
 # Rollback design
 
+## Stage 4E3 has no global Undo
+
+A review session only links original domain results; cancelling or reverting E3 code does not reverse
+system actions. Use the original domain's independently confirmed recovery workflow: file move/rename
+and startup restoration are conditional FULL; moving files/residuals/cache to the Recycle Bin is MANUAL;
+software uninstall and Recycle Bin emptying are NONE. Graceful/force process actions retain their original
+recovery rules. Do not overwrite restore conflicts or treat reinstall guidance as Undo.
+
+For a code rollback after committing this stage, use `git revert <stage-4e3-commit-sha>`, run checks, then
+push the new revert commit. Keep existing user configuration and local data. The additive
+`optimization_review_sessions` table and MSIX verification summaries need not be deleted; older code
+ignores them. Never delete the audit database to roll back code. Stage 4X recovery stays in its own module.
+
 ## Stage 4E2 recovery
 
 Ordinary Stage 4E2 cleanup has recovery level `MANUAL`, not FULL. A verified success means Windows Shell

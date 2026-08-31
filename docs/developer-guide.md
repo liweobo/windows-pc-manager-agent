@@ -1,5 +1,35 @@
 # Developer guide
 
+## Stage 4E3 development
+
+Read [routing architecture](optimization-action-routing.md) and [per-function API](api-optimization-actions.md)
+before changing a route. New preparation capabilities require finite typed policy and isolated tests;
+never add a writer to the E3 registry or pass approval, raw target identity, shell or admin parameters.
+The result reader is observation-only. Validate the actual persisted domain result shape, not a guessed
+full report schema or a terminal-state name. Domain confirmation lineage and per-item verification matter.
+
+Run from the existing repository with its locked environment:
+
+```powershell
+uv sync --all-groups --locked
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src
+$env:QT_QPA_PLATFORM = "offscreen"
+$stage4e3Tests = rg --files tests | Where-Object { $_ -match 'test_stage4e3' }
+uv run pytest @stage4e3Tests -q
+uv run pytest -m "not performance" --cov=pc_manager_agent --cov-report=term-missing --cov-fail-under=85
+uv run bandit -q -r src
+uv run pip-audit
+uv build
+uv run python -m pc_manager_agent --smoke-test
+```
+
+CI additionally enforces 95% on the E3 route/policy/session/outcome boundary and retains all older stage
+checks. Tests use synthetic transactions/adapters and disposable files, never the host Recycle Bin empty
+API or arbitrary process/service/software mutation. Logs expose IDs, digests and aggregates, not credentials
+or local document contents. See `audit.optimization_actions` for event names.
+
 ## Stage 4E2 development
 
 Stage 4E2 must keep the Stage 4E1 report registry and its writer registry separate. Do not make a report,

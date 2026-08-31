@@ -1,5 +1,12 @@
 # API reference
 
+## Stage 4E3 optimization review API
+
+See [Stage 4E3 per-function reference](api-optimization-actions.md) for models, routing, handoffs, session
+journaling, domain receipts, outcome verification, minimal refresh and GUI integration. It also describes
+the narrow process-selection and MSIX evidence changes. [Routing architecture](optimization-action-routing.md)
+defines call order and authority boundaries; these are part of the API contract.
+
 ## Stage 4E2 controlled system-cleanup API
 
 本节逐项说明 Stage 4E2 新增或改变的生产函数。调用顺序是安全契约的一部分：UI 只能调用

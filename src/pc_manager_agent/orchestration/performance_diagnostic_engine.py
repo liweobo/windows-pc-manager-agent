@@ -120,6 +120,23 @@ class PerformanceDiagnosticEngine:
                     limitations=("未采集每个启动项的实际启动耗时",),
                 )
             )
+        large_software = tuple(
+            item
+            for item in snapshot.software
+            if item.estimated_size_bytes is not None and item.estimated_size_bytes >= 1024**3
+        )
+        if large_software:
+            findings.append(
+                PerformanceFinding(
+                    category=PerformanceCategory.POSSIBLE_SOFTWARE_BLOAT,
+                    title="部分已安装软件报告了较大的体积估算",
+                    explanation="注册信息的估算不等于实测大小，也不能证明软件多余或应卸载。",
+                    confidence=OptimizationConfidence.LOW,
+                    evidence_types=(OptimizationEvidence.REGISTRY_ESTIMATED_SIZE,),
+                    evidence={"entry_count": len(large_software), "threshold_bytes": 1024**3},
+                    limitations=("仅使用本次已获批清单；未测量软件目录内容",),
+                )
+            )
         if not findings:
             findings.append(
                 PerformanceFinding(

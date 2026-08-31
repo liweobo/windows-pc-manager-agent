@@ -7,7 +7,6 @@ from html import escape
 from PySide6.QtCore import QThreadPool, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, WingetUninstallServices
 from pc_manager_agent.confirmation.winget_uninstall import WingetUninstallConfirmation
+from pc_manager_agent.domain.optimization_receipts import OptimizationReceiptKind
 from pc_manager_agent.domain.software_uninstall_analysis import SoftwareTargetQuery
 from pc_manager_agent.domain.winget_uninstall import (
     WingetUninstallExecutionReport,
@@ -26,6 +26,7 @@ from pc_manager_agent.domain.winget_uninstall import (
     WingetUninstallPreview,
     WingetVerificationState,
 )
+from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.residual_analysis_dialog import ResidualAnalysisDialog
 from pc_manager_agent.ui.winget_uninstall_workers import (
     WingetRuntimePrepareWorker,
@@ -37,7 +38,7 @@ from pc_manager_agent.ui.winget_uninstall_workers import (
 )
 
 
-class WingetUninstallDialog(QDialog):
+class WingetUninstallDialog(ObservedDomainDialog):
     """Keep cancellation as default while exposing one exact package transaction."""
 
     def __init__(
@@ -118,6 +119,7 @@ class WingetUninstallDialog(QDialog):
             return
         self._services = bundled.services
         self._plan = prepared.plan
+        self.publish_domain_preview(OptimizationReceiptKind.WINGET, prepared.plan.transaction_id)
         self._preview = prepared.preview
         self._confirmation = prepared.plan_confirmation
         self._stage = "PLAN_CONFIRMATION"

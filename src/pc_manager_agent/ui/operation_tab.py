@@ -33,6 +33,10 @@ from pc_manager_agent.domain.file_operations import (
     RenameRule,
     RenameRuleType,
 )
+from pc_manager_agent.domain.optimization_receipts import (
+    OptimizationReceiptKind,
+    OptimizationTransactionReference,
+)
 from pc_manager_agent.domain.transactions import OperationProgress
 from pc_manager_agent.orchestration.file_operation_service import PreparedFileOperation
 from pc_manager_agent.rollback.manager import PreparedRollback
@@ -52,6 +56,7 @@ class FileOperationTab(QWidget):
     """Keep user interaction visible while delegating every write to Stage 2A services."""
 
     status_message = Signal(str)
+    domain_preview_ready = Signal(object)
     progress_changed = Signal(object)
 
     def __init__(self, runtime: ApplicationRuntime) -> None:
@@ -348,6 +353,11 @@ class FileOperationTab(QWidget):
             self._worker_failed(str(exc))
             return
         self._prepared = prepared
+        self.domain_preview_ready.emit(
+            OptimizationTransactionReference(
+                kind=OptimizationReceiptKind.FILES, transaction_id=prepared.preview.transaction_id
+            )
+        )
         self._set_planning_busy(False, "Preview 已生成；没有执行任何写操作")
         preview = prepared.preview
         create_count = sum(

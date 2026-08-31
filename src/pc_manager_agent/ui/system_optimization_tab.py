@@ -25,10 +25,18 @@ from PySide6.QtWidgets import (
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, SystemOptimizationServices
 from pc_manager_agent.confirmation.models import ConfirmationRequest
+from pc_manager_agent.domain.optimization_actions import (
+    OptimizationActionPreparationResult,
+    OptimizationRecommendationReference,
+    OptimizationSessionCreateRequest,
+    RecommendationActionState,
+)
 from pc_manager_agent.domain.system_cleanup_execution import SystemCleanupRequest
 from pc_manager_agent.domain.system_optimization import OptimizationPlan, SystemOptimizationReport
 from pc_manager_agent.reporting.exporter import ReportFormat
 from pc_manager_agent.tools.manifest import CancellationToken
+from pc_manager_agent.ui.optimization_review_dialog import OptimizationDomainReviewDialog
+from pc_manager_agent.ui.optimization_review_workers import OptimizationReviewWorker
 from pc_manager_agent.ui.system_cleanup_dialog import (
     RecycleBinEmptyDialog,
     SystemCleanupDialog,
@@ -89,6 +97,11 @@ class SystemOptimizationTab(QWidget):
         self._confirmation: ConfirmationRequest | None = None
         self._report: SystemOptimizationReport | None = None
         self._worker: _OptimizationWorker | None = None
+        self._reviews = runtime.create_optimization_review_services()
+        self._review_session_id: UUID | None = None
+        self._review_dialog: OptimizationDomainReviewDialog | None = None
+        self._review_worker: OptimizationReviewWorker | None = None
+        self._closing_reviews = False
         self._build_ui()
         self._load_authorized_roots()
 
@@ -175,7 +188,9 @@ class SystemOptimizationTab(QWidget):
         self.startup_table = self._table(("名称", "来源", "范围", "启用"))
         self.process_table = self._table(("PID", "名称", "CPU %", "内存 %", "状态"))
         self.finding_table = self._table(("类别", "标题", "置信度", "说明"))
-        self.recommendation_table = self._table(("目标", "建议", "收益", "置信度", "未来风险"))
+        self.recommendation_table = self._table(
+            ("选择", "目标", "建议", "收益", "置信度", "未来风险", "复查状态")
+        )
         for table, title in (
             (self.overview_table, "概览"),
             (self.storage_table, "存储"),
@@ -187,6 +202,26 @@ class SystemOptimizationTab(QWidget):
         ):
             self.results.addTab(table, title)
         layout.addWidget(self.results, 1)
+        review_actions = QHBoxLayout()
+        self.create_review_button = QPushButton("将勾选建议加入复查清单")
+        self.next_review_button = QPushButton("复查下一条（不执行）")
+        self.cancel_review_button = QPushButton("取消剩余复查")
+        self.create_review_button.clicked.connect(self.create_review_session)
+        self.next_review_button.clicked.connect(self.open_next_review)
+        self.cancel_review_button.clicked.connect(self.cancel_review_session)
+        for button in (
+            self.create_review_button,
+            self.next_review_button,
+            self.cancel_review_button,
+        ):
+            review_actions.addWidget(button)
+        layout.addLayout(review_actions)
+        self.session_view = QTextBrowser()
+        self.session_view.setMaximumHeight(130)
+        self.session_view.setPlainText(
+            "清单不是一键优化授权；每次只复查一条，执行必须使用原业务的独立确认。"
+        )
+        layout.addWidget(self.session_view)
 
     @staticmethod
     def _table(headers: tuple[str, ...]) -> QTableWidget:
@@ -378,19 +413,190 @@ class SystemOptimizationTab(QWidget):
                 for item in report.performance_findings
             ),
         )
-        self._fill(
-            self.recommendation_table,
-            tuple(
-                (
-                    item.goal.value,
-                    item.title,
-                    item.expected_benefit.value,
-                    item.confidence.value,
-                    item.future_risk_level.value,
+        self._populate_recommendations(report)
+
+    def _populate_recommendations(self, report: SystemOptimizationReport) -> None:
+        self.recommendation_table.setSortingEnabled(False)
+        self.recommendation_table.setRowCount(len(report.recommendations))
+        for row, recommendation in enumerate(report.recommendations):
+            selector = QTableWidgetItem()
+            selector.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            selector.setCheckState(Qt.CheckState.Unchecked)
+            selector.setData(Qt.ItemDataRole.UserRole, str(recommendation.recommendation_id))
+            self.recommendation_table.setItem(row, 0, selector)
+            try:
+                route = self._reviews.router.inspect(
+                    OptimizationRecommendationReference(
+                        source_report_id=report.report_id,
+                        recommendation_id=recommendation.recommendation_id,
+                    )
                 )
-                for item in report.recommendations
-            ),
-        )
+                state = f"{route.actionability.value} → {route.target_domain.value}"
+            except Exception:
+                state = "STALE / 不可复查；需要新的只读报告"
+            values = (
+                recommendation.goal.value,
+                recommendation.title,
+                recommendation.expected_benefit.value,
+                recommendation.confidence.value,
+                recommendation.future_risk_level.value,
+                state,
+            )
+            for column, value in enumerate(values, 1):
+                self.recommendation_table.setItem(row, column, QTableWidgetItem(value))
+        self.recommendation_table.setSortingEnabled(True)
+
+    @Slot()
+    def create_review_session(self) -> None:
+        """Record selected IDs only; neither bulk execution nor global Undo is created."""
+        if (
+            self._report is None
+            or self._review_dialog is not None
+            or self._review_worker is not None
+        ):
+            return
+        selected = []
+        for row in range(self.recommendation_table.rowCount()):
+            item = self.recommendation_table.item(row, 0)
+            if item is not None and item.checkState() is Qt.CheckState.Checked:
+                selected.append(UUID(str(item.data(Qt.ItemDataRole.UserRole))))
+        if not selected:
+            self._show_error("请明确勾选要逐项复查的建议；默认不选择任何建议。")
+            return
+        try:
+            if self._review_session_id is not None:
+                self._reviews.sessions.cancel(self._review_session_id)
+            session = self._reviews.sessions.create(
+                OptimizationSessionCreateRequest(
+                    source_report_id=self._report.report_id, recommendation_ids=tuple(selected)
+                )
+            )
+            self._review_session_id = session.session_id
+            self._show_review_session()
+        except Exception as exc:
+            self._show_error(f"清单未创建：{exc}")
+
+    @Slot()
+    def open_next_review(self) -> None:
+        """Enter exactly one preparation; never continue automatically after an outcome."""
+        if (
+            self._review_session_id is None
+            or self._review_dialog is not None
+            or self._review_worker is not None
+        ):
+            return
+        try:
+            session = self._reviews.sessions.get(self._review_session_id)
+            pending = next(
+                (item for item in session.items if item.state is RecommendationActionState.PENDING),
+                None,
+            )
+            if pending is None:
+                self._show_review_session()
+                return
+            worker = OptimizationReviewWorker(
+                self._reviews.sessions, session.session_id, pending.recommendation_id
+            )
+            worker.signals.completed.connect(self._review_prepared)
+            worker.signals.failed.connect(self._review_failed)
+            self._review_worker = worker
+            QThreadPool.globalInstance().start(worker)
+        except Exception as exc:
+            self._show_error(f"无法进入复查：{exc}")
+
+    @Slot(object)
+    def _review_prepared(self, value: object) -> None:
+        self._review_worker = None
+        if self._closing_reviews or self._review_session_id is None:
+            return
+        if not isinstance(value, OptimizationActionPreparationResult):
+            self._review_failed("无效的复查结果")
+            return
+        preparation = value
+        try:
+            session = self._reviews.sessions.get(self._review_session_id)
+            if session.status.value in {"CANCELLED", "STALE"}:
+                self._show_review_session()
+                return
+            if preparation.fresh_context_id is None:
+                self._show_review_session()
+                return
+            context = self._reviews.handoffs.take(
+                preparation.fresh_context_id, preparation.route_id
+            )
+            # Repeat source invalidation immediately before navigation; the domain still
+            # performs all target identity, policy, Preview and authorization checks.
+            route = self._reviews.router.inspect(
+                OptimizationRecommendationReference(
+                    source_report_id=session.source_report_id,
+                    recommendation_id=preparation.recommendation_id,
+                )
+            )
+            if route.source_digest != context.route.source_digest:
+                raise ValueError("建议来源已变化，请重新分析")
+            dialog = OptimizationDomainReviewDialog(
+                self._runtime, session.session_id, preparation, context, self
+            )
+            self._review_dialog = dialog
+            dialog.finished.connect(lambda _result: self._review_closed(preparation))
+            dialog.open()
+            self._show_review_session()
+        except Exception as exc:
+            # A consumed navigation context cannot be retried; stop the remaining list
+            # instead of stranding it as ROUTED or silently opening another domain.
+            self.cancel_review_session()
+            self._show_error(f"无法进入复查：{exc}")
+
+    @Slot(str)
+    def _review_failed(self, message: str) -> None:
+        self._review_worker = None
+        if not self._closing_reviews:
+            self._show_error(f"复查未开始：{message}；请检查来源是否过期或目录授权是否变更。")
+            self._show_review_session()
+
+    def _review_closed(self, preparation: OptimizationActionPreparationResult) -> None:
+        self._review_dialog = None
+        if self._review_session_id is None:
+            return
+        try:
+            session = self._reviews.sessions.get(self._review_session_id)
+            item = next(
+                value
+                for value in session.items
+                if value.recommendation_id == preparation.recommendation_id
+            )
+            if item.state is RecommendationActionState.ROUTED:
+                self._reviews.sessions.close_review(
+                    session.session_id, item.recommendation_id, preparation.handoff_id
+                )
+            self._show_review_session()
+        except Exception as exc:
+            self._show_error(f"无法更新清单；不会推断成功：{exc}")
+
+    @Slot()
+    def cancel_review_session(self) -> None:
+        """Cancel remaining reviews only; completed work and external installers stay intact."""
+        if self._review_session_id is not None:
+            try:
+                self._reviews.sessions.cancel(self._review_session_id)
+                self._show_review_session()
+            except Exception as exc:
+                self._show_error(f"未能保存取消状态：{exc}")
+
+    def _show_review_session(self) -> None:
+        if self._review_session_id is None:
+            return
+        session = self._reviews.sessions.get(self._review_session_id)
+        lines = [f"复查清单 {session.session_id} — {session.status.value}"]
+        for index, item in enumerate(session.items, 1):
+            detail = (
+                f"；业务结果 {item.outcome.outcome.value}；恢复 {item.outcome.recovery_level.value}"
+                if item.outcome
+                else "；没有已验证的执行结果"
+            )
+            lines.append(f"{index}. {item.state.value}{detail}")
+        lines.append("取消只停止后续复查，不自动还原已完成操作。性能收益尚未测量。")
+        self.session_view.setPlainText("\n".join(lines))
 
     @staticmethod
     def _fill(table: QTableWidget, rows: tuple[tuple[str, ...], ...]) -> None:
@@ -489,6 +695,10 @@ class SystemOptimizationTab(QWidget):
     def shutdown(self) -> None:
         """Cancel pending reads during controlled application shutdown."""
         self.cancel()
+        self._closing_reviews = True
+        self.cancel_review_session()
+        if self._review_dialog is not None:
+            self._review_dialog.shutdown()
 
     def _show_error(self, message: str) -> None:
         QMessageBox.warning(self, "操作未执行", message)

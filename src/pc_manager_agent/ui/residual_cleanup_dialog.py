@@ -9,7 +9,6 @@ from PySide6.QtCore import QThreadPool, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -22,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, ResidualCleanupServices
+from pc_manager_agent.domain.optimization_receipts import OptimizationReceiptKind
 from pc_manager_agent.domain.residual_cleanup import (
     CleanupEligibilityDecision,
     ResidualCleanupAssessment,
@@ -33,6 +33,7 @@ from pc_manager_agent.orchestration.residual_cleanup import (
     PreparedResidualCleanup,
     RuntimeResidualCleanup,
 )
+from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.residual_cleanup_workers import (
     PreparedResidualCleanupUiState,
     ResidualCleanupExecuteWorker,
@@ -46,7 +47,7 @@ from pc_manager_agent.ui.residual_cleanup_workers import (
 _LOG = logging.getLogger(__name__)
 
 
-class ResidualCleanupDialog(QDialog):
+class ResidualCleanupDialog(ObservedDomainDialog):
     """Keep old report intent separate from fresh R2 execution authority."""
 
     def __init__(
@@ -145,6 +146,9 @@ class ResidualCleanupDialog(QDialog):
             self.primary.setEnabled(True)
             return
         self._prepared = state.prepared
+        self.publish_domain_preview(
+            OptimizationReceiptKind.RESIDUAL, state.prepared.plan.transaction_id
+        )
         self._stage = "PLAN"
         self._show_plan_confirmation(state)
 

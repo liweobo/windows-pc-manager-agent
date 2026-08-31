@@ -24,6 +24,10 @@ from PySide6.QtWidgets import (
 )
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, TrashServices
+from pc_manager_agent.domain.optimization_receipts import (
+    OptimizationReceiptKind,
+    OptimizationTransactionReference,
+)
 from pc_manager_agent.orchestration.trash_service import (
     PreparedTrashOperation,
     RuntimeConfirmedTrashOperation,
@@ -40,6 +44,7 @@ class TrashTab(QWidget):
     """Show exact R2 impact while business services enforce every safety boundary."""
 
     status_message = Signal(str)
+    domain_preview_ready = Signal(object)
 
     def __init__(self, runtime: ApplicationRuntime) -> None:
         super().__init__()
@@ -174,6 +179,12 @@ class TrashTab(QWidget):
             self._show_error(str(exc))
             return
         self._prepared = prepared
+        self.domain_preview_ready.emit(
+            OptimizationTransactionReference(
+                kind=OptimizationReceiptKind.PERSONAL_TRASH,
+                transaction_id=prepared.preview.transaction_id,
+            )
+        )
         preview = prepared.preview
         self.summary.setPlainText(
             f"风险：R2\n选择：{preview.selected_count}\n目录内对象：{preview.contained_object_count}\n"

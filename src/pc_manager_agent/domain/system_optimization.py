@@ -221,6 +221,26 @@ class ExpectedBenefit(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class RecommendationType(StrEnum):
+    """Finite review intents; no member is an execution command."""
+
+    REVIEW_TEMP_STORAGE = "REVIEW_TEMP_STORAGE"
+    REVIEW_RECYCLE_BIN = "REVIEW_RECYCLE_BIN"
+    REVIEW_APPLICATION_CACHE = "REVIEW_APPLICATION_CACHE"
+    REVIEW_CRASH_DUMPS = "REVIEW_CRASH_DUMPS"
+    REVIEW_LARGE_FILES = "REVIEW_LARGE_FILES"
+    REVIEW_INACTIVE_FILES = "REVIEW_INACTIVE_FILES"
+    REVIEW_DUPLICATES = "REVIEW_DUPLICATES"
+    REVIEW_STARTUP_ITEM = "REVIEW_STARTUP_ITEM"
+    REVIEW_HIGH_RESOURCE_PROCESS = "REVIEW_HIGH_RESOURCE_PROCESS"
+    REVIEW_INSTALLED_SOFTWARE = "REVIEW_INSTALLED_SOFTWARE"
+    REVIEW_SOFTWARE_RESIDUAL = "REVIEW_SOFTWARE_RESIDUAL"
+    REVIEW_SERVICE = "REVIEW_SERVICE"
+    FREE_DISK_SPACE = "FREE_DISK_SPACE"
+    NO_ACTION_NEEDED = "NO_ACTION_NEEDED"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+
 class OptimizationPlan(BaseModel):
     """Immutable R0 plan whose exact digest is bound to user confirmation."""
 
@@ -397,6 +417,8 @@ class OptimizationRecommendation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     recommendation_id: UUID = Field(default_factory=uuid4)
+    # Legacy reports remain readable but never acquire a route by parsing their text.
+    recommendation_type: RecommendationType = RecommendationType.MANUAL_REVIEW
     goal: OptimizationGoal
     title: str = Field(min_length=1, max_length=300)
     explanation: str = Field(min_length=1, max_length=2_000)

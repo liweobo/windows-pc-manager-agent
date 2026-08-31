@@ -8,7 +8,6 @@ from uuid import UUID
 from PySide6.QtCore import QThreadPool, Signal, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -20,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, StartupActionServices
 from pc_manager_agent.confirmation.startup_actions import StartupActionConfirmation
+from pc_manager_agent.domain.optimization_receipts import OptimizationReceiptKind
 from pc_manager_agent.domain.startup_actions import (
     StartupActionPlan,
     StartupActionPreview,
@@ -28,6 +28,7 @@ from pc_manager_agent.domain.startup_actions import (
     StartupMutationResult,
 )
 from pc_manager_agent.safety.startup_validator import StartupSafetyReview
+from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.startup_workers import (
     StartupExecutionWorker,
     StartupPrepareWorker,
@@ -38,7 +39,7 @@ from pc_manager_agent.ui.startup_workers import (
 )
 
 
-class StartupActionDialog(QDialog):
+class StartupActionDialog(ObservedDomainDialog):
     """Keep backup, Preview, both approvals, execution, and verification visible."""
 
     completed = Signal()
@@ -125,6 +126,7 @@ class StartupActionDialog(QDialog):
             return
         self._services = prepared.services
         self._plan = prepared.plan
+        self.publish_domain_preview(OptimizationReceiptKind.STARTUP, prepared.plan.transaction_id)
         self._preview = prepared.preview
         self._show_preview(prepared.plan, prepared.preview, prepared.review, runtime=False)
         if not prepared.review.approved:

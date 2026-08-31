@@ -130,6 +130,27 @@ jobs:
           tests/security/test_stage4e2_cleanup_security.py
           tests/security/test_stage4e2_safety_coverage.py
           tests/gui/test_system_cleanup_dialog.py -q
+      - name: Stage 4E3 synthetic review-routing boundary
+        if: matrix.python-version == '3.13'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          uv run pytest tests/unit/test_stage4e3_routing.py
+          tests/unit/test_stage4e3_refresh_and_sources.py
+          tests/integration/test_stage4e3_review_flow.py
+          tests/integration/test_stage4e3_domain_receipts.py
+          tests/security/test_stage4e3_boundaries.py
+          tests/gui/test_stage4e3_reviews.py
+          --cov=pc_manager_agent.safety.optimization_actions
+          --cov=pc_manager_agent.orchestration.optimization_action_resolver
+          --cov=pc_manager_agent.orchestration.optimization_action_router
+          --cov=pc_manager_agent.orchestration.optimization_capabilities
+          --cov=pc_manager_agent.orchestration.optimization_invalidation
+          --cov=pc_manager_agent.orchestration.optimization_session
+          --cov=pc_manager_agent.orchestration.optimization_outcomes
+          --cov=pc_manager_agent.persistence.optimization_receipts
+          --cov=pc_manager_agent.persistence.optimization_sessions
+          --cov-report=term-missing --cov-fail-under=95 -q
       - name: Stage 4D1 uninstall-analysis zero-execution boundary
         if: matrix.python-version == '3.13'
         run: >-

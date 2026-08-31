@@ -10,6 +10,10 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from pc_manager_agent import __version__
+from pc_manager_agent.app.optimization_reviews import (
+    OptimizationReviewServices,
+    build_optimization_review_services,
+)
 from pc_manager_agent.audit.elevated_broker import ElevatedBrokerAuditLogger
 from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
@@ -206,6 +210,8 @@ from pc_manager_agent.persistence.msix_uninstall import (
     MsixUninstallExecutionGuard,
     MsixUninstallRepository,
 )
+from pc_manager_agent.persistence.optimization_receipts import OptimizationDomainResultReader
+from pc_manager_agent.persistence.optimization_sessions import OptimizationSessionRepository
 from pc_manager_agent.persistence.privileged_actions import (
     PrivilegedActionRepository,
     PrivilegedRequestReplayStore,
@@ -696,6 +702,10 @@ class ApplicationRuntime:
         self.settings = settings
         self.audit = AuditRepository(settings.database_path)
         self.audit.initialize()
+        self.optimization_session_repository = OptimizationSessionRepository(settings.database_path)
+        self.optimization_session_repository.initialize()
+        self.optimization_result_reader = OptimizationDomainResultReader(settings.database_path)
+        self._optimization_reviews: OptimizationReviewServices | None = None
         self.agent_instance_id = uuid4()
         self.privileged_action_repository = PrivilegedActionRepository(settings.database_path)
         self.interrupted_privileged_action_ids = self.privileged_action_repository.initialize()
@@ -1200,6 +1210,12 @@ class ApplicationRuntime:
             orchestrator=orchestrator,
             exporter=SystemOptimizationReportExporter(),
         )
+
+    def create_optimization_review_services(self) -> OptimizationReviewServices:
+        """Reuse one finite Stage 4E3 review container; it holds no write authority."""
+        if self._optimization_reviews is None:
+            self._optimization_reviews = build_optimization_review_services(self)
+        return self._optimization_reviews
 
     def create_system_cleanup_services(self) -> SystemCleanupServices:
         """Build the isolated Stage 4E2 Fresh-check and Recycle Bin workflow."""
@@ -2101,6 +2117,10 @@ class ApplicationRuntime:
     def close(self) -> None:
         """Release local persistence resources."""
         self.optimization_report_store.clear()
+        if self._optimization_reviews is not None:
+            self._optimization_reviews.handoffs.clear()
+        self.optimization_session_repository.close()
+        self.optimization_result_reader.close()
         self.system_cleanup_repository.close()
         self.privileged_action_repository.close()
         self.residual_cleanup_repository.close()

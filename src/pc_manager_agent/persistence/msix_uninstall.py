@@ -23,6 +23,7 @@ from pc_manager_agent.domain.msix_uninstall import (
     MsixUninstallPlan,
     MsixUninstallPreview,
     MsixUninstallRequest,
+    MsixUninstallResult,
     ValidatedMsixRemovalAction,
 )
 from pc_manager_agent.persistence.database import create_sqlite_engine
@@ -179,7 +180,13 @@ class MsixUninstallRepository:
             row = self._transaction(session, transaction_id)
             return MsixTransactionState(row.state)
 
-    def transition(self, transaction_id: UUID, state: MsixTransactionState) -> None:
+    def transition(
+        self,
+        transaction_id: UUID,
+        state: MsixTransactionState,
+        *,
+        result: MsixUninstallResult | None = None,
+    ) -> None:
         """Persist a forward state change; terminal transactions stay terminal."""
         self._require_initialized()
         with self._sessions.begin() as session:
@@ -189,6 +196,21 @@ class MsixUninstallRepository:
                 if current is state:
                     return
                 raise MsixUninstallStoreError("terminal MSIX transaction cannot transition")
+            if result is not None:
+                result = MsixUninstallResult.model_validate_json(result.model_dump_json())
+                if result.transaction_id != transaction_id or state not in {
+                    MsixTransactionState.VERIFIED_REMOVED,
+                    MsixTransactionState.COMPLETED_UNVERIFIED,
+                }:
+                    raise MsixUninstallStoreError(
+                        "MSIX result belongs to another transaction/state"
+                    )
+                row.result = {
+                    "transaction_id": str(result.transaction_id),
+                    "verification_state": result.verification.state.value,
+                    "original_full_name_present": result.verification.original_full_name_present,
+                    "software_identity_present": result.verification.software_identity_present,
+                }
             row.state = state.value
             row.updated_at = datetime.now(UTC)
 

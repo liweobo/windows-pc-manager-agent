@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased — Stage 4E3
+
+### Added
+
+- Typed recommendations, a default-deny finite domain review matrix, four isolated R0 review tools,
+  expiring single-use navigation contexts and a revision-checked SQLite review session journal.
+- Sequential default-unchecked GUI review entry points into existing domain workflows, cancellation,
+  source invalidation, read-only domain receipt correlation and separately confirmed minimal refresh.
+- Detailed routing/security and per-function API documentation plus synthetic unit, integration,
+  security and GUI tests; a dedicated 95% routing-boundary CI coverage gate.
+
+### Security
+
+- Report IDs, selections, sessions and navigation are intent only; existing domain Fresh checks,
+  Preview, confirmations, privilege policy, executor, verification and recovery remain authoritative.
+- Service recommendations remain review-only. There is no new Windows writer, apply-all, global
+  consent/Undo, shell, elevation route, automatic fallback or uninstall-to-cleanup chain.
+- Process selections additionally bind observed creation time and executable path before resolution,
+  preventing reused PIDs from silently selecting a different process.
+- New MSIX terminal transitions retain a minimal validated verification summary for honest receipt
+  readback. Historical rows without verification evidence are never upgraded to verified success.
+- Result correlation validates fresh transaction lineage and actual domain result shapes, including
+  per-item cleanup verification and R1 Undo records. Window closure and exit codes are not success.
+- Stage 4X results remain in their original domain UI, outside the V1 E3 aggregate receipt reader.
+  Benefit observations never claim causality; persistent sessions retain BENEFIT_NOT_MEASURED.
+
 ## Unreleased — Stage 4E2
 
 ### Added

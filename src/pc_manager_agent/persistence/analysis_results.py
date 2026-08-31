@@ -404,6 +404,15 @@ class AnalysisResultRepository:
         except SQLAlchemyError as exc:
             raise AnalysisResultStoreError("Candidate page query failed") from exc
 
+    def get_record(self, record_id: int) -> StoredFileRecord:
+        """Read one Stage 1 provenance record; callers must revalidate current authorization."""
+        self._require_initialized()
+        with self._sessions() as session:
+            row = session.get(FileRecordRow, record_id)
+            if row is None or not row.matches_plan:
+                raise AnalysisResultStoreError("Stage 1 candidate is unavailable")
+            return self._row_to_record(row)
+
     def recent_matching_candidates(
         self,
         authorized_roots: Sequence[Path],

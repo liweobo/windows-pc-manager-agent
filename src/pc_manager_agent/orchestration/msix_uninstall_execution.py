@@ -229,7 +229,7 @@ class MsixUninstallService:
             if result.verification.state.value in {"verified_removed", "already_removed"}
             else MsixTransactionState.COMPLETED_UNVERIFIED
         )
-        self._repository.transition(plan.transaction_id, final_state)
+        self._repository.transition(plan.transaction_id, final_state, result=result)
         self._audit.completed(plan, result)
         if self._context_recorder is not None:
             self._context_recorder.finalize(

@@ -10,7 +10,6 @@ from PySide6.QtCore import Qt, QThreadPool, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, SystemCleanupServices
+from pc_manager_agent.domain.optimization_receipts import OptimizationReceiptKind
 from pc_manager_agent.domain.risk import RiskLevel
 from pc_manager_agent.domain.system_cleanup_execution import (
     CleanupEligibilityDecision,
@@ -37,6 +37,7 @@ from pc_manager_agent.orchestration.system_cleanup import (
     RuntimeRecycleBinEmpty,
     RuntimeSystemCleanup,
 )
+from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.system_cleanup_workers import (
     RecycleBinEmptyExecuteWorker,
     RecycleBinEmptyPrepareWorker,
@@ -55,7 +56,7 @@ from pc_manager_agent.ui.system_cleanup_workers import (
 _LOG = logging.getLogger(__name__)
 
 
-class SystemCleanupDialog(QDialog):
+class SystemCleanupDialog(ObservedDomainDialog):
     """Require Fresh discovery, a second exact selection, and two approvals."""
 
     def __init__(
@@ -229,6 +230,9 @@ class SystemCleanupDialog(QDialog):
                 self._failed(f"{type(exc).__name__}: {exc}")
                 return
             self._prepared = prepared
+            self.publish_domain_preview(
+                OptimizationReceiptKind.CLEANUP, prepared.plan.transaction_id
+            )
             self._stage = "PLAN"
             risk = _risk_text(prepared.plan.risk_level)
             self.risk_label.setText(f"第一次确认：{risk}；仅移入 Windows 回收站；恢复能力 MANUAL。")
@@ -390,7 +394,7 @@ class SystemCleanupDialog(QDialog):
         event.accept()
 
 
-class RecycleBinEmptyDialog(QDialog):
+class RecycleBinEmptyDialog(ObservedDomainDialog):
     """Keep exact-volume irreversible emptying separate from ordinary cleanup."""
 
     def __init__(self, runtime: ApplicationRuntime, parent: QWidget | None = None) -> None:
@@ -449,6 +453,9 @@ class RecycleBinEmptyDialog(QDialog):
             return
         self._services = state.services
         self._prepared = state.prepared
+        self.publish_domain_preview(
+            OptimizationReceiptKind.RECYCLE_BIN, state.prepared.plan.transaction_id
+        )
         self._stage = "PLAN"
         self.progress.setRange(0, 1)
         self.progress.setValue(1)

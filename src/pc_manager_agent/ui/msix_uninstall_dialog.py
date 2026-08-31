@@ -7,7 +7,6 @@ from html import escape
 from PySide6.QtCore import QThreadPool, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -26,6 +25,8 @@ from pc_manager_agent.domain.msix_uninstall import (
     MsixUninstallResult,
     MsixVerificationState,
 )
+from pc_manager_agent.domain.optimization_receipts import OptimizationReceiptKind
+from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.msix_uninstall_workers import (
     MsixExecuteWorker,
     MsixPrepareWorker,
@@ -37,7 +38,7 @@ from pc_manager_agent.ui.msix_uninstall_workers import (
 from pc_manager_agent.ui.residual_analysis_dialog import ResidualAnalysisDialog
 
 
-class MsixUninstallDialog(QDialog):
+class MsixUninstallDialog(ObservedDomainDialog):
     """Keep cancellation as default and show exact Windows data impact twice."""
 
     def __init__(
@@ -112,6 +113,7 @@ class MsixUninstallDialog(QDialog):
             return
         self._services = bundle.services
         self._plan = prepared.plan
+        self.publish_domain_preview(OptimizationReceiptKind.MSIX, prepared.plan.transaction_id)
         self._preview = prepared.preview
         self._confirmation = prepared.plan_confirmation
         self._stage = "PLAN"

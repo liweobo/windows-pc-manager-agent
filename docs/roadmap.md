@@ -199,6 +199,27 @@ file candidates route to Stage 2B and Stage 4D3 residual candidates route to Sta
 Windows Update, Delivery Optimization and broader Windows-managed cleanup remain deferred. There is no
 permanent delete, shell, elevation/Broker, service/process action or automatic resume/restore.
 
+## Stage 4E3 — recommendation review orchestration (implemented, narrow V1)
+
+Typed recommendations, a finite default-deny routing matrix, four independent R0 review tools, bounded
+single-use navigation, sequential persistent sessions, original domain preparation/confirmation flows,
+domain-result verification and separately confirmed minimal observation refresh are implemented. Services
+are review-only; no new Windows writer, global authorization/Undo, auto-chain or privileged action exists.
+
+The first new Preview in a review can be correlated with its original domain transaction. Stage 4X receipts
+and subsequent Force/Restore actions remain in their original business UI. Metrics are observations in an
+independent window, not a persistent causal-benefit time series. Production signing and isolated manual
+Windows validation from earlier stages remain outstanding; this is not a production-ready release claim.
+
+## Proposed Stage 5A — Office / desktop office automation foundation (not started)
+
+Next design a narrow, independently reviewed Office/desktop automation foundation. Start with explicit
+user-selected document scope, structured task plans, bounded read-only inspection and previews; any
+document write needs its own registered tool, confirmation, verified backup and conflict-safe recovery.
+Do not inherit system-optimization consent or add arbitrary scripts, macros, shell commands, broad
+mouse/keyboard control, external sends or uploads. Specific Office adapters and supported operations
+require the separate Stage 5A plan and approval; no Stage 5A implementation is part of Stage 4E3.
+
 ## Stage 4X4+ — additional privileged actions (not started)
 
 Any startup, service-configuration, installer, registry or other R3 adapter needs its own narrow stage,

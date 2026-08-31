@@ -71,6 +71,8 @@ class SystemDiagnosticsTab(QWidget):
 
     status_message = Signal(str)
     process_reference_changed = Signal(int, str)
+    domain_dialog_opened = Signal(object)
+    report_ready = Signal(object)
 
     def __init__(self, runtime: ApplicationRuntime) -> None:
         super().__init__()
@@ -345,6 +347,7 @@ class SystemDiagnosticsTab(QWidget):
         self.progress.setValue(1)
         self._populate(report)
         self.status_message.emit(report.summary)
+        self.report_ready.emit(report)
 
     @Slot(str)
     def _failed(self, message: str) -> None:
@@ -594,10 +597,19 @@ class SystemDiagnosticsTab(QWidget):
             self._show_error("请先选择一个具体进程。")
             return
         pid, name = selected
+        collection = self._report.snapshot.processes if self._report is not None else None
+        matches = (
+            tuple(item for item in collection.processes if item.pid == pid) if collection else ()
+        )
+        if len(matches) != 1 or matches[0].started_at is None or matches[0].executable_path is None:
+            self._show_error("进程身份信息不完整；请刷新列表后重新选择。")
+            return
         query = ProcessTargetQuery(
             query_type=ProcessTargetQueryType.SELECTED_PROCESS,
             pid=pid,
             include_application_group=True,
+            expected_create_time=matches[0].started_at,
+            expected_executable_path=matches[0].executable_path,
         )
         self.open_process_action(f"关闭选中的 {name}（PID {pid}）", query=query)
 
@@ -610,6 +622,7 @@ class SystemDiagnosticsTab(QWidget):
         """Open a modeless Preview dialog; execution remains in orchestration workers."""
         dialog = ProcessActionDialog(self._runtime, user_goal, query=query, parent=self)
         self._process_dialogs.add(dialog)
+        self.domain_dialog_opened.emit(dialog)
         dialog.finished.connect(lambda _result, value=dialog: self._process_dialogs.discard(value))
         dialog.show()
         self.status_message.emit("正在后台生成实时进程 Preview；尚未执行任何进程操作")
@@ -672,6 +685,7 @@ class SystemDiagnosticsTab(QWidget):
         """Open the Stage 4D2A one-product MSI workflow with cancellation as default."""
         dialog = SoftwareUninstallDialog(self._runtime, user_goal, query=query, parent=self)
         self._software_uninstall_dialogs.add(dialog)
+        self.domain_dialog_opened.emit(dialog)
         dialog.finished.connect(
             lambda _result, value=dialog: self._software_uninstall_dialogs.discard(value)
         )
@@ -687,6 +701,7 @@ class SystemDiagnosticsTab(QWidget):
         """Open the Stage 4D2B trusted Vendor workflow with cancellation as default."""
         dialog = VendorUninstallDialog(self._runtime, user_goal, query=query, parent=self)
         self._vendor_uninstall_dialogs.add(dialog)
+        self.domain_dialog_opened.emit(dialog)
         dialog.finished.connect(
             lambda _result, value=dialog: self._vendor_uninstall_dialogs.discard(value)
         )
@@ -702,6 +717,7 @@ class SystemDiagnosticsTab(QWidget):
         """Open the official-source Stage 4D2C1 workflow with cancellation as default."""
         dialog = WingetUninstallDialog(self._runtime, user_goal, query=query, parent=self)
         self._winget_uninstall_dialogs.add(dialog)
+        self.domain_dialog_opened.emit(dialog)
         dialog.finished.connect(
             lambda _result, value=dialog: self._winget_uninstall_dialogs.discard(value)
         )
@@ -722,6 +738,7 @@ class SystemDiagnosticsTab(QWidget):
             parent=self,
         )
         self._msix_uninstall_dialogs.add(dialog)
+        self.domain_dialog_opened.emit(dialog)
         dialog.finished.connect(
             lambda _result, value=dialog: self._msix_uninstall_dialogs.discard(value)
         )

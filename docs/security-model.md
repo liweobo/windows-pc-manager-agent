@@ -1,5 +1,25 @@
 # Security model
 
+## Stage 4E3 review controls
+
+- Source report and recommendation UUIDs resolve locally under a canonical digest and bounded expiry.
+  Text, paths, PIDs, commands, arbitrary tool names, administrator flags and confirmation tokens cannot
+  become E3 input authority. Legacy untyped recommendations default to manual review.
+- A sealed finite capability registry prepares navigation only. Services are REVIEW_ONLY. A handoff is
+  single-use, time-limited and domain-bound, never a domain Preview or execution authorization.
+- Existing domains repeat target discovery/selection, policy, Fresh Preview, risk, confirmations and
+  privilege decisions. A blocked object cannot be made safe by clicking an optimization checkbox.
+- Sessions serialize reviews, audit aggregate identifiers/digests only, fail on journal corruption and
+  invalidate source context after domain outcomes. Cancellation/restart never dispatches a next action,
+  kills an external uninstaller, retries, or performs automatic recovery.
+- Only a transaction created after handoff may supply a result. The read-only receipt reader checks
+  immutable plan binding, consumed domain confirmation lineage and domain-specific verification;
+  partial/unverified results remain distinct. It cannot execute or sign approval.
+- Existing Stage 4X can only be invoked by its original business workflow. E3 adds no Broker action and
+  does not aggregate a privileged result as verified. All original seven-action restrictions remain.
+
+The full [routing matrix and recovery limits](optimization-action-routing.md) are part of this boundary.
+
 ## Stage 4E2 controlled-cleanup controls
 
 - Old Stage 4E1 plans, confirmations, reports, candidate IDs and selections grant no mutation authority.

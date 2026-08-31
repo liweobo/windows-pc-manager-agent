@@ -1,5 +1,22 @@
 # Architecture
 
+## Stage 4E3 review orchestration boundary
+
+`app.optimization_reviews` composes the finite policy/resolver, sealed preparation registry, expiring
+handoff store, additive SQLite session journal, independent domain receipt reader and outcome coordinator.
+The optimization layer owns no execution or confirmation authority. Its four R0 tools remain isolated
+from the unchanged Stage 4E1 five-tool and Stage 4E2 four-tool registries.
+
+The GUI prepares one review off-thread, then embeds an existing domain UI. New domain Preview events
+carry only an enum and transaction UUID; the result coordinator binds before dispatch, then reads the
+domain's durable confirmation and verification evidence. MSIX adds minimal evidence to its existing result
+column; process resolution additionally checks the selected observation's creation time/path. No schema
+or adapter broadens Windows execution. Sessions use compare-and-swap revisions, expire with their source
+reports and become STALE after restart. There is no resumed authority or global undo transaction.
+
+See [complete routing and data flow](optimization-action-routing.md) and
+[per-function API](api-optimization-actions.md), including V1 limits for privileged receipts and metrics.
+
 ## Stage 4E2 controlled cleanup boundary
 
 Stage 4E2 does not extend the Stage 4E1 registry. `ApplicationRuntime` creates a second isolated

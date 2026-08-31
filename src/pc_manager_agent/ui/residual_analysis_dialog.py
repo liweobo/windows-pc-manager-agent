@@ -7,7 +7,7 @@ from html import escape
 from pathlib import Path
 from uuid import UUID
 
-from PySide6.QtCore import Qt, QThreadPool, Slot
+from PySide6.QtCore import Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -57,6 +57,8 @@ _LOG = logging.getLogger(__name__)
 
 class ResidualAnalysisDialog(QDialog):
     """Confirm one R0 plan and display protected metadata without cleanup controls."""
+
+    domain_dialog_opened = Signal(object)
 
     def __init__(
         self,
@@ -482,6 +484,7 @@ class ResidualAnalysisDialog(QDialog):
             ),
             self,
         )
+        self.domain_dialog_opened.emit(dialog)
         dialog.exec()
 
     @Slot(str)

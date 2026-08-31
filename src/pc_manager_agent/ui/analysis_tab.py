@@ -61,9 +61,12 @@ class FileAnalysisTab(QWidget):
     rename_selected_requested = Signal(object)
     trash_selected_requested = Signal(object)
 
-    def __init__(self, runtime: ApplicationRuntime) -> None:
+    def __init__(
+        self, runtime: ApplicationRuntime, *, allowed_root_ids: frozenset[UUID] | None = None
+    ) -> None:
         super().__init__()
         self._runtime = runtime
+        self._allowed_root_ids = allowed_root_ids
         self._services: FileAnalysisServices | None = None
         self._plan: FileAnalysisPlan | None = None
         self._confirmation: ConfirmationRequest | None = None
@@ -278,6 +281,8 @@ class FileAnalysisTab(QWidget):
         self._building = True
         self.authorized_list.clear()
         for record in self._runtime.authorized_paths.list_authorized():
+            if self._allowed_root_ids is not None and record.path_id not in self._allowed_root_ids:
+                continue
             marker = "★ " if record.favorite else ""
             item = QListWidgetItem(f"{marker}{record.label} — {record.path}")
             item.setData(Qt.ItemDataRole.UserRole, str(record.path_id))

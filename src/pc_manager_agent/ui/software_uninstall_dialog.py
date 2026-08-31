@@ -8,7 +8,6 @@ from PySide6.QtCore import Qt, QThreadPool, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -24,6 +23,7 @@ from pc_manager_agent.app.runtime import ApplicationRuntime, MsiUninstallService
 from pc_manager_agent.confirmation.software_uninstall_execution import (
     MsiUninstallConfirmation,
 )
+from pc_manager_agent.domain.optimization_receipts import OptimizationReceiptKind
 from pc_manager_agent.domain.software_uninstall_analysis import (
     NormalizedInstalledSoftware,
     SoftwareTargetQuery,
@@ -34,6 +34,7 @@ from pc_manager_agent.domain.software_uninstall_execution import (
     MsiUninstallPreview,
     MsiVerificationState,
 )
+from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.residual_analysis_dialog import ResidualAnalysisDialog
 from pc_manager_agent.ui.software_uninstall_workers import (
     MsiRuntimePrepareWorker,
@@ -45,7 +46,7 @@ from pc_manager_agent.ui.software_uninstall_workers import (
 )
 
 
-class SoftwareUninstallDialog(QDialog):
+class SoftwareUninstallDialog(ObservedDomainDialog):
     """Keep cancellation as default while exposing only one validated MSI transaction."""
 
     def __init__(
@@ -140,6 +141,7 @@ class SoftwareUninstallDialog(QDialog):
             self._failed("安全审查未创建可用的计划确认；没有启动卸载。")
             return
         self._plan = prepared.plan
+        self.publish_domain_preview(OptimizationReceiptKind.MSI, prepared.plan.transaction_id)
         self._preview = prepared.preview
         self._plan_confirmation = prepared.plan_confirmation
         self._show_preview(prepared.preview, immediate=False)

@@ -109,6 +109,26 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 4E3 adds exactly four isolated R0 review tools: `optimization.recommendation.inspect`,
+`optimization.recommendation.prepare_action`, `optimization.session.create`, and
+`optimization.session.refresh`. Keep the Stage 4E1 five-tool and Stage 4E2 four-tool registries unchanged.
+Reports, recommendations, selected UUIDs, sessions and single-use navigation contexts are intent only.
+Route by finite typed policy to existing domain preparation, never by model text or arbitrary tool names.
+Services are REVIEW_ONLY in V1. Personal files retain Stage 1/2 authorization; software residuals require
+one eligible Stage 4D3 uninstall context; direct system cleanup retains all Stage 4E2 gates.
+
+Every domain independently reselects current targets, revalidates identity/safety, builds a new Preview and
+owns confirmation, privilege, execution, verification and recovery. E3 must not add a Windows writer,
+shell, force/admin flag, global consent/Undo, automatic fallback, or uninstall-to-cleanup chain.
+Only a newly prepared domain transaction can be correlated; read actual durable confirmations and verified
+domain results before reporting APPLIED_VERIFIED. A closed window, exit code, historical transaction or
+report selection is never success. Current E3 aggregation excludes privileged Stage 4X receipts.
+Sessions allow one review at a time; cancellation stops future work, not external uninstallers. Restart
+marks active sessions STALE and never resumes them. Audit remains ID/digest/aggregate-only.
+Refresh metrics through a new minimal independently confirmed R0 plan; missing/partial observations remain
+unmeasured and short-term differences never establish causal performance gains. Preserve the dedicated
+95% routing-boundary test gate and test dangerous domain adapters with fakes only.
+
 Stage 4E2 retains the Stage 4E1 five-tool R0 registry unchanged and adds one separate registry with exactly
 four tools: `optimization.cleanup.prepare`, `optimization.cleanup.trash`,
 `optimization.recycle_bin.inspect`, and `optimization.recycle_bin.empty`. A Stage 4E1 report/candidate/UI

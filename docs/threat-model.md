@@ -1,5 +1,18 @@
 # Threat model
 
+## Stage 4E3 threats and mitigations
+
+| Threat | Mitigation | Remaining limitation |
+|---|---|---|
+| Recommendation text injects a command | Typed enum policy, exact UUID lookup, no raw execution arguments or generic executor | Recommendation wording is still untrusted display data |
+| Old report or selected row acts as authorization | Canonical source digest/expiry; single-use navigation; original domain Fresh selection and confirmations | No background event bus: external changes are caught by the domain's final checks |
+| Recommendation routes personal data to direct cleanup | Stage 1 root provenance → Stage 1/2; exact Stage 4D3 context → Stage 4D3/4; protected candidates block | Unknown sources remain unsupported |
+| PID is reused before process Preview | Fresh PID, creation time and executable-path comparison before existing Stage 4A gates | Original final identity checks remain necessary |
+| Forged success through UI closure or old transaction | Bind before dispatch; read-only finite table reader; plan/confirmation/result validation | Long-running or privileged outcomes may remain only in the original domain UI |
+| Cancel races with preparation/result | Revision-checked journal, bounded locks, cancellation token and one active review | Already-dispatched external uninstallers are not killed |
+| Restart replays dangerous work | Active sessions become STALE, volatile handoff/result bindings discarded | User must explicitly start a new report/plan |
+| Metric change advertised as optimization benefit | Minimal separately confirmed R0 sampling, completeness/comparability checks, UNKNOWN/LOW attribution | No measured boot-time or causal speed improvement claim |
+
 ## Stage 4E2 threats and mitigations
 
 | Threat | Mitigation | Residual risk |

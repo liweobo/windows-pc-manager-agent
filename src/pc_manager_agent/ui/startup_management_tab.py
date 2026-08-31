@@ -39,6 +39,7 @@ class StartupManagementTab(QWidget):
     """Present read-only inventory and expose only object-specific safe actions."""
 
     status_message = Signal(str)
+    domain_dialog_opened = Signal(object)
 
     def __init__(self, runtime: ApplicationRuntime) -> None:
         super().__init__()
@@ -263,6 +264,7 @@ class StartupManagementTab(QWidget):
         dialog.completed.connect(self.refresh)
         dialog.finished.connect(lambda _result, value=dialog: self._dialogs.discard(value))
         self._dialogs.add(dialog)
+        self.domain_dialog_opened.emit(dialog)
         dialog.show()
 
     def _machine_allowed(self, observation: StartupObservation) -> bool:

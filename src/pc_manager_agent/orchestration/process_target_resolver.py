@@ -43,6 +43,7 @@ class ProcessTargetResolver:
                     "The selected process no longer exists or cannot be identified safely",
                 )
             if query.include_application_group:
+                self._require_selected_identity(query, selected)
                 candidates = self._platform.list_processes(self._max_processes)
                 members = tuple(
                     item
@@ -52,6 +53,7 @@ class ProcessTargetResolver:
                 if not members:
                     members = (selected,)
             else:
+                self._require_selected_identity(query, selected)
                 members = (selected,)
             return (_target(members),)
 
@@ -82,6 +84,21 @@ class ProcessTargetResolver:
                 + ", ".join(labels[:10]),
             )
         return (_target(tuple(next(iter(groups.values())))),)
+
+    @staticmethod
+    def _require_selected_identity(query: ProcessTargetQuery, selected: ProcessObservation) -> None:
+        if (
+            query.expected_create_time is not None
+            and query.expected_create_time != selected.identity.create_time
+        ) or (
+            query.expected_executable_path is not None
+            and os.path.normcase(str(query.expected_executable_path))
+            != os.path.normcase(str(selected.identity.executable_path))
+        ):
+            raise ProcessTargetResolutionError(
+                ProcessActionErrorCode.PROCESS_IDENTITY_CHANGED,
+                "The selected process identity changed; refresh the list and select again",
+            )
 
     def re_resolve(self, target: ResolvedProcessTarget) -> ResolvedProcessTarget:
         """Refresh every member and reject application-group membership changes."""

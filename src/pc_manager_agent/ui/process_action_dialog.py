@@ -7,7 +7,6 @@ from html import escape
 from PySide6.QtCore import QThreadPool, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from pc_manager_agent.app.runtime import ApplicationRuntime, ProcessActionServices
 from pc_manager_agent.confirmation.process_actions import ProcessActionConfirmation
+from pc_manager_agent.domain.optimization_receipts import OptimizationReceiptKind
 from pc_manager_agent.domain.process_actions import (
     ProcessActionErrorCode,
     ProcessActionPlan,
@@ -30,6 +30,7 @@ from pc_manager_agent.domain.process_actions import (
     ProcessTargetQuery,
 )
 from pc_manager_agent.safety.process_validator import ProcessSafetyReview
+from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.process_workers import (
     ProcessExecutionWorker,
     ProcessForcePreviewWorker,
@@ -41,7 +42,7 @@ from pc_manager_agent.ui.process_workers import (
 )
 
 
-class ProcessActionDialog(QDialog):
+class ProcessActionDialog(ObservedDomainDialog):
     """Keep Preview, both approvals, execution, verification, and force flow visible."""
 
     def __init__(
@@ -131,6 +132,7 @@ class ProcessActionDialog(QDialog):
         review: ProcessSafetyReview,
     ) -> None:
         self._plan = plan
+        self.publish_domain_preview(OptimizationReceiptKind.PROCESS, plan.transaction_id)
         self._preview = preview
         self._runtime_confirmation = None
         self._progress.setRange(0, 1)
