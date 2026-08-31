@@ -189,7 +189,7 @@ class SystemOptimizationTab(QWidget):
         self.process_table = self._table(("PID", "名称", "CPU %", "内存 %", "状态"))
         self.finding_table = self._table(("类别", "标题", "置信度", "说明"))
         self.recommendation_table = self._table(
-            ("选择", "目标", "建议", "收益", "置信度", "未来风险", "复查状态")
+            ("选择", "目标", "建议", "收益", "置信度", "复查入口风险", "复查状态")
         )
         for table, title in (
             (self.overview_table, "概览"),
@@ -439,7 +439,7 @@ class SystemOptimizationTab(QWidget):
                 recommendation.title,
                 recommendation.expected_benefit.value,
                 recommendation.confidence.value,
-                recommendation.future_risk_level.value,
+                "R0（仅复查）；操作风险由业务重新评估",
                 state,
             )
             for column, value in enumerate(values, 1):

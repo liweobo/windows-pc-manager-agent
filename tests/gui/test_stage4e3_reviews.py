@@ -40,6 +40,8 @@ def test_review_checkboxes_start_unchecked_and_navigation_does_not_execute(
     tab._completed(report)
     selector = tab.recommendation_table.item(0, 0)
     assert selector.checkState() is Qt.CheckState.Unchecked
+    assert tab.recommendation_table.horizontalHeaderItem(5).text() == "复查入口风险"
+    assert tab.recommendation_table.item(0, 5).text() == "R0（仅复查）；操作风险由业务重新评估"
     tab.create_review_session()
     assert tab._review_session_id is None
     selector.setCheckState(Qt.CheckState.Checked)

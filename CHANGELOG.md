@@ -17,6 +17,8 @@
   Preview, confirmations, privilege policy, executor, verification and recovery remain authoritative.
 - Service recommendations remain review-only. There is no new Windows writer, apply-all, global
   consent/Undo, shell, elevation route, automatic fallback or uninstall-to-cleanup chain.
+- The GUI labels R0 as review-entry risk only; it never presents that label as the risk of a later
+  process, startup, uninstall or cleanup action, which must be reassessed by its owning domain.
 - Process selections additionally bind observed creation time and executable path before resolution,
   preventing reused PIDs from silently selecting a different process.
 - New MSIX terminal transitions retain a minimal validated verification summary for honest receipt
