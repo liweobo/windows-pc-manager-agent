@@ -1,0 +1,13 @@
+[run]
+branch = true
+omit =
+    */pc_manager_agent/safety/browser/*
+    */pc_manager_agent/confirmation/browser.py
+
+[report]
+show_missing = true
+skip_covered = true
+exclude_also =
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    @abstractmethod

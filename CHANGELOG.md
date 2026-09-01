@@ -2,6 +2,12 @@
 
 ## Unreleased — Stage 5C
 
+### Fixed
+
+- Isolated the Stage 5C browser boundary test and incidentally imported browser modules from the legacy
+  cross-stage coverage denominator; the same code remains mandatory in both dedicated browser gates,
+  including the 95-percent safety/confirmation gate.
+
 ### Added
 
 - Independent disposable Chromium/Playwright Browser Worker, secret-scrubbed finite JSON-lines protocol,

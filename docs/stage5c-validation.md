@@ -13,7 +13,11 @@ managed Chromium and runs that contract separately. The 85-percent Stage 5C core
 orchestration, tools, audit, IPC protocol, Worker and Main client. The OS/browser-bound Playwright adapter is
 required to pass its real synthetic Chromium contract but is not included in the line-percentage denominator;
 faking browser internals merely to increase line coverage would not validate Chromium behavior. The separate
-safety/confirmation coverage gate remains at 95 percent.
+safety/confirmation coverage gate remains at 95 percent. The legacy cross-stage security gate explicitly
+ignores `tests/security/test_browser_boundaries.py` and omits incidentally imported browser safety/confirmation
+modules from its denominator. That file and the complete Stage 5C test set run together in the two dedicated
+browser gates; partially measuring them through GUI/voice imports would test the wrong boundary rather than
+strengthen it.
 
 ## Commands
 
@@ -40,6 +44,8 @@ uv run python -m pc_manager_agent --smoke-test
 - Stage 5C core gate: 78 passed; 86.12% across domain, orchestration, tools, audit, IPC protocol, Worker,
   Main client, safety, confirmation and persistence.
 - Browser safety/confirmation gate: 74 passed; 95.32% combined coverage.
+- Legacy cross-stage security gate after boundary isolation: 968 passed, 3 skipped for unavailable local
+  symlink/reparse privileges; 95.50% combined coverage, above its unchanged 95% requirement.
 - Managed Chromium synthetic adapter plus real isolated Worker-client lifecycle: 3 passed, including strict
   `ResourceWarning` handling. No private/public real site or user account was contacted.
 - Performance suite: 11 passed in 236.75 seconds. The maximum synthetic browser observation used 5,000

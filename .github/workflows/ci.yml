@@ -44,6 +44,7 @@ jobs:
         if: matrix.python-version == '3.13'
         run: >-
           uv run pytest tests/security tests/unit/test_confirmation.py
+          --ignore=tests/security/test_browser_boundaries.py
           tests/unit/voice
           tests/unit/office tests/integration/office
           tests/unit/test_system_optimization_confirmation.py
@@ -96,6 +97,7 @@ jobs:
           tests/integration/test_startup_action_workflow.py
           tests/security/test_service_startup_safety.py
           tests/security/test_startup_safety.py
+          --cov-config=.coveragerc-cross-stage-security
           --cov=pc_manager_agent.safety
           --cov=pc_manager_agent.confirmation --cov=pc_manager_agent.rollback
           --cov=pc_manager_agent.recovery
