@@ -29,6 +29,9 @@ jobs:
           enable-cache: true
       - name: Install locked dependencies
         run: uv sync --all-groups --locked
+      - name: Install managed Chromium for Stage 5C contract tests
+        if: matrix.python-version == '3.13'
+        run: uv run playwright install chromium
       - name: Ruff format
         run: uv run ruff format --check .
       - name: Ruff lint
@@ -36,7 +39,7 @@ jobs:
       - name: Type check
         run: uv run mypy src
       - name: Tests and core coverage
-        run: uv run pytest -m "not performance" --cov=pc_manager_agent --cov-report=term-missing --cov-report=xml --cov-fail-under=85
+        run: uv run pytest -m "not performance and not playwright" --cov=pc_manager_agent --cov-report=term-missing --cov-report=xml --cov-fail-under=85
       - name: Security boundary coverage
         if: matrix.python-version == '3.13'
         run: >-
@@ -535,6 +538,33 @@ jobs:
           --cov=pc_manager_agent.orchestration.user_requests
           --cov=pc_manager_agent.ui.voice_audio
           --cov=pc_manager_agent.providers.speech_logging
+          --cov-report=term-missing --cov-fail-under=95 -q
+      - name: Stage 5C isolated browser and web safety boundary
+        if: matrix.python-version == '3.13'
+        run: >-
+          uv run pytest tests/unit/browser tests/integration/browser
+          tests/security/test_browser_boundaries.py tests/gui/test_browser_tab.py
+          --cov=pc_manager_agent.domain.browser
+          --cov=pc_manager_agent.domain.browser_downloads
+          --cov=pc_manager_agent.domain.browser_plans
+          --cov=pc_manager_agent.safety.browser
+          --cov=pc_manager_agent.confirmation.browser
+          --cov=pc_manager_agent.persistence.browser
+          --cov=pc_manager_agent.orchestration.browser
+          --cov=pc_manager_agent.browser.client
+          --cov=pc_manager_agent.browser.protocol
+          --cov=pc_manager_agent.browser.worker
+          --cov=pc_manager_agent.tools.browser_tools
+          --cov=pc_manager_agent.audit.browser
+          --cov-report=term-missing --cov-fail-under=85 -q
+      - name: Stage 5C browser safety and confirmation coverage
+        if: matrix.python-version == '3.13'
+        run: >-
+          uv run pytest tests/unit/browser tests/integration/browser/test_browser_workflow.py
+          tests/security/test_browser_boundaries.py
+          --cov=pc_manager_agent.safety.browser
+          --cov=pc_manager_agent.confirmation.browser
+          --cov=pc_manager_agent.persistence.browser
           --cov-report=term-missing --cov-fail-under=95 -q
       - name: Python security scan
         run: uv run bandit -q -r src

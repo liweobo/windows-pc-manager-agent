@@ -1,5 +1,19 @@
 # Rollback design
 
+## Stage 5C code and download recovery
+
+Revert Stage 5C code on the same project with `git revert <Stage-5C-commit>` after closing the application and
+its owned temporary browser. Do not delete the existing audit/confirmation database; the additive browser
+table can remain and older code ignores it. Reverting code does not undo a download or any manual action the
+user performed during takeover.
+
+For an unchanged Agent download, use its explicit Browser recovery action before removing Stage 5C code.
+It rechecks exact path, size and SHA-256, requires an absent unique recovery target and moves the file to the
+application recovery directory without overwrite. If the file changed, disappeared or conflicts, automatic
+recovery refuses; preserve the newer file and handle it manually. The download policy never permanently
+deletes files. Cancellation/close invalidates future authority but cannot retract network requests already
+sent or undo user actions in takeover.
+
 ## Stage 5B code and voice recovery
 
 Close the application normally and wait for provider cancellation before reverting the Stage 5B commit

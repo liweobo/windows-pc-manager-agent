@@ -1791,6 +1791,15 @@ OfficeTab.set_user_goal(self, text: str) -> None
 
 作用：Accept chat intent without choosing files, uploading content or preparing an edit.
 
+### `OfficeTab.suggest_downloaded_document`
+
+```python
+OfficeTab.suggest_downloaded_document(self, path: Path) -> None
+```
+
+作用：只显示 Stage 5C 已验证下载的文件名/路径提示，不创建 READ/OUTPUT grant，不解析文档，也不
+生成编辑计划。用户必须在 Stage 5A 重新选择同一文件并完成独立的读取、Preview 和确认流程。
+
 ### `OfficeTab._discard`
 
 ```python

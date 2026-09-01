@@ -31,6 +31,7 @@ class RequestDomain(StrEnum):
     SERVICE = "SERVICE"
     SOFTWARE = "SOFTWARE"
     OFFICE = "OFFICE"
+    BROWSER = "BROWSER"
     CANCEL = "CANCEL"
     STATUS = "STATUS"
     CONFIRMATION = "CONFIRMATION"

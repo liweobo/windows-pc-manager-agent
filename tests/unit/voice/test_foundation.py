@@ -319,7 +319,7 @@ def test_every_summary_uses_only_structured_facts(outcome):
         ("取消", "CANCEL"),
         ("status", "STATUS"),
         ("执行 powershell", "BLOCKED"),
-        ("打开网页", "UNSUPPORTED"),
+        ("打开网页", "BROWSER"),
         ("hello", "UNSUPPORTED"),
     ],
 )

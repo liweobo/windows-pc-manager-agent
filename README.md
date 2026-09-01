@@ -1,5 +1,23 @@
 # Windows PC Manager Agent
 
+## Stage 5C：受控浏览器阅读、语义操作与单文件下载
+
+新增独立“浏览器”页面和一次性 Chromium 会话。页面内容始终是不可信数据；Agent 只使用有限的
+可访问性语义元素执行打开链接、搜索、筛选、翻页和展开，不提供任意点击、选择器、脚本、坐标或
+通用网络请求。购买、付款、预订、发帖、发消息、账户/条款操作和私网访问默认阻止。
+
+每项操作先展示精确 Origin、动作、风险和影响，再使用与 session/page/navigation/plan/action/expiry
+绑定的一次性确认。网页跳转会让旧元素和旧确认失效。用户可以接管临时浏览器，交还后必须重新
+观察和计划；不导入或保存日常浏览器 Cookie、密码、历史或配置。
+
+单文件下载属于 R1，只允许有限文档/图片格式，默认 50 MiB；先在 Worker 临时目录下载，再由 Main
+检查名称、类型、magic bytes、大小和 SHA-256，以不覆盖方式提交。未改变的文件可有条件移动到
+恢复目录；这不是病毒扫描。浏览器到办公文档只是提示，Stage 5A 仍需重新选择、Preview 和确认。
+
+首次使用先执行 `uv run playwright install chromium`。详见
+[能力与安全模型](docs/browser-automation-model.md)、[逐函数 API](docs/api-browser-automation.md)、
+[手工验收](docs/manual-testing/browser-automation.md) 和 [验证记录](docs/stage5c-validation.md)。
+
 ## Stage 5B：按住说话，检查文字，再进入原业务审查
 
 新增共享语音面板：按住说话 → 松开停录 → 单独确认本次音频上传 → 编辑识别文字 → 提交普通请求。
@@ -450,7 +468,11 @@ Stage 4D3 / `0.1.0` 开发版本在此前阶段基础上包含：
 git clone https://github.com/liweobo/windows-pc-manager-agent.git
 cd windows-pc-manager-agent
 uv sync --all-groups
+uv run playwright install chromium
 ```
+
+最后一条安装 Stage 5C 使用的独立 Chromium（会额外占用数百 MB）。如果暂时不用浏览器页面，
+其他模块可以先运行，但浏览器真实契约测试和浏览器页面需要完成这一步。
 
 如需启用 OpenAI 开发适配器，请在启动应用的同一个 PowerShell 窗口中设置：
 

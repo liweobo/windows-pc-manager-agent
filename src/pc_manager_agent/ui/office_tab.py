@@ -487,6 +487,14 @@ class OfficeTab(QWidget):
         """Accept chat intent without choosing files, uploading content or preparing an edit."""
         self._goal.setText(text)
 
+    def suggest_downloaded_document(self, path: Path) -> None:
+        """Display a Browser handoff hint without granting read access or starting parsing."""
+        self._goal.setText(f"审查浏览器下载文档：{path.name}")
+        self._status.setText(
+            f"浏览器已交接文件提示：{path}。请点击“选择并只读解析文档”重新选择它，"
+            "并完成独立 Stage 5A 读取确认；当前提示不授予读取或编辑权限。"
+        )
+
     def _discard(self) -> None:
         try:
             self._invalidate()

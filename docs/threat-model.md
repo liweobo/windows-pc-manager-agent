@@ -1,5 +1,23 @@
 # Threat model
 
+## Stage 5C browser threats
+
+| Threat | Enforced control / residual risk |
+|---|---|
+| Page prompt injection requests secrets/tools/approval | All content is untrusted, advisory signal detection, closed actions and independent policy/confirmation; deceptive display still requires user judgment |
+| SSRF, localhost, private host or redirect escape | HTTP(S), standard ports, no credentials, IDNA, fresh all-public A/AAAA checks at planning/routing/redirect; application policy is not an OS network sandbox and DNS races remain |
+| Stale/ambiguous element activates a different target | Session/page/navigation binding, semantic fingerprint, exact-one role/name match, fresh observation; highly dynamic sites may fail safely |
+| Page triggers purchase, message, account or terms side effect | Transaction/account/communication markers and unsupported methods/actions BLOCK; classifier vocabulary cannot understand every language, so allowed actions stay narrowly structural |
+| Confirmation replay after page change/takeover/restart | Plan/action/origin/generation/expiry binding, atomic SQLite consume, startup/session invalidation; same-user database tampering is outside the MVP trust boundary |
+| Browser child receives provider secrets | `-I`, no shell, credential-like environment removal, ephemeral profile; same-user malware can still read resources allowed by the user token |
+| Download traversal, overwrite or type disguise | Leaf-name/ADS/reserved/bidi checks, finite MIME/extension/magic/size, O_EXCL commit, SHA-256; format validation is not malware scanning |
+| Download recovery overwrites newer work | Current path/size/hash must equal recorded result and recovery target must be absent; recovery refuses drift and does not securely erase data |
+| Audit/model leaks page or credentials | Aggregate origin/digest/count audit, model disabled by default, future explicit minimized disclosure; user-visible page data still exists in GUI/process memory |
+| Compromised Playwright/Chromium escapes | Managed current runtime and browser sandbox requested; dependency/browser vulnerabilities remain and require patching/release review |
+
+Automated tests use fakes and a synthetic managed-Chromium route. They do not authorize or validate real
+logins, CAPTCHA, SSO, payments, messages, internal sites or malicious-document safety.
+
 ## Stage 5B speech threats
 
 | Threat | Enforced control / residual risk |
@@ -392,10 +410,10 @@ deterministic reparse branches remain tested.
 
 The MVP does not claim protection against a compromised kernel, an attacker already able
 to modify this process, physical disk attacks, or malicious dependency infrastructure.
-Installed-software inventory is not yet implemented. Stage 2A file mutation is limited to
-the documented R1 tools. Recycle-bin/permanent deletion, overwrite, cross-volume move,
-system changes, arbitrary commands, browser automation, and privilege elevation remain
-outside this stage and cannot be triggered through placeholder interfaces.
+This historical Stage 2A boundary did not include installed-software inventory or browser automation.
+Stage 2A file mutation remains limited to its documented R1 tools; it cannot trigger recycle-bin/permanent
+deletion, overwrite, cross-volume move, system changes, arbitrary commands, Stage 5C browser tools or
+privilege elevation through placeholder interfaces.
 ## Stage 4D2C2 threats and mitigations
 
 | Threat | Mitigation |

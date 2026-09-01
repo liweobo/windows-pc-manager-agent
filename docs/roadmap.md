@@ -1,5 +1,14 @@
 # Roadmap
 
+## Stage 5C — bounded browser automation (implemented; visible-site validation pending)
+
+Disposable Chromium Worker, exact origin/page generation, bounded semantic observation, untrusted-content
+signals, closed read-oriented action vocabulary, durable one-shot confirmation, manual takeover/handback,
+finite R1 document download with conditional recovery, Browser-to-Office hint, Qt workspace and synthetic
+security/GUI/managed-browser tests. No persistent profile, generic click/script/network API, upload, purchase,
+message, account action or private-network access. Complete the cautious visible-browser checklist before a
+stable release; model page summaries remain disabled pending a separate external-disclosure design.
+
 ## Stage 5B — bounded voice input/output (implemented; real-device validation pending)
 
 Visible PTT, independent upload disclosure, provider-neutral STT/TTS, mandatory final review, shared
@@ -7,12 +16,6 @@ text/voice preparation, metadata-only single-use journal, safe finite summaries,
 device/SDK/GUI/security tests. All existing domain permissions remain unchanged. Exact default-device
 24kHz PCM only; no ambient listening or biometrics. Some domain receipts remain text-only/unverified.
 Complete the separately authorized real Windows microphone/output/network-cost checklist before release.
-
-## Stage 5C — proposed only, not started
-
-Design a separate browser domain with exact origin/tab scope, read-only-first actions, untrusted page
-content, independent external-send/purchase confirmations, secret protection and no inherited voice or
-Office authority. No browser controller, extension, background task or auto-click is added by Stage 5B.
 
 ## Stage 0 — secure foundation (complete)
 
@@ -235,15 +238,15 @@ shell, Office UI control or privileged route exists. Final quality/CI results ar
 this is not a production-signing or full Microsoft Office compatibility claim. See the
 [local verification record](stage5a-validation.md); remote CI must be checked against the final commit.
 
-## Stage 5B — Voice Interaction (planned, not started)
+## Stage 5B — Voice Interaction (implemented; real-device validation pending)
 
-Push-to-talk, replaceable STT/TTS, editable transcription and voice cancellation need a separate plan.
-Voice recognition must never substitute for destructive confirmation. Do not start automatically.
+See the current Stage 5B entry at the top of this roadmap. Voice recognition never substitutes for a
+visual business confirmation and never starts automatically.
 
-## Stage 5C / 5D / 5E (planned, not started)
+## Stage 5D / 5E (planned, not started)
 
-Structured browser automation, memory/multi-agent integration and the final cross-domain orchestrator
-remain independently designed future stages; Stage 5A grants none of their capabilities.
+Memory/multi-agent integration and the final cross-domain orchestrator remain independently designed future
+stages. Stage 5C grants none of their capabilities and adds no schedule/background authority.
 
 ## Stage 4X4+ — additional privileged actions (not started)
 
@@ -260,5 +263,5 @@ recovery plan, Windows API experiment, and isolated test/review before implement
 ## Later stages
 
 Each R3 capability receives an independent threat model, implementation, test
-plan, and review. Voice, office/browser automation, schedules, and cross-platform
-adapters follow only after the safety boundary is stable.
+plan, and review. Broader browser actions, schedules, and cross-platform adapters follow only after their
+own safety boundary, recovery design and isolated review are complete.

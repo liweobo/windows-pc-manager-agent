@@ -1,5 +1,34 @@
 # Developer guide
 
+## Stage 5C development and verification
+
+Playwright is locked by `uv.lock`; Chromium is a separately managed runtime. Core tests use fake DNS/browser
+and temporary storage. The real contract uses a synthetic route and is marked `playwright`; do not point tests
+at private/user sites. Keep browser code out of the Broker and preserve the exact five-tool registry.
+
+```powershell
+uv sync --all-groups --locked
+uv run playwright install chromium
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src
+$env:QT_QPA_PLATFORM = 'offscreen'
+uv run pytest -m 'not performance and not playwright' --cov=pc_manager_agent --cov-fail-under=85
+uv run pytest tests/integration/browser/test_playwright_contract.py -q
+uv run pytest tests/unit/browser tests/integration/browser/test_browser_workflow.py tests/security/test_browser_boundaries.py --cov=pc_manager_agent.safety.browser --cov=pc_manager_agent.confirmation.browser --cov=pc_manager_agent.persistence.browser --cov-fail-under=95
+```
+
+Never add selector/script/generic command fields to domain models or IPC. A new action requires schema,
+policy, manifest, worker implementation, confirmation/audit redaction, hostile-page/network tests and updated
+function-level documentation together. See [architecture and limitations](browser-automation-model.md),
+[every production function](api-browser-automation.md), [validation record](stage5c-validation.md) and
+[manual checklist](manual-testing/browser-automation.md).
+
+CI installs managed Chromium on Python 3.13. Its synthetic-route contract is mandatory but the OS/browser-
+bound adapter is not in the line-percentage denominator; faking browser internals would not validate browser
+behavior. Domain, orchestration, tools, audit, protocol, Worker and Main client remain in the 85% Stage 5C
+core denominator. The independent safety/confirmation gate remains 95%.
+
 ## Stage 5B verification
 
 No extra dependency was introduced: PySide6 QtMultimedia, official OpenAI SDK and the existing SQLAlchemy

@@ -109,6 +109,26 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 5C is an independent ephemeral browser domain. It owns exactly five tools: `browser.session.open`,
+`browser.page.navigate`, `browser.page.observe`, `browser.element.activate`, and `browser.document.download`.
+Keep all page text/names/links untrusted; use only the closed action vocabulary and session/page/navigation-
+bound semantic references. Never add generic selector/click, coordinates, JavaScript/CDP, arbitrary HTTP,
+shell, extension, persistent profile, cookie/password/history import or local-file upload.
+
+Every URL and redirect is HTTP/HTTPS-only, standard-port, credential-free, IDNA-normalized and freshly
+resolved; all A/AAAA results must be globally routable. localhost/private/link-local/metadata/single-label,
+ambiguous or over-limit navigation fails closed. This is not an OS network sandbox. Transactional, account,
+communication, purchase/payment/booking/terms actions remain BLOCK. Manual takeover invalidates authority;
+handback must create a fresh page generation. Old element references and confirmations never resume.
+
+All actions use an exact plan and durable expiring single-use confirmation. One R1 download may accept only
+the finite PDF/TXT/CSV/JSON/DOCX/XLSX/PNG/JPEG/GIF/WebP set, default 50 MiB, after filename/MIME/magic/size/
+SHA-256 validation and exclusive no-overwrite commit. Conditional FULL recovery is valid only while the
+download is unchanged and moves it to a unique recovery path. This is not malware scanning. Browser-to-Office
+is a hint only; Stage 5A must independently select, inspect, Preview and confirm. Model summaries are disabled
+by default, advisory only, and require future separate external-data disclosure. Maintain the dedicated 85%
+Stage 5C and 95% safety/confirmation gates plus docs/browser-automation-model.md and API/manual validation docs.
+
 Stage 5B is an input/output layer, never a voice executor. Use one visible, explicit Push-to-Talk
 owner with bounded memory-only 24 kHz mono signed PCM. Startup, hide, background/inactive state, cancel,
 device failure and quit must never leave live capture or queued speech. No wake word, ambient listening,

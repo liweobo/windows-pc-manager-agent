@@ -65,9 +65,21 @@ class UserRequestDispatcher:
         if any(join in text for join in ("然后", "接着", " and then ")):
             return RequestDomain.AMBIGUOUS
         if any(
-            term in text for term in ("浏览器自动", "点击购买", "打开网页", "browser automation")
+            term in text
+            for term in (
+                "浏览器自动",
+                "点击购买",
+                "打开网页",
+                "网页",
+                "网站",
+                "网页搜索",
+                "browser automation",
+                "open website",
+                "web search",
+                "download pdf",
+            )
         ):
-            return RequestDomain.UNSUPPORTED
+            return RequestDomain.BROWSER
         if any(term in text for term in ("服务", "service")):
             return (
                 RequestDomain.SERVICE

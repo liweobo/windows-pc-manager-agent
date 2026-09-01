@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — Stage 5C
+
+### Added
+
+- Independent disposable Chromium/Playwright Browser Worker, secret-scrubbed finite JSON-lines protocol,
+  bounded accessibility observations and an exact five-tool registry with no generic click/script/network API.
+- Deterministic URL/DNS/origin/redirect, prompt-injection, semantic-action and transaction-denial policies;
+  page content is always untrusted and cannot grant authority.
+- Digest-bound R0 plans and durable expiring single-use confirmations tied to session/page/navigation; manual
+  takeover invalidates authority and handback creates a fresh generation.
+- One-file R1 downloads with filename/type/size/magic/hash checks, exclusive no-overwrite commit, conditional
+  FULL unchanged-file recovery, retained (never permanently deleted) staging artifacts and a non-authoritative
+  Browser-to-Office hint.
+- Background Qt browser workspace, minimized structured audit, provider-neutral optional content-summary port,
+  fake and managed-Chromium tests, dedicated coverage gates and function-level documentation.
+
+### Security and limitations
+
+- No persistent profile, cookie/password/history import, arbitrary selector/click, coordinate automation,
+  JavaScript/CDP/shell, local-file upload, private-network access, purchase, payment, booking, message, post,
+  account or terms action.
+- Application URL/DNS checks are not an OS network sandbox. Downloads are not malware-scanned; only a finite
+  format/identity contract is enforced. Public-site, SSO, CAPTCHA, popup and multi-tab compatibility is not
+  guaranteed.
+- Model page summarization is disabled by default and remains advisory. A future enablement needs independent
+  external-data disclosure; page bodies, queries, cookies, secrets and downloaded documents are not audited.
+
 ## Unreleased — Stage 5B
 
 ### Added

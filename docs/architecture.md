@@ -1,5 +1,21 @@
 # Architecture
 
+## Stage 5C browser boundary
+
+`app/browser.py` composes independent URL/action/download policies, SQLite confirmation authority, minimal
+audit, a five-tool registry and `BrowserTaskService`. The Qt tab calls orchestration only. The default adapter
+is `BrowserWorkerClient`, which launches `python -I -m pc_manager_agent.browser.worker` with `shell=False` and
+a credential-scrubbed environment. The Worker alone owns Playwright/Chromium objects and accepts a finite
+JSON-lines command protocol; no selector, script, command, HTTP request or generic arguments cross IPC.
+
+The flow is `visible intent → typed action → URL/DNS + semantic policy → exact plan → durable confirmation →
+atomic consume → registered tool → isolated worker → fresh observation/readback → minimized audit`. Page
+elements bind session/page/navigation plus role/name/href fingerprint. Navigation, takeover, cancellation or
+restart invalidates old authority. A download adds Preview → worker temporary file → Main filename/type/size/
+magic/hash validation → exclusive commit → conditional recovery record. Browser-to-Office sends only a hint;
+Office grants and confirmations remain independent. See [model](browser-automation-model.md) and
+[API](api-browser-automation.md).
+
 ## Stage 5B voice boundaries
 
 `app/voice.py` composes one application-local coordinator, metadata store, provider service and router.

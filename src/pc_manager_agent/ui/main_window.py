@@ -68,6 +68,7 @@ from pc_manager_agent.orchestration.user_requests import (
     optimization_preparation_goal,
 )
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
+from pc_manager_agent.ui.browser_tab import BrowserTab
 from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.office_tab import OfficeTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
@@ -111,7 +112,7 @@ class MainWindow(QMainWindow):
         self._voice_results = VoiceResultSummaryService(
             runtime.optimization_result_reader.read, datetime.now(UTC)
         )
-        self.setWindowTitle("Windows PC Manager Agent — Stage 5B 受控语音交互")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 5C 受控浏览器")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -128,6 +129,10 @@ class MainWindow(QMainWindow):
         self._build_settings_tab()
         self._office_tab = OfficeTab(runtime.office)
         self._tabs.addTab(self._office_tab, "办公文档")
+        self._browser_tab = BrowserTab(runtime.browser)
+        self._browser_tab.status_message.connect(self.statusBar().showMessage)
+        self._browser_tab.office_handoff_requested.connect(self._open_browser_download_in_office)
+        self._tabs.addTab(self._browser_tab, "受控浏览器")
         self._build_voice()
         self._tabs.currentChanged.connect(self._voice_surface_changed)
         self.statusBar().showMessage("就绪：写操作默认不执行，必须先 Preview 并确认")
@@ -336,6 +341,14 @@ class MainWindow(QMainWindow):
             self._conversation.append(
                 "Agent：已转到办公文档。请明确选择文件；读取、模型发送和编辑各自确认。"
                 "不会执行宏、脚本或自动控制 Word/Excel。"
+            )
+            return
+        if domain is RequestDomain.BROWSER:
+            self._tabs.setCurrentWidget(self._browser_tab)
+            self._browser_tab.set_user_goal(text)
+            self._conversation.append(
+                "Agent：已转到受控浏览器。网页内容不会成为系统指令；请检查完整网址并生成计划。"
+                "购买、消息、上传、账户修改和凭据自动化不可由确认覆盖。"
             )
             return
         if domain is RequestDomain.SOFTWARE:
@@ -573,6 +586,7 @@ class MainWindow(QMainWindow):
             6: RequestDomain.STARTUP,
             7: RequestDomain.SERVICE,
             11: RequestDomain.OFFICE,
+            12: RequestDomain.BROWSER,
         }
         return VoiceInteractionContext(
             active_surface=surfaces.get(self._tabs.currentIndex()),
@@ -708,6 +722,8 @@ class MainWindow(QMainWindow):
             self._system_optimization_tab.cancel()
         elif current is self._office_tab:
             self._office_tab.cancel_current_work()
+        elif current is self._browser_tab:
+            self._browser_tab.cancel()
 
     def hideEvent(self, event: QHideEvent) -> None:
         """Stop audio before hiding to tray; no background or invisible microphone session."""
@@ -748,6 +764,16 @@ class MainWindow(QMainWindow):
         self._trash_tab.set_sources(paths)
         self._tabs.setCurrentWidget(self._trash_tab)
         self.statusBar().showMessage("已传入明确勾选对象；请生成 R2 Preview 并完成两次确认")
+
+    @Slot(object)
+    def _open_browser_download_in_office(self, value: object) -> None:
+        """Transfer only a path hint; Office must independently select and confirm the file."""
+        if not isinstance(value, Path):
+            self.statusBar().showMessage("浏览器下载交接失败：文件引用无效。")
+            return
+        self._office_tab.suggest_downloaded_document(value)
+        self._tabs.setCurrentWidget(self._office_tab)
+        self.statusBar().showMessage("已交接路径提示；办公文档仍需重新选择并确认只读解析。")
 
     @Slot(int, str)
     def _remember_process_reference(self, pid: int, name: str) -> None:
@@ -933,6 +959,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("正在取消语音网络请求，请稍后再次退出。")
             return False
         if not self._office_tab.shutdown():
+            return False
+        if not self._browser_tab.shutdown():
             return False
         self._analysis_tab.shutdown()
         self._operation_tab.shutdown()

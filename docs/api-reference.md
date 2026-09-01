@@ -1,5 +1,13 @@
 # API reference
 
+## Stage 5C Browser Automation API
+
+Every production function and method in the browser domain, URL/action/content/download policies, disposable
+worker protocol, Playwright adapter, plans, durable confirmation, orchestration, tools, audit, optional model
+provider and Qt tab is documented in [api-browser-automation.md](api-browser-automation.md). The reference
+states parameters, return values, I/O, failure semantics and security side effects; its call order is part of
+the authority contract.
+
 ## Stage 5A Office API
 
 Every named function and method added for Office (including nested worker callbacks) is indexed with its

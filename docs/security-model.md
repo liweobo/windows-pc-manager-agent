@@ -1,5 +1,24 @@
 # Security model
 
+## Stage 5C untrusted web boundary
+
+Every remote URL, redirect, title, text, accessible name, href, filename and error is untrusted data. The Main
+process applies exact HTTP(S)/standard-port/credential-free URL parsing, IDNA normalization and fresh all-
+public A/AAAA resolution; the Worker repeats checks for intercepted requests and permits only GET/HEAD while
+Agent-controlled. Application checks do not claim OS network isolation.
+
+Only session/page/navigation-bound accessibility references and the finite action enum may execute. Generic
+click/selectors/scripts/CDP/coordinates, transactions, account/messages/posts, credentials, uploads and private
+network access are structurally absent or blocked. Prompt-injection detection is advisory and never adds an
+action. Every plan confirmation is durable, expiring and single-use; page generation drift, takeover, cancel,
+close, restart, audit/SQLite failure or DNS/origin change fails closed.
+
+Downloads are R1 and single-file: finite extension/MIME/magic checks, default 50 MiB, non-symlink staging,
+SHA-256 and exclusive no-overwrite commit. Recovery is FULL only if the committed file remains byte-identical;
+it moves rather than deletes. There is no malware-safety claim. Audit contains only origins, digests, enums,
+counts and file hash/size/type—not page bodies, query values, local paths, names, cookies or passwords.
+See [the complete safety contract](browser-automation-model.md).
+
 ## Stage 5B untrusted speech boundary
 
 Explicit visible user activation, standard-user token check, fixed-format input, bounded recording,
