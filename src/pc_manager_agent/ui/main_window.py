@@ -70,6 +70,7 @@ from pc_manager_agent.orchestration.user_requests import (
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.browser_tab import BrowserTab
 from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
+from pc_manager_agent.ui.memory_tab import MemoryTab
 from pc_manager_agent.ui.office_tab import OfficeTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
 from pc_manager_agent.ui.service_action_dialog import ServiceActionDialog
@@ -80,6 +81,7 @@ from pc_manager_agent.ui.startup_management_tab import StartupManagementTab
 from pc_manager_agent.ui.system_diagnostics_tab import SystemDiagnosticsTab
 from pc_manager_agent.ui.system_optimization_tab import SystemOptimizationTab
 from pc_manager_agent.ui.system_tray import SystemTrayController
+from pc_manager_agent.ui.task_center_tab import TaskCenterTab
 from pc_manager_agent.ui.trash_tab import TrashTab
 from pc_manager_agent.ui.voice_audio import QtAudioCapture, QtAudioPlayback
 from pc_manager_agent.ui.voice_controller import VoiceUiController
@@ -112,7 +114,8 @@ class MainWindow(QMainWindow):
         self._voice_results = VoiceResultSummaryService(
             runtime.optimization_result_reader.read, datetime.now(UTC)
         )
-        self.setWindowTitle("Windows PC Manager Agent — Stage 5C 受控浏览器")
+        self._active_agent_task_id: UUID | None = None
+        self.setWindowTitle("Windows PC Manager Agent — Stage 5D 安全任务协调")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -127,6 +130,12 @@ class MainWindow(QMainWindow):
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
+        self._task_center_tab = TaskCenterTab(runtime.agents)
+        self._task_center_tab.status_message.connect(self.statusBar().showMessage)
+        self._tabs.addTab(self._task_center_tab, "任务中心")
+        self._memory_tab = MemoryTab(runtime.agents.runtime.memory)
+        self._memory_tab.status_message.connect(self.statusBar().showMessage)
+        self._tabs.addTab(self._memory_tab, "记忆与偏好")
         self._office_tab = OfficeTab(runtime.office)
         self._tabs.addTab(self._office_tab, "办公文档")
         self._browser_tab = BrowserTab(runtime.browser)
@@ -692,6 +701,8 @@ class MainWindow(QMainWindow):
                 "Agent：目标不明确或不支持。请明确对象，并在原业务页选择；尚未执行。"
             )
             return
+        if not self._register_agent_task(request, route):
+            return
         if domain is RequestDomain.STARTUP:
             self._tabs.setCurrentWidget(self._startup_management_tab)
             self._conversation.append("Agent：请从当前启动项清单选择确切对象，再生成独立 Preview。")
@@ -707,6 +718,30 @@ class MainWindow(QMainWindow):
             self._system_optimization_tab.open_recycle_bin_empty()
             return
         self._dispatch_domain(request, route)
+
+    def _register_agent_task(self, request: UserRequest, route: RequestRoute) -> bool:
+        """Track a bounded handoff; this never approves the destination domain."""
+        try:
+            prepared = self._runtime.agents.runtime.prepare_request(request, route)
+            domain = prepared.boundary.allowed_domains[0]
+            result = self._runtime.agents.runtime.prepare_domain_handoff(
+                prepared.graph.task_id, domain
+            )
+            if not result.preparation_proposals or any(
+                proposal.execution_authorized for proposal in result.preparation_proposals
+            ):
+                raise RuntimeError("Agent handoff did not preserve the authorization boundary")
+        except Exception as exc:
+            self._conversation.append("Agent：任务协调安全检查失败，未进入业务执行流程。")
+            self.statusBar().showMessage(f"任务未创建：{type(exc).__name__}")
+            return False
+        self._active_agent_task_id = prepared.graph.task_id
+        self._task_center_tab.register_task(prepared)
+        self._conversation.append(
+            f"Agent：任务 {str(prepared.graph.task_id)[:8]} 已记录并转交原业务域。"
+            "任务中心不能替你确认或执行。"
+        )
+        return True
 
     def _cancel_current_surface(self) -> None:
         current = self._tabs.currentWidget()
@@ -724,6 +759,16 @@ class MainWindow(QMainWindow):
             self._office_tab.cancel_current_work()
         elif current is self._browser_tab:
             self._browser_tab.cancel()
+        if self._active_agent_task_id is not None:
+            try:
+                self._runtime.agents.runtime.cancel(self._active_agent_task_id)
+            except Exception as exc:
+                self.statusBar().showMessage(
+                    f"业务页面已停止；任务协调状态更新失败：{type(exc).__name__}"
+                )
+            else:
+                self._task_center_tab.refresh()
+            self._active_agent_task_id = None
 
     def hideEvent(self, event: QHideEvent) -> None:
         """Stop audio before hiding to tray; no background or invisible microphone session."""
