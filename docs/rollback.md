@@ -1,5 +1,16 @@
 # Rollback design
 
+## Stage 5D code and local-state rollback
+
+Close the application, then revert the Stage 5D commit with `git revert <Stage-5D-commit>`. Do not delete the shared
+application database: Stage 5D tables are additive and older code ignores them. Reverting code does not undo an
+operation already completed by File/System/Software/Office/Browser/Optimization; use that domain's verified Undo or
+manual recovery. Task cancellation likewise stops only future coordination.
+
+Before reverting, use the Memory page to export/copy any preference you want to keep, then explicitly delete or
+clear it if desired. A code revert does not erase Memory rows or Audit. Active Stage 5D tasks become INTERRUPTED and
+are never resumed; recent references and user goal bodies are in memory only and disappear when the app closes.
+
 ## Stage 5C code and download recovery
 
 Revert Stage 5C code on the same project with `git revert <Stage-5C-commit>` after closing the application and

@@ -1,5 +1,28 @@
 # Developer guide
 
+## Stage 5D development and verification
+
+Do not add an Executor or ConfirmationService to `agents`, `context` or `memory`. Extend a capability only by
+updating the sealed manifest, goal/data-flow policy, hostile tests, audit redaction and per-function documentation
+together. Provider output may propose a graph but local code assigns roles and every real action re-enters the
+existing domain boundary.
+
+```powershell
+uv run pytest tests/unit/agents tests/unit/context tests/unit/memory `
+  tests/integration/test_stage5d_multi_agent_flow.py tests/security/test_stage5d_boundaries.py `
+  tests/gui/test_task_center.py tests/gui/test_memory_tab.py tests/gui/test_main_window.py -q
+uv run pytest tests/unit/agents tests/unit/context tests/unit/memory `
+  tests/integration/test_stage5d_multi_agent_flow.py tests/security/test_stage5d_boundaries.py `
+  --cov-config=.coveragerc-stage5d --cov=pc_manager_agent.safety.agent_capabilities `
+  --cov=pc_manager_agent.safety.task_graph --cov=pc_manager_agent.safety.task_goal `
+  --cov=pc_manager_agent.safety.context --cov=pc_manager_agent.safety.cross_domain `
+  --cov=pc_manager_agent.safety.memory --cov=pc_manager_agent.context.governance `
+  --cov-report=term-missing --cov-fail-under=95 -q
+```
+
+See [architecture](multi-agent-architecture.md), [Context](context-governance.md),
+[Memory](memory-model.md) and [per-function API](api-stage5d.md).
+
 ## Stage 5C development and verification
 
 Playwright is locked by `uv.lock`; Chromium is a separately managed runtime. Core tests use fake DNS/browser

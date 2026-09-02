@@ -1,0 +1,9 @@
+[run]
+branch = True
+
+[report]
+show_missing = True
+skip_covered = True
+exclude_also =
+    if TYPE_CHECKING:
+    @abstractmethod

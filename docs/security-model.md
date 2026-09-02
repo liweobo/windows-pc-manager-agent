@@ -1,5 +1,18 @@
 # Security model
 
+## Stage 5D Agent, Context and Memory boundary
+
+Agent capability is default-deny and bound to a runtime-created identity, manifest SHA-256 and Prompt version.
+All Agent manifests structurally deny action execution and confirmation requests; only listed existing R0 tools may
+be proposed. Delegations are issuer-bound, expiring, single-use, capability-subset and task-goal confined. Message
+payload identity and trust labels are validated, and no Agent message may claim system trust or act as confirmation.
+
+Context is selected item by item. Credential/secret classification and known secret assignments fail closed;
+document/web/model taint survives summarization and cross-Agent messages. Memory accepts only closed low-risk keys,
+never authorization or unstable execution identity. Explicit safe writes require confirmation; inferred preferences
+remain ephemeral. Agent cancellation only stops future coordination. Original domain safety, confirmation,
+privilege and verification remain authoritative. See [Context](context-governance.md) and [Memory](memory-model.md).
+
 ## Stage 5C untrusted web boundary
 
 Every remote URL, redirect, title, text, accessible name, href, filename and error is untrusted data. The Main

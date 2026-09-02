@@ -1,5 +1,12 @@
 # API reference
 
+## Stage 5D Agent, Context and Memory API
+
+Every Stage 5D production function, method, validator and important persistence/UI helper is documented in
+[api-stage5d.md](api-stage5d.md). The reference explains inputs, outputs, failure behavior and security effects for
+capability manifests, task graphs, delegation, trust propagation, scoped Memory, journals, aggregation, optional
+OpenAI proposals and the Task Center/Memory tabs.
+
 ## Stage 5C Browser Automation API
 
 Every production function and method in the browser domain, URL/action/content/download policies, disposable

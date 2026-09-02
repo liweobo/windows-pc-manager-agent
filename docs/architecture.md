@@ -1,5 +1,18 @@
 # Architecture
 
+## Stage 5D bounded Agent coordination
+
+`app/agents.py` composes a sealed role registry, graph/goal validators, Context gateway, scoped Memory, task journal,
+delegation coordinator and resource lock service. `Stage5DAgentRuntime` deliberately has no Domain Executor or
+ConfirmationService. It creates a content-free journal and a non-authoritative handoff into the same domain UI that
+already owns Fresh resolution, Preview, confirmation, execution and verification.
+
+Runtime identity, capability narrowing and message trust are local code. Provider graph drafts cannot choose their
+effective role; `PlannerAgent` replaces role claims with the finite domain mapping. Independent reads can overlap;
+any same-resource write intent conflicts. Durable task rows contain only IDs/digests/counts/status and active tasks
+become INTERRUPTED on startup. See [full topology](multi-agent-architecture.md),
+[Context contract](context-governance.md) and [API](api-stage5d.md).
+
 ## Stage 5C browser boundary
 
 `app/browser.py` composes independent URL/action/download policies, SQLite confirmation authority, minimal

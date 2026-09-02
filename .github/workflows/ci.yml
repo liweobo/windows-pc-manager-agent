@@ -568,6 +568,61 @@ jobs:
           --cov=pc_manager_agent.confirmation.browser
           --cov=pc_manager_agent.persistence.browser
           --cov-report=term-missing --cov-fail-under=95 -q
+      - name: Stage 5D bounded Agent and Memory integration
+        if: matrix.python-version == '3.13'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          uv run pytest tests/unit/agents tests/unit/context tests/unit/memory
+          tests/integration/test_stage5d_multi_agent_flow.py
+          tests/security/test_stage5d_boundaries.py
+          tests/gui/test_task_center.py tests/gui/test_memory_tab.py tests/gui/test_main_window.py
+          --cov-config=.coveragerc-stage5d
+          --cov=pc_manager_agent.agents
+          --cov=pc_manager_agent.app.agents
+          --cov=pc_manager_agent.audit.memory
+          --cov=pc_manager_agent.audit.multi_agent
+          --cov=pc_manager_agent.config.agents
+          --cov=pc_manager_agent.context
+          --cov=pc_manager_agent.domain.agents
+          --cov=pc_manager_agent.domain.context
+          --cov=pc_manager_agent.domain.memory
+          --cov=pc_manager_agent.domain.task_graph
+          --cov=pc_manager_agent.domain.task_outcomes
+          --cov=pc_manager_agent.memory
+          --cov=pc_manager_agent.orchestration.agent_runtime
+          --cov=pc_manager_agent.orchestration.agent_selection
+          --cov=pc_manager_agent.orchestration.delegation
+          --cov=pc_manager_agent.orchestration.resource_locks
+          --cov=pc_manager_agent.orchestration.task_graph
+          --cov=pc_manager_agent.persistence.memory
+          --cov=pc_manager_agent.persistence.task_runtime
+          --cov=pc_manager_agent.providers.llm.agent_base
+          --cov=pc_manager_agent.providers.llm.openai_agents
+          --cov=pc_manager_agent.safety.agent_capabilities
+          --cov=pc_manager_agent.safety.context
+          --cov=pc_manager_agent.safety.cross_domain
+          --cov=pc_manager_agent.safety.memory
+          --cov=pc_manager_agent.safety.task_goal
+          --cov=pc_manager_agent.safety.task_graph
+          --cov=pc_manager_agent.ui.memory_tab
+          --cov=pc_manager_agent.ui.task_center_tab
+          --cov-report=term-missing --cov-fail-under=85 -q
+      - name: Stage 5D Agent security and Context coverage
+        if: matrix.python-version == '3.13'
+        run: >-
+          uv run pytest tests/unit/agents tests/unit/context tests/unit/memory
+          tests/integration/test_stage5d_multi_agent_flow.py
+          tests/security/test_stage5d_boundaries.py
+          --cov-config=.coveragerc-stage5d
+          --cov=pc_manager_agent.safety.agent_capabilities
+          --cov=pc_manager_agent.safety.task_graph
+          --cov=pc_manager_agent.safety.task_goal
+          --cov=pc_manager_agent.safety.context
+          --cov=pc_manager_agent.safety.cross_domain
+          --cov=pc_manager_agent.safety.memory
+          --cov=pc_manager_agent.context.governance
+          --cov-report=term-missing --cov-fail-under=95 -q
       - name: Python security scan
         run: uv run bandit -q -r src
       - name: Dependency vulnerability scan

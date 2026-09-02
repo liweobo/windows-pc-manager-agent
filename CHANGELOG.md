@@ -1,6 +1,30 @@
 # Changelog
 
-## Unreleased — Stage 5C
+## Unreleased — Stage 5D
+
+### Added
+
+- Runtime-owned Agent roles, sealed default-deny capability manifests, minimum Agent selection and bounded,
+  dependency/confirmation-aware task graphs whose role ownership is assigned by deterministic code.
+- Single-use issuer-bound delegation, depth/count/context/model budgets, trust-labelled messages, explicit goal
+  confinement, taint propagation and finite cross-domain data-flow policy.
+- User-controlled scoped Memory with closed keys, deterministic write/read policy, TTL/versioning, physical
+  deletion, value-free events/audit and a Memory settings page.
+- Ephemeral recent references requiring Fresh domain resolution, read/read resource concurrency with overlapping
+  write serialization, deterministic evidence precedence and content-free restart-safe task journals.
+- Task Center, provider-neutral graph proposal protocol, optional OpenAI structured adapter, security/integration/
+  GUI tests, dedicated CI gates and architecture/context/Memory/per-function documentation.
+
+### Security and limitations
+
+- Agent recommendations, task graphs, messages, Safety Reviewer output and Memory are never authorization.
+  Stage 5D adds no writer, generic Executor, shell, UAC route, confirmation bypass or automatic destructive retry.
+- Passwords, API keys, cookies, tokens, MFA, confirmation/Broker secrets, document/web bodies and full conversation
+  history are excluded from Memory and audit. Known-pattern screening is conservative and is not complete DLP.
+- Active coordination becomes `INTERRUPTED` after restart and is not resumed. Full multi-domain receipt correlation,
+  pause/resume and crash workflow reconstruction remain Stage 5E work.
+
+## Stage 5C
 
 ### Fixed
 

@@ -1,5 +1,18 @@
 # Roadmap
 
+## Stage 5D — Memory and bounded multi-Agent integration (implemented)
+
+Runtime Agent identities, sealed capability manifests, minimum Agent selection, validated task graphs, issuer-bound
+delegation, trust-labelled Context, prompt-injection taint propagation, cross-domain policy, scoped user-controlled
+Memory, ephemeral recent references, resource locks, deterministic result precedence, Task Center and synthetic
+security/GUI/integration tests. No Agent authorization, generic Executor, new system writer or destructive retry.
+
+## Stage 5E — final orchestration and end-to-end UX (planned)
+
+Complex long-running cross-domain workflow receipts, explicit pause/resume, crash recovery without replay, unified
+Chat/Tray/Voice/Browser/Office UX and end-to-end task history. Different risks will keep independent Preview and
+confirmation; Stage 5E will not introduce “Confirm All”.
+
 ## Stage 5C — bounded browser automation (implemented; visible-site validation pending)
 
 Disposable Chromium Worker, exact origin/page generation, bounded semantic observation, untrusted-content

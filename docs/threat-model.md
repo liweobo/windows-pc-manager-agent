@@ -1,5 +1,22 @@
 # Threat model
 
+## Stage 5D coordination threats
+
+| Threat | Enforced control / residual risk |
+|---|---|
+| Agent or model impersonates another role | Runtime creates identity; manifest/Prompt digest revalidation; Planner role claims ignored |
+| Child asks for wider tools or loops forever | Capability intersection, allowed child roles, task goal boundary, depth/count/model/context budgets |
+| Agent message acts as confirmation | Schema contains no authority; sender/recipient/task/node/goal/issuer/single-use checks; domain confirmation remains separate |
+| Web/document prompt injection spreads between Agents | Source-required trust labels, taint union, cross-domain classification and opaque-reference reduction |
+| Document content is exfiltrated through Browser | Document/user data external transmission defaults BLOCK; browser upload remains absent |
+| Secret reaches model/Memory/audit | Credential/Secret classification and known-pattern block, closed Memory keys, value/body-free audit; pattern screening is not complete DLP |
+| Saved preference lowers risk or removes confirmation | Memory has no risk/permission fields; unsafe directives BLOCK; each domain performs Fresh safety and confirmation |
+| Stale recent object is executed | In-memory TTL + conversation binding + mandatory Fresh domain resolution; restart forgets hints |
+| Concurrent Agents modify one resource | Process-local read/write lease conflict; underlying domain locks/Fresh checks remain required |
+| Majority model vote claims success | Fixed evidence precedence; model `*_VERIFIED` is not accepted as verified |
+| Retry or restart repeats a write | Agent retry is proposal-only; no Agent action executor; startup marks active coordination INTERRUPTED |
+| User cancels and assumes prior changes were undone | UI says “cancel future work”; completed domain effects require their own Undo/manual recovery |
+
 ## Stage 5C browser threats
 
 | Threat | Enforced control / residual risk |

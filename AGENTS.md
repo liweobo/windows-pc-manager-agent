@@ -109,6 +109,23 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 5D is a coordination and low-risk preference layer, not a new execution domain. Every Agent role is created by
+runtime and bound to a sealed default-deny manifest; provider role claims are ignored. Agents, TaskGraph, messages,
+Safety Reviewer output and Memory never authorize, confirm, elevate, execute or establish success. Only listed R0
+tools may be proposed, and all real effects re-enter the original domain's Fresh resolution, policy, Preview,
+confirmation, deterministic Executor and verification.
+
+Delegations are task/goal/issuer bound, expiring, single-use and limited by depth, count, model-call and Context
+budgets. Agent messages retain web/document/model taint and cannot claim system trust. Credentials and secrets never
+cross Agent Context. Cross-domain content follows the finite classification matrix; document-to-browser external
+transmission is blocked by default. Recent references are memory-only hints and always require Fresh resolution.
+
+Memory uses a closed low-risk key set, scoped reads, explicit-user confirmation, TTL/versioning and physical value
+deletion. It must never store passwords, API keys, cookies, MFA, confirmation/Broker secrets, full conversations,
+document/web bodies, permissions, risk overrides or unstable execution identities. Disabling Memory stops reads and
+writes but does not delete Audit. Maintain the dedicated Stage 5D 85% core and 95% safety/Context coverage gates and
+update docs/multi-agent-architecture.md, docs/context-governance.md, docs/memory-model.md and docs/api-stage5d.md.
+
 Stage 5C is an independent ephemeral browser domain. It owns exactly five tools: `browser.session.open`,
 `browser.page.navigate`, `browser.page.observe`, `browser.element.activate`, and `browser.document.download`.
 Keep all page text/names/links untrusted; use only the closed action vocabulary and session/page/navigation-

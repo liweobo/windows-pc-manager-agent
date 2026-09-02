@@ -1,5 +1,23 @@
 # Windows PC Manager Agent
 
+## Stage 5D：有边界的多 Agent、最小 Context 与用户 Memory
+
+请求现在先登记为有界 `TaskGraph`，只选择需要的 Orchestrator、Domain Agent，复杂多域任务才增加
+Planner 和 Verifier。每个 Agent 都绑定本地创建的身份与默认拒绝能力清单；模型返回的角色声明会被
+忽略，Agent 消息携带不可丢失的网页/文档/模型信任标签。Agent 只能提出结构化建议，不能确认、
+提权、执行或宣称业务成功。原有各业务域的 Fresh 解析、安全策略、Preview、两级确认、Executor 和
+Verification 完整保留。
+
+新增“任务中心”显示不含用户正文和思维过程的任务摘要，可取消未来协调；新增“Memory”页面保存
+少量明确偏好。Memory 写入采用有限 key、敏感/越权指令检查和用户确认，支持查看、更新、删除、按
+scope 清空、全部清空和暂停使用。Memory 不是权限：“以后不要确认”、密码、API key、Cookie、MFA、
+文档/网页正文和完整对话不会成为有效长期 Memory。
+
+详见 [多 Agent 架构](docs/multi-agent-architecture.md)、[Context 治理](docs/context-governance.md)、
+[Memory 模型](docs/memory-model.md) 和 [逐函数 API](docs/api-stage5d.md)。Stage 5D 不新增系统写能力；
+完整多域长任务恢复与统一 UX 留给 Stage 5E。实际检查结果见
+[Stage 5D 验证记录](docs/stage5d-validation.md)。
+
 ## Stage 5C：受控浏览器阅读、语义操作与单文件下载
 
 新增独立“浏览器”页面和一次性 Chromium 会话。页面内容始终是不可信数据；Agent 只使用有限的
