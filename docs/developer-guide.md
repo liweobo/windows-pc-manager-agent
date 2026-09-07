@@ -1,5 +1,27 @@
 # Developer guide
 
+## Stage 5E development and verification
+
+The Final Orchestrator may call only `DomainWorkflow.prepare`, `reconcile` and `recovery_summary`. Never import a
+low-level tool, Windows adapter, domain ConfirmationService or Broker executor into this layer. Task-plan consent is
+R0 coordination-only; result truth comes from exact owning-domain receipts. Checkpoints restore knowledge, not
+authority. Restart and resume require Fresh review and never replay.
+
+```powershell
+uv run pytest tests/unit/tasks tests/integration/test_stage5e_crash_recovery.py `
+  tests/e2e/test_stage5e_fake_long_tasks.py tests/security/test_stage5e_boundaries.py `
+  tests/gui/test_stage5e_task_ui.py -q
+uv run pytest tests/unit/tasks/test_safety_policies.py tests/security/test_stage5e_boundaries.py `
+  --cov-config=.coveragerc-stage5e --cov=pc_manager_agent.safety.final_orchestrator `
+  --cov=pc_manager_agent.safety.task_revision --cov=pc_manager_agent.safety.task_staleness `
+  --cov=pc_manager_agent.domain.task_checkpoints --cov=pc_manager_agent.domain.task_workflows `
+  --cov-report=term-missing --cov-fail-under=95 -q
+```
+
+See [architecture](final-orchestrator.md), [lifecycle](task-lifecycle.md),
+[recovery](crash-recovery.md), [API](api-final-orchestrator.md) and
+[manual checklist](manual-testing/final-orchestrator.md).
+
 ## Stage 5D development and verification
 
 Do not add an Executor or ConfirmationService to `agents`, `context` or `memory`. Extend a capability only by

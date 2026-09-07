@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Stage 5E
+
+### Added
+
+- Durable `ComputerTask`, versioned coordination-only graph, immutable checkpoints, unique dispatch records,
+  per-task R0 plan consent, attention queue, budgets, pause/Fresh-resume/future-only cancellation and revision.
+- Closed eleven-domain high-level workflow registry with no execute/confirm method, exact owning-domain receipts,
+  deterministic summaries and domain-specific recovery metadata without global Undo.
+- Crash startup interruption, confirmation invalidation and reconciliation-only recovery with no automatic replay.
+- Home safe templates, upgraded Task Center, tray navigation, fake long-task E2E tests, dedicated 85%/95% CI gates,
+  architecture/lifecycle/recovery/manual-validation and detailed per-function API documentation.
+
+### Security and limitations
+
+- Stage 5E adds no Windows writer, shell, Broker capability, global confirmation, unattended mode or cross-domain
+  rollback. Existing domain policies and confirmations remain authoritative.
+- Raw goal bodies and domain content remain volatile; durable records contain bounded safe labels, IDs, digests,
+  fixed codes and counts. Known secret screening is conservative and is not complete DLP.
+- Production adapters currently hand off to existing domain UIs. Automated E2E tests validate coordination with
+  fakes; real dangerous actions, UAC, paid APIs and user documents were not exercised.
+
 ## Unreleased — Stage 5D
 
 ### Added

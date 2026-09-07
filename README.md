@@ -1,5 +1,20 @@
 # Windows PC Manager Agent
 
+## Stage 5E：可恢复的长任务协调与统一任务中心
+
+新增 Final Orchestrator，用版本化 `ComputerTask`/`TaskGraph`、检查点、单次派发、用户注意队列和
+各业务域验证回执协调复杂长任务。应用重启会把活动任务标记为 `INTERRUPTED`、使旧任务计划确认
+失效，并只做 Fresh 状态核对；不会自动重放。任务计划确认只覆盖高层 R0 协调，文件、进程、
+启动项、服务、软件、残留、清理、Office 和浏览器仍在原页面独立 Preview、确认、执行和验证。
+
+新增“主页与长任务”和升级后的“任务中心”，支持安全模板、逐任务计划审查、暂停、Fresh 恢复、
+未来步骤取消与中断检查。没有 `FULL_UNATTENDED`、Confirm All、全局管理员模式、全局 Executor 或
+跨业务域 Undo；托盘通知只能打开任务中心。自动测试使用高层假适配器，不执行真实 Windows 写操作。
+
+详见 [Final Orchestrator](docs/final-orchestrator.md)、[任务生命周期](docs/task-lifecycle.md)、
+[崩溃恢复](docs/crash-recovery.md)、[逐函数 API](docs/api-final-orchestrator.md) 和
+[Stage 5E 验证记录](docs/stage5e-validation.md)。
+
 ## Stage 5D：有边界的多 Agent、最小 Context 与用户 Memory
 
 请求现在先登记为有界 `TaskGraph`，只选择需要的 Orchestrator、Domain Agent，复杂多域任务才增加

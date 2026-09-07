@@ -7,11 +7,18 @@ delegation, trust-labelled Context, prompt-injection taint propagation, cross-do
 Memory, ephemeral recent references, resource locks, deterministic result precedence, Task Center and synthetic
 security/GUI/integration tests. No Agent authorization, generic Executor, new system writer or destructive retry.
 
-## Stage 5E — final orchestration and end-to-end UX (planned)
+## Stage 5E — final orchestration and end-to-end UX (implemented)
 
-Complex long-running cross-domain workflow receipts, explicit pause/resume, crash recovery without replay, unified
-Chat/Tray/Voice/Browser/Office UX and end-to-end task history. Different risks will keep independent Preview and
-confirmation; Stage 5E will not introduce “Confirm All”.
+Versioned long-running cross-domain tasks, exact workflow receipts, explicit pause/Fresh resume, future-only
+cancellation, graph revision, attention queue, durable checkpoints, crash recovery without replay, Home/Chat/Tray/
+Voice/Browser/Office navigation and end-to-end task history. Different risks retain independent Preview and
+confirmation. There is no Confirm All, global Executor, full unattended mode or cross-domain Undo.
+
+## Stage 7A — release hardening and trustworthy distribution (next; not started)
+
+Design the signed Windows build/install/update boundary, migration/backup policy, privacy review, accessibility,
+telemetry opt-in, release channels and final real-device/manual validation. Do not begin distribution or auto-update
+implementation without a separate plan and confirmation.
 
 ## Stage 5C — bounded browser automation (implemented; visible-site validation pending)
 

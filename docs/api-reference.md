@@ -1,5 +1,8 @@
 # API reference
 
+Stage 5E Final Orchestrator functions and methods are documented in
+[api-final-orchestrator.md](api-final-orchestrator.md).
+
 ## Stage 5D Agent, Context and Memory API
 
 Every Stage 5D production function, method, validator and important persistence/UI helper is documented in

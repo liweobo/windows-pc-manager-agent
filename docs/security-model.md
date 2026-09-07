@@ -1,5 +1,17 @@
 # Security model
 
+## Stage 5E global coordination invariants
+
+- The task plan confirms only exact R0 coordination nodes and always has `domain_write_authorized=false`.
+- No task, graph, checkpoint, attention item, Agent/model message or domain preparation can authorize execution.
+- Exactly eleven high-level domains are registered; their interface has no execute or confirm method.
+- Every write-capable effect retains the original domain's Fresh resolution, Preview, confirmation and verifier.
+- Restart/revision invalidate old task consent. Recovery may reconcile but `action_replayed` is schema-forbidden.
+- Tray/notification actions navigate only. Voice/chat text cannot approve task or domain confirmation.
+- `FULL_UNATTENDED`, Confirm All, global elevation, generic tool/command routing and global Undo do not exist.
+- Durable task data is IDs, safe labels, digests, fixed codes, counts and opaque references; raw goal/domain bodies,
+  credentials, confirmation/Broker secrets and model reasoning are excluded.
+
 ## Stage 5D Agent, Context and Memory boundary
 
 Agent capability is default-deny and bound to a runtime-created identity, manifest SHA-256 and Prompt version.

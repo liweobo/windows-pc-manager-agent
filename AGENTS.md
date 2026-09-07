@@ -109,6 +109,20 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 5E is the final high-level coordination layer, not a global Executor. `ComputerTask`, graph versions,
+checkpoints, dispatch records, task-plan confirmation, attention queue and summaries never grant business-domain
+authority. The sealed `DomainWorkflow` registry contains exactly File/System/Process/Startup/Service/Software/
+Residual/Cleanup/Office/Browser/Optimization and exposes only prepare, reconcile and recovery-summary operations.
+Each real action must re-enter its original domain's Fresh resolution, policy, Preview, confirmations, execution,
+verification and recovery. Task-plan consent is R0-only and cannot replace any domain confirmation.
+
+Restart marks active work INTERRUPTED, invalidates pending/approved task consent and reconciles without replay.
+Pause/resume, cancellation and graph revision never restore old confirmation, PID, DOM, path or transaction
+authority. Notifications and voice cannot approve. There is no FULL_UNATTENDED, Confirm All, global admin mode,
+shell/generic tool routing, automatic destructive retry or global Undo. Maintain the dedicated Stage 5E 85% core
+and 95% safety/checkpoint coverage gates and update docs/final-orchestrator.md, docs/task-lifecycle.md,
+docs/crash-recovery.md, docs/api-final-orchestrator.md and the manual checklist on every related change.
+
 Stage 5D is a coordination and low-risk preference layer, not a new execution domain. Every Agent role is created by
 runtime and bound to a sealed default-deny manifest; provider role claims are ignored. Agents, TaskGraph, messages,
 Safety Reviewer output and Memory never authorize, confirm, elevate, execute or establish success. Only listed R0

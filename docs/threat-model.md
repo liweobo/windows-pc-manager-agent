@@ -1,5 +1,24 @@
 # Threat model
 
+## Stage 5E additions
+
+| Threat | Control |
+| --- | --- |
+| Model/page/document expands a long task | Closed domain enum, explicit user revision and separate scope-expansion acknowledgement |
+| Task-plan consent approves later writes | Consent contains only R0 node IDs and fixed false write-authority field |
+| Duplicate UI/restart dispatch | Durable unique node dispatch reserved before handoff; writes never auto-retry |
+| Crash replays an uncertain action | Active task becomes interrupted; dispatch becomes reconciling; result schema forbids replay |
+| Old PID/DOM/file/service identity is reused | Object-specific staleness policy and owning-domain Fresh resolution |
+| One domain claims another's success | Receipt binds exact task, node, graph version and domain; verified success requires evidence |
+| Notification or voice says “yes” | Attention/notification schema cannot authorize; confirmations remain visual and domain-owned |
+| Global Undo overstates recovery | Summary fixes global Undo false and preserves each domain rollback level |
+| Checkpoint restores a secret/confirmation | Checkpoint contains metadata only and schema rejects restored authority |
+| Long task exhausts resources | Immutable bounded budgets pause coordination and request user review |
+
+Residual risk: local malware running as the same user may tamper with application storage, and known-pattern secret
+screening is not complete DLP. Digest and schema checks detect accidental/simple payload changes but are not a
+hardware-backed trust boundary. Production signing and installation hardening belong to Stage 7A.
+
 ## Stage 5D coordination threats
 
 | Threat | Enforced control / residual risk |

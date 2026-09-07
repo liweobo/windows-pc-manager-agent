@@ -1,5 +1,18 @@
 # Architecture
 
+## Stage 5E Final Orchestrator boundary
+
+`app.tasks` composes an independent metadata repository, closed high-level `DomainWorkflowRegistry`, validated
+graph builder, lifecycle state machine, attention queue, deterministic summary service and audit facade. The Final
+Orchestrator imports no Windows writer and receives no business-domain Executor or ConfirmationService. Its graph
+has only internal R0 nodes and high-level domain handoffs; the owning business module remains the sole place where
+targets are freshly resolved and actual Preview/confirmation/execution/verification occurs.
+
+Stage 5E tables are additive and digest-protected. Root transitions use compare-and-swap revisions; dispatch has a
+unique `(task_id, graph_version, node_id)` key; graph versions and checkpoints are append-only. Startup marks active
+state interrupted, invalidates consent and enters reconciliation without replay. See
+[final-orchestrator.md](final-orchestrator.md).
+
 ## Stage 5D bounded Agent coordination
 
 `app/agents.py` composes a sealed role registry, graph/goal validators, Context gateway, scoped Memory, task journal,

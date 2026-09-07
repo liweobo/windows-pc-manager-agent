@@ -623,6 +623,44 @@ jobs:
           --cov=pc_manager_agent.safety.memory
           --cov=pc_manager_agent.context.governance
           --cov-report=term-missing --cov-fail-under=95 -q
+      - name: Stage 5E Final Orchestrator core and fake long tasks
+        if: matrix.python-version == '3.13'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          uv run pytest tests/unit/tasks tests/integration/test_stage5e_crash_recovery.py
+          tests/e2e/test_stage5e_fake_long_tasks.py tests/security/test_stage5e_boundaries.py
+          tests/gui/test_stage5e_task_ui.py
+          --cov-config=.coveragerc-stage5e
+          --cov=pc_manager_agent.domain.computer_tasks
+          --cov=pc_manager_agent.domain.task_attention
+          --cov=pc_manager_agent.domain.task_checkpoints
+          --cov=pc_manager_agent.domain.task_summaries
+          --cov=pc_manager_agent.domain.task_workflows
+          --cov=pc_manager_agent.orchestration.domain_workflows
+          --cov=pc_manager_agent.orchestration.final_orchestrator
+          --cov=pc_manager_agent.orchestration.task_attention
+          --cov=pc_manager_agent.orchestration.task_graphs
+          --cov=pc_manager_agent.orchestration.task_state_machine
+          --cov=pc_manager_agent.orchestration.task_summary
+          --cov=pc_manager_agent.persistence.computer_tasks
+          --cov=pc_manager_agent.safety.final_orchestrator
+          --cov=pc_manager_agent.safety.task_revision
+          --cov=pc_manager_agent.safety.task_staleness
+          --cov=pc_manager_agent.safety.task_templates
+          --cov-report=term-missing --cov-fail-under=85 -q
+      - name: Stage 5E safety confirmation and recovery coverage
+        if: matrix.python-version == '3.13'
+        run: >-
+          uv run pytest tests/unit/tasks/test_safety_policies.py
+          tests/security/test_stage5e_boundaries.py
+          --cov-config=.coveragerc-stage5e
+          --cov=pc_manager_agent.safety.final_orchestrator
+          --cov=pc_manager_agent.safety.task_revision
+          --cov=pc_manager_agent.safety.task_staleness
+          --cov=pc_manager_agent.domain.task_checkpoints
+          --cov=pc_manager_agent.domain.task_workflows
+          --cov-report=term-missing --cov-fail-under=95 -q
       - name: Python security scan
         run: uv run bandit -q -r src
       - name: Dependency vulnerability scan

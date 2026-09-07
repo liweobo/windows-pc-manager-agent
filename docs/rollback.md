@@ -1,5 +1,16 @@
 # Rollback design
 
+## Stage 5E task recovery
+
+There is no task-wide rollback transaction. Cancelling a `ComputerTask` stops only future coordination. The final
+summary lists recovery separately for each owning-domain receipt and preserves its actual `FULL`, `PARTIAL`,
+`MANUAL` or `NONE` level. A recovery navigation code only opens that domain's existing recovery review; it does not
+perform recovery.
+
+Application restart restores graph/checkpoint knowledge, invalidates old confirmations and requires Fresh
+reconciliation. It never reruns a domain action. To roll back this code release, prefer `git revert <stage5e-sha>`;
+existing additive SQLite rows may remain unused and should not be manually deleted while recovery evidence matters.
+
 ## Stage 5D code and local-state rollback
 
 Close the application, then revert the Stage 5D commit with `git revert <Stage-5D-commit>`. Do not delete the shared
