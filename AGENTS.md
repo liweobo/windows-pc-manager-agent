@@ -116,6 +116,15 @@ environment-provided feature lists cannot widen a production artifact. Release r
 missing, failed, not-run and not-configured checks do not pass. Code signing is currently NOT_CONFIGURED, so no
 public-RC, V1-ready or trusted-Broker claim is permitted until independently verified signing evidence exists.
 
+Production logging is local, rotating and centrally redacted. Crash reports contain no source, locals or cleartext
+paths and are never uploaded. Three recent unclean starts enter a separate reduction-only Safe Mode that constructs
+no business-domain tab or worker and disables provider/Broker configuration. Diagnostic ZIP export is R1 and must
+use an exact Preview, explicit default-deny confirmation, single-use authority, exclusive absent local target,
+verified members and mandatory audit. It may contain only finite runtime facts and structural log fields; never
+SQLite/audit bodies, Memory values, user files, paths, credentials, prompts, documents, pages, transcripts or audio.
+Telemetry remains NOT_IMPLEMENTED. Maintain docs/privacy.md, docs/release/logging-and-diagnostics.md and
+docs/api-production-hardening.md with every related change.
+
 Stage 5E is the final high-level coordination layer, not a global Executor. `ComputerTask`, graph versions,
 checkpoints, dispatch records, task-plan confirmation, attention queue and summaries never grant business-domain
 authority. The sealed `DomainWorkflow` registry contains exactly File/System/Process/Startup/Service/Software/

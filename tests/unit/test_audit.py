@@ -25,6 +25,24 @@ def test_recursive_redaction_preserves_shape() -> None:
     assert redact_text("password=hunter2 more") == f"password={REDACTED} more"
 
 
+def test_redaction_blocks_release_credential_and_content_shapes() -> None:
+    value = {
+        "mfa_code": "123456",
+        "raw_audio_bytes": "voice",
+        "document_body": "private document",
+        "safe": (
+            "Bearer abcdefghijklmnop ghp_abcdefghijklmnopqrstuvwxyz eyJabcdefgh.abcdefgh.abcdefgh"
+        ),
+    }
+
+    redacted = redact_json(value)
+
+    assert redacted["mfa_code"] == REDACTED
+    assert redacted["raw_audio_bytes"] == REDACTED
+    assert redacted["document_body"] == REDACTED
+    assert redacted["safe"] == f"Bearer {REDACTED} {REDACTED} {REDACTED}"
+
+
 def test_repository_requires_initialization(tmp_path: Path) -> None:
     repository = AuditRepository(tmp_path / "audit.db")
     event = AuditEvent(event_type="test", app_version="0.1.0")

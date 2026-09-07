@@ -142,7 +142,9 @@ class ProductionConfigValidator:
             violations.append(
                 self._violation("MAIN_ELEVATED", "The Main Agent must be standard-user")
             )
-        if features != FeatureFlags.private_rc_defaults():
+        safe_mode = bool(getattr(settings, "safe_mode", False))
+        expected_features = FeatureFlags() if safe_mode else FeatureFlags.private_rc_defaults()
+        if features != expected_features:
             violations.append(
                 self._violation(
                     "FEATURE_SET", "Production feature allow-list differs from the RC policy"
@@ -166,6 +168,10 @@ class ProductionConfigValidator:
                 )
             )
         provider = getattr(settings, "llm_provider", "disabled")
+        if safe_mode and provider != "disabled":
+            violations.append(
+                self._violation("SAFE_MODE_PROVIDER", "Safe mode must disable model providers")
+            )
         if provider == "openai" and (
             getattr(settings, "openai_model", None) is None
             or getattr(settings, "openai_api_key", None) is None

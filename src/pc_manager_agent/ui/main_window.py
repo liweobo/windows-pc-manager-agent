@@ -72,6 +72,7 @@ from pc_manager_agent.orchestration.user_requests import (
 )
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.browser_tab import BrowserTab
+from pc_manager_agent.ui.diagnostic_bundle_dialog import export_diagnostic_bundle
 from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
 from pc_manager_agent.ui.home_tab import HomeTaskTab, require_computer_task
 from pc_manager_agent.ui.memory_tab import MemoryTab
@@ -155,7 +156,11 @@ class MainWindow(QMainWindow):
             self._build_voice()
         self._apply_feature_flags()
         self._tabs.currentChanged.connect(self._voice_surface_changed)
-        self.statusBar().showMessage("就绪：写操作默认不执行，必须先 Preview 并确认")
+        self.statusBar().showMessage(
+            "安全模式：所有可选业务能力与模型供应商均已关闭"
+            if self._runtime.settings.safe_mode
+            else "就绪：写操作默认不执行，必须先 Preview 并确认"
+        )
 
     def attach_tray(self, tray: SystemTrayController) -> None:
         """Attach tray presentation after both objects are constructed."""
@@ -354,9 +359,19 @@ class MainWindow(QMainWindow):
         model = self._runtime.settings.openai_model or "未设置"
         layout.addWidget(QLabel(f"模型供应商：{provider}"))
         layout.addWidget(QLabel(f"模型 ID：{model}"))
+        layout.addWidget(
+            QLabel(
+                "安全模式：已启用（仅保留最小界面和本地诊断）"
+                if self._runtime.settings.safe_mode
+                else "安全模式：未启用"
+            )
+        )
         layout.addWidget(QLabel("API Key：仅从环境变量读取，界面和日志不会显示"))
         layout.addWidget(QLabel(f"本地数据目录：{self._runtime.settings.data_directory}"))
         layout.addWidget(QLabel(f"扫描文件上限：{self._runtime.settings.scan_max_files}"))
+        diagnostic_bundle = QPushButton("预览并导出已脱敏诊断包")
+        diagnostic_bundle.clicked.connect(lambda: export_diagnostic_bundle(self, self._runtime))
+        layout.addWidget(diagnostic_bundle)
         layout.addWidget(
             QLabel("Stage 2A 仅支持已授权目录内的同卷移动、同父重命名、mkdir 和回滚。")
         )

@@ -34,3 +34,17 @@ automatic retry, redispatch, confirmation restoration, external uninstaller kill
 SQLite integrity, audit/storage, graph binding, receipt ownership or reconciliation errors stop the related step.
 Existing domain evidence is retained. The application must report what is known, unknown and already changed; it
 must not infer success from process exit or missing objects without the owning domain's required verification.
+
+## Stage 7A application crash loop
+
+After obtaining the single-instance lock, the application writes a local active-session marker. Orderly shutdown
+removes it. A marker found at the next start counts as one unclean session; three within ten minutes select a
+reduction-only Safe Mode. Corrupt health history also selects Safe Mode. This decision never restores or fabricates
+task/domain authority and never resumes an operation.
+
+Safe Mode creates no domain tabs or workers. It permits local status/settings inspection, structural audit metadata
+and reviewed diagnostic export only. Normal mode must be started afresh after the cause is understood; old plans,
+confirmations, browser references, process identities and Broker authorities remain invalid.
+
+Unhandled exceptions produce a bounded local report with sanitized message and hashed frames. Reports are not
+uploaded. The newest ten are retained. See [logging and diagnostics](release/logging-and-diagnostics.md).

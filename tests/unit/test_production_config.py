@@ -69,6 +69,19 @@ def test_valid_unsigned_private_rc_configuration_passes() -> None:
     assert report.violations == ()
 
 
+def test_safe_mode_allows_only_empty_features_and_disabled_provider() -> None:
+    safe = _production_settings(
+        safe_mode=True,
+        feature_flags=FeatureFlags(),
+        llm_provider="disabled",
+    )
+    assert ProductionConfigValidator().validate(safe, _context()).valid
+
+    unsafe = safe.model_copy(update={"llm_provider": "openai"})
+    report = ProductionConfigValidator().validate(unsafe, _context())
+    assert "SAFE_MODE_PROVIDER" in {item.code for item in report.violations}
+
+
 @pytest.mark.parametrize(
     ("settings", "context", "code"),
     [

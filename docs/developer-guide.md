@@ -1,5 +1,26 @@
 # Developer guide
 
+## Stage 7A observability and diagnostics
+
+Do not bypass `LogRedactionPolicy`, add a traceback/local/body field to production logs, or add automatic upload.
+Safe mode must remain a separate window with no domain construction. Diagnostic export must retain Preview,
+default-deny confirmation, mandatory audit callbacks, absent-target commit and exact post-write verification.
+
+```powershell
+uv run pytest tests/unit/test_audit.py tests/unit/test_production_logging.py `
+  tests/unit/test_crash_observability.py tests/unit/test_diagnostic_bundle.py `
+  tests/unit/test_main_entry.py tests/gui/test_main_window.py -q
+uv run pytest tests/unit/test_production_logging.py `
+  --cov=pc_manager_agent.observability.logging --cov-fail-under=95 -q
+uv run pytest tests/unit/test_crash_observability.py `
+  --cov=pc_manager_agent.observability.crash --cov-fail-under=95 -q
+uv run pytest tests/unit/test_diagnostic_bundle.py `
+  --cov=pc_manager_agent.diagnostics.bundle --cov-fail-under=95 -q
+```
+
+See [privacy](privacy.md), [logging and diagnostics](release/logging-and-diagnostics.md),
+[migration](release/database-migrations.md) and [API](api-production-hardening.md).
+
 ## Stage 5E development and verification
 
 The Final Orchestrator may call only `DomainWorkflow.prepare`, `reconcile` and `recovery_summary`. Never import a

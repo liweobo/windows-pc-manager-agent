@@ -464,3 +464,16 @@ privilege elevation through placeholder interfaces.
 | False success from WinRT return | Fresh current-user inventory distinguishes present, removed, and same-family replacement. |
 | Crash/replay/double click | Durable single-use confirmations and transaction restart recovery mark active work interrupted, never retry. |
 | User-data overreach | No recursive enumeration/deletion; fixed roaming-preservation option and explicit LocalState warning. |
+
+## Stage 7A observability and diagnostic threats
+
+| Threat | Mitigation | Residual risk |
+|---|---|---|
+| Secret or private body reaches a log | Recursive sensitive-key removal, inline Bearer/token/assignment filtering, path hashing, production INFO level and bounds | Pattern matching is not complete DLP; callers must avoid content fields |
+| Traceback reveals user paths or locals | Crash report stores only exception type/sanitized message and salted path references; no source or locals | Exception text may contain an unrecognized secret shape |
+| Crash loop repeatedly loads risky domains | Active-session marker and bounded unclean history select reduction-only Safe Mode before runtime composition | Same-user tampering can force Safe Mode (availability loss), but cannot grant capability |
+| Safe-mode UI still exposes a writer | A separate minimal window is constructed; feature/provider/Broker settings are empty/disabled | Diagnostic ZIP is an explicit R1 local creation |
+| Support ZIP silently exfiltrates data | No uploader exists; exact default-No review; structural log selection; explicit exclusions | User can manually share the reviewed ZIP after export |
+| Stale/forged diagnostic consent | Exact content digest, expiry, in-memory hashed authority and single consumption | Process-memory compromise is outside this boundary |
+| Existing target is overwritten | Absolute local absent `.zip`, reparse/network/ambiguity checks and hard-link no-overwrite commit | Filesystems without hard links fail closed |
+| Audit outage produces an unaudited export | Approval audit precedes authority; result-audit failure removes the newly created ZIP | Crash between filesystem commit and cleanup can require manual inspection |

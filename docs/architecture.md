@@ -893,6 +893,14 @@ catalog under an explicit transaction, and compares the resulting table set and 
 future-version, missing-step, drift, corrupt, or recovery-marker states stop startup; they never trigger a database
 rebuild. See [production database migration and recovery](release/database-migrations.md).
 
+The Stage 7A observability boundary starts only after single-instance ownership and before dependency composition.
+Production configuration validation cannot widen flags; a crash-loop decision can only replace settings with an
+empty feature set and disabled provider/Broker. Safe mode constructs `SafeModeWindow` instead of `MainWindow`, so
+hidden widgets are not relied on as its security boundary. Local structured logging, local crash evidence and the
+diagnostic exporter are independent from domain Executors. The diagnostic service receives mandatory Audit callbacks
+from `ApplicationRuntime`, holds reviewed member bytes/authority only in memory, and never provides upload behavior.
+See [logging and diagnostics](release/logging-and-diagnostics.md) and [privacy](privacy.md).
+
 Authorized-path changes produce FULL inverse records. Report export is R1 and uses
 exclusive creation; existing files are never overwritten. Export cleanup is deliberately
 manual because Stage 1 never deletes even an incomplete report. User-file analysis is R0

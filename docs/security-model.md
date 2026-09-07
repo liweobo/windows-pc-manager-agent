@@ -670,6 +670,18 @@ record only after postcondition verification. Undo and audit are separate tables
 purposes. Reverse execution refuses changed results, occupied original paths, unsafe
 scope, and non-empty created directories. `FULL` describes the normal verified case,
 not a promise that later user changes cannot create a rollback conflict.
+
+## Stage 7A observability and recovery boundary
+
+Production logs are bounded local JSON records. Central redaction removes credential/content fields, common inline
+secret shapes, URL queries and cleartext Windows paths before serialization. Crash reports keep only type, sanitized
+message and hashed bounded frames; there is no automatic upload. Repeated unclean startup or corrupt health metadata
+only removes capabilities by selecting a separate Safe Mode with no business-domain construction.
+
+A diagnostic bundle is an R1 local file creation, not support transmission. The user reviews exact members,
+exclusions, target and recovery level in a default-No dialog. Approval is digest/expiry-bound and single-use. Target,
+member set and bytes are revalidated; overwrite/network/reparse/ambiguous targets fail closed. Mandatory audit failure
+prevents authority or removes a newly committed ZIP. Telemetry and automatic update are not implemented.
 ## Stage 4D2C2 policy
 
 MSIX removal is R2, single-object, current-user only and rollback `NONE`. An executable Preview needs

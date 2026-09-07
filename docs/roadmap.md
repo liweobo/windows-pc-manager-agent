@@ -14,11 +14,13 @@ cancellation, graph revision, attention queue, durable checkpoints, crash recove
 Voice/Browser/Office navigation and end-to-end task history. Different risks retain independent Preview and
 confirmation. There is no Confirm All, global Executor, full unattended mode or cross-domain Undo.
 
-## Stage 7A — release hardening and trustworthy distribution (next; not started)
+## Stage 7A — release hardening and trustworthy distribution (in progress)
 
-Design the signed Windows build/install/update boundary, migration/backup policy, privacy review, accessibility,
-telemetry opt-in, release channels and final real-device/manual validation. Do not begin distribution or auto-update
-implementation without a separate plan and confirmation.
+Implemented slices: immutable private-RC feature freeze/readiness evidence, versioned fail-closed database migration,
+bounded redacted local logging, sanitized crash evidence, crash-loop Safe Mode, reviewed local diagnostic export and
+privacy/retention documentation. Remaining work includes separate packaged-process validation, installer/ACL and
+artifact inspection, SBOM/license/vulnerability evidence, accessibility/performance/leak/manual matrices and signed
+real-device validation. Signing is NOT_CONFIGURED, so public RC and V1 remain blocked. No auto-update or final tag.
 
 ## Stage 5C — bounded browser automation (implemented; visible-site validation pending)
 

@@ -11,6 +11,12 @@ Stage 7A 正在把开发构建收敛为可验证的 Windows 发布物。首个�
 `NOT_CONFIGURED`，因此不能宣称 public RC 或 V1 ready。功能冻结清单见
 [私有 RC 功能冻结](docs/release/feature-freeze.md)。
 
+启动现在先执行数据库迁移校验、生产配置校验与崩溃循环检测。连续异常启动会进入只能查看状态、
+审计元数据、设置和导出本地诊断包的安全模式；不会加载业务能力或模型。应用日志采用本地限量 JSONL
+并集中脱敏。诊断 ZIP 必须选择不存在的本地文件、查看精确清单并确认后才创建，且绝不自动上传。
+详见[隐私模型](docs/privacy.md)、[日志与诊断](docs/release/logging-and-diagnostics.md)、
+[数据库迁移](docs/release/database-migrations.md)及[生产加固 API](docs/api-production-hardening.md)。
+
 ## Stage 5E：可恢复的长任务协调与统一任务中心
 
 新增 Final Orchestrator，用版本化 `ComputerTask`/`TaskGraph`、检查点、单次派发、用户注意队列和

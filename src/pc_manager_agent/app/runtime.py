@@ -78,6 +78,11 @@ from pc_manager_agent.confirmation.system_optimization import OptimizationConfir
 from pc_manager_agent.confirmation.trash import TrashConfirmationService
 from pc_manager_agent.confirmation.vendor_uninstall import VendorUninstallConfirmationService
 from pc_manager_agent.confirmation.winget_uninstall import WingetUninstallConfirmationService
+from pc_manager_agent.diagnostics.bundle import (
+    DiagnosticBundlePreview,
+    DiagnosticBundleResult,
+    DiagnosticBundleService,
+)
 from pc_manager_agent.domain.elevated_broker import BrokerTrustMode
 from pc_manager_agent.domain.file_analysis import FileAnalysisProgress
 from pc_manager_agent.domain.privileged_actions import (
@@ -711,6 +716,11 @@ class ApplicationRuntime:
         ).migrate()
         self.audit = AuditRepository(settings.database_path)
         self.audit.initialize()
+        self.diagnostic_bundle = DiagnosticBundleService(
+            settings.data_directory,
+            on_confirmation=self._audit_diagnostic_bundle_confirmation,
+            on_exported=self._audit_diagnostic_bundle_export,
+        )
         self.optimization_session_repository = OptimizationSessionRepository(settings.database_path)
         self.optimization_session_repository.initialize()
         self.optimization_result_reader = OptimizationDomainResultReader(settings.database_path)
@@ -2238,6 +2248,44 @@ class ApplicationRuntime:
                     "level": "MANUAL",
                     "reason": "Stage 1 never automatically deletes an exported user report",
                 },
+                app_version=__version__,
+            )
+        )
+
+    def _audit_diagnostic_bundle_confirmation(
+        self, preview: DiagnosticBundlePreview, approved: bool
+    ) -> None:
+        self.audit.record(
+            AuditEvent(
+                event_type="diagnostic_bundle.confirmation.resolved",
+                parameters={
+                    "preview_id": str(preview.preview_id),
+                    "content_digest": preview.content_digest,
+                    "entry_count": len(preview.entries),
+                    "total_bytes": sum(item.size_bytes for item in preview.entries),
+                    "automatic_upload": False,
+                },
+                risk_level=RiskLevel.R1,
+                confirmation_required=True,
+                confirmation_result="APPROVED" if approved else "REJECTED",
+                rollback={"level": "MANUAL"},
+                app_version=__version__,
+            )
+        )
+
+    def _audit_diagnostic_bundle_export(self, result: DiagnosticBundleResult) -> None:
+        self.audit.record(
+            AuditEvent(
+                event_type="diagnostic_bundle.exported",
+                parameters={"sha256": result.sha256, "entry_count": len(result.entries)},
+                risk_level=RiskLevel.R1,
+                confirmation_required=True,
+                confirmation_result="APPROVED",
+                result={
+                    "size_bytes": result.size_bytes,
+                    "automatic_upload": result.automatically_uploaded,
+                },
+                rollback={"level": "MANUAL"},
                 app_version=__version__,
             )
         )

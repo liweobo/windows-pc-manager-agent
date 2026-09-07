@@ -22,6 +22,7 @@ class AppSettings(BaseModel):
 
     app_name: str = "WindowsPCManagerAgent"
     build_mode: BuildMode = BuildMode.DEVELOPMENT
+    safe_mode: bool = False
     feature_flags: FeatureFlags = Field(default_factory=FeatureFlags.development_defaults)
     agent_limits: AgentRuntimeLimits = Field(default_factory=AgentRuntimeLimits)
     office_limits: OfficeLimits = Field(default_factory=OfficeLimits)

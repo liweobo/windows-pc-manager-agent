@@ -10,6 +10,7 @@ from pc_manager_agent.app.runtime import ApplicationRuntime
 from pc_manager_agent.config.production import FeatureFlags
 from pc_manager_agent.config.settings import AppSettings
 from pc_manager_agent.ui.main_window import MainWindow
+from pc_manager_agent.ui.safe_mode_window import SafeModeWindow
 
 
 @pytest.mark.gui
@@ -95,5 +96,24 @@ def test_private_rc_hides_and_blocks_non_release_domains(
 
         assert "当前发布版本未启用" in window._conversation.toPlainText()
         assert runtime.audit.list_recent(100) == before_events
+    finally:
+        runtime.close()
+
+
+@pytest.mark.gui
+def test_safe_mode_keeps_only_minimal_surfaces(qtbot: QtBot, tmp_path: Path) -> None:
+    runtime = ApplicationRuntime(
+        AppSettings(
+            data_directory=tmp_path / "safe-mode",
+            safe_mode=True,
+            feature_flags=FeatureFlags(),
+        )
+    )
+    window = SafeModeWindow(runtime)
+    qtbot.addWidget(window)
+    try:
+        visible = {window._tabs.tabText(index) for index in range(window._tabs.count())}
+        assert visible == {"安全模式", "审计", "设置"}
+        assert "安全模式" in window.statusBar().currentMessage()
     finally:
         runtime.close()

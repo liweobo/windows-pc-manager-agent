@@ -13,6 +13,12 @@
 - A complete versioned SQLite schema catalog, integrity/digest validation, verified pre-migration backups,
   transactional legacy migration, interruption markers, fail-closed downgrade policy, and non-overwrite recovery
   copy primitive.
+- Bounded local JSON logging with centralized path/credential/content redaction, sanitized local-only crash reports,
+  crash-loop detection, and a reduction-only safe-mode UI that constructs no business-domain workers.
+- An explicitly reviewed R1 diagnostic ZIP containing only finite runtime metadata and structural log fields, with
+  expiring single-use authority, exclusive no-overwrite commit, exact verification and mandatory audit callbacks.
+- A complete privacy data-flow register, retention policy, logging/diagnostic operations guide and Stage 7A
+  per-function API reference for the implemented slices.
 
 ### Security and limitations
 
@@ -20,6 +26,8 @@
 - Private-RC feature flags are compiled into the production configuration and cannot be widened by model output
   or an environment-provided feature list. Broker, uninstall, cleanup, file writes, Office, voice, browser,
   Memory, multi-Agent execution, and Final Orchestrator surfaces remain disabled in that profile.
+- Telemetry remains `NOT_IMPLEMENTED`; crash evidence and diagnostics stay local until the user manually shares a
+  reviewed file. Pattern redaction is defense in depth and is not represented as comprehensive DLP.
 
 ## Unreleased — Stage 5E
 

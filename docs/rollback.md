@@ -8,6 +8,12 @@ next startup with `MIGRATION_RECOVERY_REQUIRED`; it never drops/recreates tables
 API can copy a verified backup only to a new path and cannot overwrite the live database. Downgrade is unsupported;
 see [database migration and recovery](release/database-migrations.md) before any manual replacement.
 
+Stage 7A diagnostic export is R1 with `MANUAL` recovery: inspect the ZIP, then remove it manually if no longer
+needed. The Agent deliberately has no diagnostic-file delete/undo route. Rejecting a Preview creates no file.
+Rolling back Stage 7A code does not delete logs, crash reports, diagnostic ZIPs, the database or verified migration
+backups. Preserve recovery evidence until related work is resolved, close the application, and use `git revert` on
+the Stage 7A commits rather than resetting shared history.
+
 ## Stage 5E task recovery
 
 There is no task-wide rollback transaction. Cancelling a `ComputerTask` stops only future coordination. The final
