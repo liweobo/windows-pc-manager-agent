@@ -1,3 +1,5 @@
 """Windows PC Manager Agent package."""
 
-__version__ = "0.1.0"
+from pc_manager_agent.version import __version__
+
+__all__ = ["__version__"]

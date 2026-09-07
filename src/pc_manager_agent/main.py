@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,7 +14,13 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pc_manager_agent import __version__
 from pc_manager_agent.app.runtime import ApplicationRuntime
+from pc_manager_agent.config.production import (
+    BuildMode,
+    ProductionConfigValidator,
+    ProductionRuntimeContext,
+)
 from pc_manager_agent.config.settings import AppSettings
+from pc_manager_agent.platform_support.windows.msi_uninstall import current_process_is_elevated
 from pc_manager_agent.platform_support.windows.single_instance import QtSingleInstanceGuard
 from pc_manager_agent.ui.main_window import MainWindow
 from pc_manager_agent.ui.system_tray import SystemTrayController
@@ -47,9 +54,21 @@ def run_application(settings: AppSettings, *, smoke_test: bool = False) -> int:
         """如果有旧的服务端，则执行return 0；如果没有就的服务端则跳过if"""
         return 0
     try:
+        if settings.build_mode is BuildMode.PRODUCTION:
+            ProductionConfigValidator().require_valid(
+                settings,
+                ProductionRuntimeContext(
+                    frozen_binary=bool(getattr(sys, "frozen", False)),
+                    process_elevated=current_process_is_elevated(),
+                    executable_path=Path(sys.executable).resolve(strict=False),
+                    active_environment_names=frozenset(
+                        name.upper() for name, value in os.environ.items() if value
+                    ),
+                ),
+            )
         runtime = ApplicationRuntime(settings)
     except Exception as exc:
-        QMessageBox.critical(None, "启动失败", f"无法初始化本地审计数据库：{exc}")
+        QMessageBox.critical(None, "启动失败", f"安全启动检查或本地数据库初始化失败：{exc}")
         guard.close()
         return 1
     window = MainWindow(runtime)
@@ -77,7 +96,7 @@ def run_application(settings: AppSettings, *, smoke_test: bool = False) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and avoid persistent user data during a smoke test."""
     arguments = build_parser().parse_args(argv)
-    if arguments.smoke_test:
+    if arguments.smoke_test and not bool(getattr(sys, "frozen", False)):
         with TemporaryDirectory(prefix="pc-manager-agent-smoke-") as temporary_directory:
             settings = AppSettings.from_environment().model_copy(
                 update={"data_directory": Path(temporary_directory)}

@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from pc_manager_agent.app.runtime import ApplicationRuntime
+from pc_manager_agent.config.production import FeatureFlags
+from pc_manager_agent.config.settings import AppSettings
 from pc_manager_agent.ui.main_window import MainWindow
 
 
@@ -63,3 +65,35 @@ def test_gui_plan_confirmation_and_background_scan(
     qtbot.waitUntil(lambda: window._worker is None, timeout=10_000)
     assert window._results.rowCount() == 1
     assert "完成" in window.statusBar().currentMessage()
+
+
+@pytest.mark.gui
+def test_private_rc_hides_and_blocks_non_release_domains(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    runtime = ApplicationRuntime(
+        AppSettings(
+            data_directory=tmp_path / "private-rc",
+            feature_flags=FeatureFlags.private_rc_defaults(),
+        )
+    )
+    window = MainWindow(runtime)
+    qtbot.addWidget(window)
+    try:
+        assert window._tabs.isTabVisible(window._tabs.indexOf(window._analysis_tab))
+        assert window._tabs.isTabVisible(window._tabs.indexOf(window._system_diagnostics_tab))
+        assert window._tabs.isTabVisible(window._tabs.indexOf(window._system_optimization_tab))
+        assert not window._tabs.isTabVisible(window._tabs.indexOf(window._operation_tab))
+        assert not window._tabs.isTabVisible(window._tabs.indexOf(window._trash_tab))
+        assert not window._tabs.isTabVisible(window._tabs.indexOf(window._browser_tab))
+        assert window._voice is None
+
+        before_events = runtime.audit.list_recent(100)
+        window._chat_input.setText("把文件移动到另一个目录")
+        qtbot.keyClick(window._chat_input, Qt.Key.Key_Return)
+
+        assert "当前发布版本未启用" in window._conversation.toPlainText()
+        assert runtime.audit.list_recent(100) == before_events
+    finally:
+        runtime.close()

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 
 from pc_manager_agent.config.agents import AgentRuntimeLimits
 from pc_manager_agent.config.office import OfficeLimits
+from pc_manager_agent.config.production import BuildMode, FeatureFlags
 from pc_manager_agent.config.tasks import FinalTaskLimits
 
 
@@ -20,6 +21,8 @@ class AppSettings(BaseModel):
     # extra="forbid" 不允许传入未定义字段; frozen=True 使实例创建后不可修改.
 
     app_name: str = "WindowsPCManagerAgent"
+    build_mode: BuildMode = BuildMode.DEVELOPMENT
+    feature_flags: FeatureFlags = Field(default_factory=FeatureFlags.development_defaults)
     agent_limits: AgentRuntimeLimits = Field(default_factory=AgentRuntimeLimits)
     office_limits: OfficeLimits = Field(default_factory=OfficeLimits)
     task_limits: FinalTaskLimits = Field(default_factory=FinalTaskLimits)
@@ -164,7 +167,14 @@ class AppSettings(BaseModel):
     @classmethod
     def from_environment(cls) -> AppSettings:
         """Build settings without reading a project-local secret file."""
+        build_mode = BuildMode(os.getenv("PC_MANAGER_BUILD_MODE", "development").strip().lower())
         raw: dict[str, object] = {
+            "build_mode": build_mode,
+            "feature_flags": (
+                FeatureFlags.private_rc_defaults()
+                if build_mode is BuildMode.PRODUCTION
+                else FeatureFlags.development_defaults()
+            ),
             "llm_provider": os.getenv("PC_MANAGER_LLM_PROVIDER", "disabled"),
             "openai_model": os.getenv("OPENAI_MODEL"),
             "openai_api_key": os.getenv("OPENAI_API_KEY"),

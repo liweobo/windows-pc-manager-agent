@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "windows-pc-manager-agent"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A safety-first Windows 11 personal computer management agent"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -63,6 +63,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pc_manager_agent"]
+
+[tool.hatch.version]
+path = "src/pc_manager_agent/version.py"
 
 [tool.ruff]
 target-version = "py311"

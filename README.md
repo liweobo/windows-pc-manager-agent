@@ -1,5 +1,16 @@
 # Windows PC Manager Agent
 
+## Stage 7A：生产加固与发布门禁（进行中）
+
+Stage 7A 正在把开发构建收敛为可验证的 Windows 发布物。首个私有 RC 使用不可变的功能白名单，
+只显示文件只读分析、系统只读诊断、软件只读分析和优化只读分析；文件写入、回收站、进程/启动项/
+服务操作、卸载、清理、Broker、Office、语音、浏览器、Memory、多 Agent 与长任务编排均默认关闭。
+禁用能力在创建任务或计划之前即被拒绝，界面隐藏不是唯一安全边界。
+
+发布状态由确定性的证据门禁评估；未运行、失败或未配置的检查一律不算通过。目前代码签名为
+`NOT_CONFIGURED`，因此不能宣称 public RC 或 V1 ready。功能冻结清单见
+[私有 RC 功能冻结](docs/release/feature-freeze.md)。
+
 ## Stage 5E：可恢复的长任务协调与统一任务中心
 
 新增 Final Orchestrator，用版本化 `ComputerTask`/`TaskGraph`、检查点、单次派发、用户注意队列和

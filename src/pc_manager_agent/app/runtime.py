@@ -42,6 +42,7 @@ from pc_manager_agent.audit.vendor_uninstall import VendorUninstallAuditLogger
 from pc_manager_agent.audit.winget_uninstall import WingetUninstallAuditLogger
 from pc_manager_agent.authorization.models import AuthorizedPath
 from pc_manager_agent.authorization.service import AuthorizedPathService
+from pc_manager_agent.config.production import ReleaseFeature
 from pc_manager_agent.config.settings import AppSettings
 from pc_manager_agent.confirmation.external_data import (
     ExternalDataConsentRequest,
@@ -821,8 +822,13 @@ class ApplicationRuntime:
         self.agents: AgentServices = build_agent_services(settings, self.audit)
         self.tasks: FinalTaskServices = build_final_task_services(settings, self.audit)
 
+    def require_feature(self, feature: ReleaseFeature) -> None:
+        """Fail before preparation when the immutable build policy disables a domain."""
+        self.settings.feature_flags.require(feature)
+
     def create_scan_orchestrator(self, root: Path) -> ScanOrchestrator:
         """为一个用户选择的根目录创建独立路径策略、注册表和扫描编排器。"""
+        self.require_feature(ReleaseFeature.FILE_ANALYSIS)
         policy = PathPolicy.for_scan_root(root)
         registry = ToolRegistry()
         registry.register(DirectoryScannerTool(policy))
@@ -857,6 +863,7 @@ class ApplicationRuntime:
         progress_callback: Callable[[FileAnalysisProgress], None] | None = None,
     ) -> FileAnalysisServices:
         """Build Stage 1 services over exactly the currently authorized roots."""
+        self.require_feature(ReleaseFeature.FILE_ANALYSIS)
         records = self.authorized_paths.list_authorized()
         if not records:
             raise ValueError("Add at least one authorized directory before analysis")
@@ -973,6 +980,7 @@ class ApplicationRuntime:
         progress_callback: Callable[[OperationProgress], None] | None = None,
     ) -> FileOperationServices:
         """Build Stage 2A services over exactly the currently authorized roots."""
+        self.require_feature(ReleaseFeature.FILE_OPERATIONS)
         records = self.authorized_paths.list_authorized()
         if not records:
             raise ValueError("Add at least one authorized directory before file operations")
@@ -1050,6 +1058,7 @@ class ApplicationRuntime:
         _progress_callback: Callable[[TrashExecutionReport], None] | None = None,
     ) -> TrashServices:
         """Build Stage 2B services without granting a model any path-selection authority."""
+        self.require_feature(ReleaseFeature.RECYCLE_BIN)
         records = self.authorized_paths.list_authorized()
         if not records:
             raise ValueError("Add at least one authorized directory before Recycle Bin operations")
@@ -1122,6 +1131,7 @@ class ApplicationRuntime:
 
     def create_system_diagnostic_services(self) -> SystemDiagnosticServices:
         """Build all eight read-only collectors behind one confirmed orchestrator."""
+        self.require_feature(ReleaseFeature.SYSTEM_DIAGNOSTICS)
         platform_adapter = WindowsSystemDiagnosticsPlatform()
         registry = ToolRegistry()
         for tool in (
@@ -1174,6 +1184,7 @@ class ApplicationRuntime:
 
     def create_system_optimization_services(self) -> SystemOptimizationServices:
         """Build the exact Stage 4E1 R0 graph without importing any mutation adapter."""
+        self.require_feature(ReleaseFeature.OPTIMIZATION_ANALYSIS)
         platform_adapter = WindowsSystemOptimizationPlatform()
         cleanup_policy = CleanupCandidatePolicy()
         performance_engine = PerformanceDiagnosticEngine()
@@ -1223,12 +1234,14 @@ class ApplicationRuntime:
 
     def create_optimization_review_services(self) -> OptimizationReviewServices:
         """Reuse one finite Stage 4E3 review container; it holds no write authority."""
+        self.require_feature(ReleaseFeature.OPTIMIZATION_ANALYSIS)
         if self._optimization_reviews is None:
             self._optimization_reviews = build_optimization_review_services(self)
         return self._optimization_reviews
 
     def create_system_cleanup_services(self) -> SystemCleanupServices:
         """Build the isolated Stage 4E2 Fresh-check and Recycle Bin workflow."""
+        self.require_feature(ReleaseFeature.SYSTEM_CLEANUP)
         local_app_data = Path(
             os.environ.get(
                 "LOCALAPPDATA",
@@ -1332,6 +1345,7 @@ class ApplicationRuntime:
 
     def create_software_analysis_services(self) -> SoftwareAnalysisServices:
         """Build the exact five-tool R0 Stage 4D1 workflow with no execution registry."""
+        self.require_feature(ReleaseFeature.SOFTWARE_ANALYSIS)
         inventory = SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
         resolver = SoftwareTargetResolver(inventory)
         capability = UninstallCapabilityResolver()
@@ -1382,6 +1396,7 @@ class ApplicationRuntime:
 
     def create_msi_uninstall_services(self) -> MsiUninstallServices:
         """Build the one-tool, current-user MSI uninstall execution boundary."""
+        self.require_feature(ReleaseFeature.SOFTWARE_UNINSTALL)
         inventory = SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
         resolver = SoftwareTargetResolver(inventory)
         capability = UninstallCapabilityResolver()
@@ -1432,6 +1447,7 @@ class ApplicationRuntime:
 
     def create_software_uninstall_router(self) -> SoftwareUninstallRouter:
         """Build a read-only fresh-metadata router with no execution authority."""
+        self.require_feature(ReleaseFeature.SOFTWARE_UNINSTALL)
         inventory = SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
         return SoftwareUninstallRouter(
             SoftwareTargetResolver(inventory),
@@ -1441,6 +1457,7 @@ class ApplicationRuntime:
 
     def create_vendor_uninstall_services(self) -> VendorUninstallServices:
         """Build the one-tool trusted interactive Vendor uninstall boundary."""
+        self.require_feature(ReleaseFeature.SOFTWARE_UNINSTALL)
         inventory = SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
         resolver = SoftwareTargetResolver(inventory)
         capability = UninstallCapabilityResolver()
@@ -1492,6 +1509,7 @@ class ApplicationRuntime:
 
     def create_winget_uninstall_services(self) -> WingetUninstallServices:
         """Build the one-tool official-source current-user winget boundary."""
+        self.require_feature(ReleaseFeature.SOFTWARE_UNINSTALL)
         availability_platform = WindowsWingetAvailabilityPlatform()
         package_inventory = PackageInventoryService(
             WindowsWingetPackageInventoryPlatform(
@@ -1561,6 +1579,7 @@ class ApplicationRuntime:
 
     def create_msix_uninstall_services(self) -> MsixUninstallServices:
         """Build the one-tool current-user MSIX WinRT removal boundary."""
+        self.require_feature(ReleaseFeature.SOFTWARE_UNINSTALL)
         platform = WindowsMsixPackagePlatform()
         registry = ToolRegistry(
             write_guard=MsixUninstallExecutionGuard(self.msix_uninstall_repository)
@@ -1593,6 +1612,7 @@ class ApplicationRuntime:
 
     def create_residual_analysis_services(self) -> ResidualAnalysisServices:
         """Build the fixed three-tool Stage 4D3 read-only analysis boundary."""
+        self.require_feature(ReleaseFeature.RESIDUAL_ANALYSIS)
         scope = ResidualScanScopePolicy(
             max_roots=self.settings.residual_max_roots,
             network_path_detector=is_network_path,
@@ -1645,6 +1665,7 @@ class ApplicationRuntime:
 
     def create_residual_cleanup_services(self) -> ResidualCleanupServices:
         """Build the independent Stage 4D4 fresh validation and Recycle Bin boundary."""
+        self.require_feature(ReleaseFeature.RESIDUAL_CLEANUP)
         scope = ResidualScanScopePolicy(
             max_roots=self.settings.residual_max_roots,
             network_path_detector=is_network_path,
@@ -1722,6 +1743,7 @@ class ApplicationRuntime:
 
     def create_process_action_services(self) -> ProcessActionServices:
         """Build the Stage 4A resolver, policy, confirmations, registry, and executor."""
+        self.require_feature(ReleaseFeature.PROCESS_ACTIONS)
         platform = self.process_management_platform
         own_process = platform.inspect_process(os.getpid())
         if own_process is None:
@@ -1769,6 +1791,7 @@ class ApplicationRuntime:
 
     def create_startup_action_services(self) -> StartupActionServices:
         """Build the Stage 4B inventory, policy, encrypted backup, and narrow tools."""
+        self.require_feature(ReleaseFeature.STARTUP_ACTIONS)
         platform = self.startup_management_platform
         resolver = StartupTargetResolver(platform, max_items=self.settings.diagnostic_max_items)
         policy = StartupSafetyPolicy(agent_root=Path(__file__).resolve().parents[1])
@@ -1814,6 +1837,7 @@ class ApplicationRuntime:
 
     def create_service_action_services(self) -> ServiceActionServices:
         """Build Stage 4C1 exact identity, policy, two-step restart, and SCM tools."""
+        self.require_feature(ReleaseFeature.SERVICE_ACTIONS)
         platform = self.service_control_platform
         resolver = ServiceTargetResolver(platform, max_items=self.settings.diagnostic_max_items)
         compiler = ServiceActionPlanCompiler()
@@ -1875,6 +1899,7 @@ class ApplicationRuntime:
         fake_state: FakePrivilegedSystemState,
     ) -> PrivilegedActionServices:
         """Compose Mock-only protocol services when the explicit developer mode is enabled."""
+        self.require_feature(ReleaseFeature.PRIVILEGED_BROKER)
         if self.settings.privileged_broker_mode != "mock":
             raise RuntimeError("Stage 4X1 privileged broker is disabled")
         if current_process_is_elevated():
@@ -1927,6 +1952,7 @@ class ApplicationRuntime:
 
     def create_windows_privileged_action_services(self) -> WindowsPrivilegedActionServices:
         """Compose the disabled-by-default real Broker route for exact service Start/Stop."""
+        self.require_feature(ReleaseFeature.PRIVILEGED_BROKER)
         if self.settings.privileged_broker_mode != "windows":
             raise RuntimeError("Stage 4X2 Windows elevated Broker is disabled")
         if current_process_is_elevated():
@@ -2017,6 +2043,7 @@ class ApplicationRuntime:
         source: ServiceActionServices,
     ) -> ElevatedServicePreparationService:
         """Bridge one Stage 4C1 permission-only Start/Stop block into Stage 4X2."""
+        self.require_feature(ReleaseFeature.PRIVILEGED_BROKER)
         privileged = self.create_windows_privileged_action_services()
         return ElevatedServicePreparationService(
             privileged.service,
@@ -2031,6 +2058,7 @@ class ApplicationRuntime:
 
     def create_stage4x3_action_services(self) -> Stage4X3ActionServices:
         """Compose the three explicit Stage 4X3 Main preparation and readback paths."""
+        self.require_feature(ReleaseFeature.PRIVILEGED_BROKER)
         privileged = self.create_windows_privileged_action_services()
         software = SoftwareTargetResolver(
             SoftwareInventoryService(WindowsSoftwareInventoryPlatform())
@@ -2069,6 +2097,7 @@ class ApplicationRuntime:
 
     def create_service_startup_action_services(self) -> ServiceStartupActionServices:
         """Build Stage 4C2 backup, Preview, confirmation, and narrow SCM tools."""
+        self.require_feature(ReleaseFeature.SERVICE_ACTIONS)
         resolver = ServiceTargetResolver(
             self.service_control_platform,
             max_items=self.settings.diagnostic_max_items,

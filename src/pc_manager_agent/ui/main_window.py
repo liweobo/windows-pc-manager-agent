@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from pc_manager_agent.app.runtime import ApplicationRuntime
 from pc_manager_agent.app.voice import audio_process_is_elevated, build_voice_services
 from pc_manager_agent.audit.repository import AuditUnavailableError
+from pc_manager_agent.config.production import ReleaseFeature
 from pc_manager_agent.confirmation.models import ConfirmationRequest
 from pc_manager_agent.domain.computer_tasks import AutonomyLevel, ComputerTaskKind
 from pc_manager_agent.domain.optimization_receipts import OptimizationTransactionReference
@@ -150,7 +151,9 @@ class MainWindow(QMainWindow):
         self._home_tab.status_message.connect(self.statusBar().showMessage)
         self._home_tab.task_created.connect(self._register_home_task)
         self._tabs.addTab(self._home_tab, "主页与长任务")
-        self._build_voice()
+        if self._feature_enabled(ReleaseFeature.VOICE):
+            self._build_voice()
+        self._apply_feature_flags()
         self._tabs.currentChanged.connect(self._voice_surface_changed)
         self.statusBar().showMessage("就绪：写操作默认不执行，必须先 Preview 并确认")
 
@@ -158,6 +161,41 @@ class MainWindow(QMainWindow):
         """Attach tray presentation after both objects are constructed."""
         self._tray = tray
         tray.task_center_requested.connect(self._show_task_center)
+
+    def _feature_enabled(self, feature: ReleaseFeature) -> bool:
+        """Read the immutable build policy; UI state never grants a capability."""
+        return self._runtime.settings.feature_flags.is_enabled(feature)
+
+    def _apply_feature_flags(self) -> None:
+        """Hide disabled release surfaces while runtime guards remain authoritative."""
+        mapping = (
+            (self._analysis_tab, ReleaseFeature.FILE_ANALYSIS),
+            (self._scan_page, ReleaseFeature.FILE_ANALYSIS),
+            (self._operation_tab, ReleaseFeature.FILE_OPERATIONS),
+            (self._trash_tab, ReleaseFeature.RECYCLE_BIN),
+            (self._system_diagnostics_tab, ReleaseFeature.SYSTEM_DIAGNOSTICS),
+            (self._system_optimization_tab, ReleaseFeature.OPTIMIZATION_ANALYSIS),
+            (self._startup_management_tab, ReleaseFeature.STARTUP_ACTIONS),
+            (self._service_management_tab, ReleaseFeature.SERVICE_ACTIONS),
+            (self._task_center_tab, ReleaseFeature.FINAL_ORCHESTRATOR),
+            (self._memory_tab, ReleaseFeature.MEMORY),
+            (self._office_tab, ReleaseFeature.OFFICE),
+            (self._browser_tab, ReleaseFeature.BROWSER),
+            (self._home_tab, ReleaseFeature.FINAL_ORCHESTRATOR),
+        )
+        for widget, feature in mapping:
+            index = self._tabs.indexOf(widget)
+            if index >= 0 and not self._feature_enabled(feature):
+                self._tabs.setTabVisible(index, False)
+
+    def _route_blocked(self, feature: ReleaseFeature) -> bool:
+        """Explain a build-time block without preparing, confirming, or executing a task."""
+        if self._feature_enabled(feature):
+            return False
+        message = f"当前发布版本未启用该能力（{feature.value}）；没有生成计划或执行操作。"
+        self._conversation.append(f"Agent：{message}")
+        self.statusBar().showMessage(message)
+        return True
 
     def _build_chat_tab(self) -> None:
         page = QWidget()
@@ -185,6 +223,7 @@ class MainWindow(QMainWindow):
 
     def _build_scan_tab(self) -> None:
         page = QWidget()
+        self._scan_page = page
         layout = QVBoxLayout(page)
         directory_row = QHBoxLayout()
         self._root_input = QLineEdit()
@@ -354,6 +393,8 @@ class MainWindow(QMainWindow):
         domain = route.domain
         self._conversation.append(f"你：{escape(text)}")
         if domain is RequestDomain.OFFICE:
+            if self._route_blocked(ReleaseFeature.OFFICE):
+                return
             self._tabs.setCurrentWidget(self._office_tab)
             self._office_tab.set_user_goal(text)
             self._conversation.append(
@@ -362,6 +403,8 @@ class MainWindow(QMainWindow):
             )
             return
         if domain is RequestDomain.BROWSER:
+            if self._route_blocked(ReleaseFeature.BROWSER):
+                return
             self._tabs.setCurrentWidget(self._browser_tab)
             self._browser_tab.set_user_goal(text)
             self._conversation.append(
@@ -370,6 +413,8 @@ class MainWindow(QMainWindow):
             )
             return
         if domain is RequestDomain.SOFTWARE:
+            if self._route_blocked(ReleaseFeature.SOFTWARE_UNINSTALL):
+                return
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             target_name = extract_software_target_name(text)
             if target_name is None:
@@ -388,6 +433,8 @@ class MainWindow(QMainWindow):
             return
         service_intent_value = service_action_intent(text)
         if domain is RequestDomain.SERVICE and service_intent_value is not None:
+            if self._route_blocked(ReleaseFeature.SERVICE_ACTIONS):
+                return
             self._tabs.setCurrentWidget(self._service_management_tab)
             try:
                 target_query = service_target_query(text)
@@ -414,6 +461,8 @@ class MainWindow(QMainWindow):
             )
             return
         if domain is RequestDomain.OPTIMIZATION:
+            if self._route_blocked(ReleaseFeature.OPTIMIZATION_ANALYSIS):
+                return
             self._tabs.setCurrentWidget(self._system_optimization_tab)
             self._system_optimization_tab.goal_input.setText(
                 optimization_preparation_goal(text) if voice else text
@@ -425,6 +474,8 @@ class MainWindow(QMainWindow):
             self._system_optimization_tab.prepare()
             return
         if domain is RequestDomain.PROCESS:
+            if self._route_blocked(ReleaseFeature.PROCESS_ACTIONS):
+                return
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             query: ProcessTargetQuery | None = None
             if (
@@ -465,6 +516,8 @@ class MainWindow(QMainWindow):
             )
             return
         if domain is RequestDomain.DIAGNOSTICS:
+            if self._route_blocked(ReleaseFeature.SYSTEM_DIAGNOSTICS):
+                return
             self._tabs.setCurrentWidget(self._system_diagnostics_tab)
             self._conversation.append(
                 "Agent：已转到系统诊断。将先展示 R0 只读计划，确认后才查询；"
@@ -490,6 +543,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("R4/MVP 禁止：永久删除能力未注册，未执行任何操作")
             return
         if trash_intent is TrashIntentDecision.RECYCLE_BIN:
+            if self._route_blocked(ReleaseFeature.RECYCLE_BIN):
+                return
             self._tabs.setCurrentWidget(self._trash_tab)
             self._conversation.append(
                 "Agent：已转到 Windows 回收站页面。模型不会选择对象；请在文件分析结果中勾选，"
@@ -497,6 +552,8 @@ class MainWindow(QMainWindow):
             )
             return
         if domain is RequestDomain.FILE_OPERATIONS:
+            if self._route_blocked(ReleaseFeature.FILE_OPERATIONS):
+                return
             self._tabs.setCurrentWidget(self._operation_tab)
             if any(term in text for term in ("撤销", "回滚")):
                 self._conversation.append(
@@ -518,6 +575,8 @@ class MainWindow(QMainWindow):
             return
         if domain is not RequestDomain.FILES:
             self._conversation.append("Agent：请在对应页面明确目标和操作，尚未执行。")
+            return
+        if self._route_blocked(ReleaseFeature.FILE_ANALYSIS):
             return
         if voice:
             text = "只读分析大文件、疑似闲置文件和重复候选"
@@ -710,6 +769,9 @@ class MainWindow(QMainWindow):
                 "Agent：目标不明确或不支持。请明确对象，并在原业务页选择；尚未执行。"
             )
             return
+        release_feature = _release_feature_for_request(domain)
+        if release_feature is not None and self._route_blocked(release_feature):
+            return
         if not self._register_agent_task(request, route):
             return
         if domain is RequestDomain.STARTUP:
@@ -795,6 +857,8 @@ class MainWindow(QMainWindow):
     @Slot()
     def _show_task_center(self) -> None:
         """Navigate from tray notification to task metadata only."""
+        if self._route_blocked(ReleaseFeature.FINAL_ORCHESTRATOR):
+            return
         self._task_center_tab.refresh()
         self._tabs.setCurrentWidget(self._task_center_tab)
 
@@ -802,19 +866,40 @@ class MainWindow(QMainWindow):
     def _open_task_handoff(self, action_code: str) -> None:
         """Open the existing owning-domain UI; this action cannot approve it."""
         widgets = {
-            "OPEN_FILE_WORKFLOW": self._analysis_tab,
-            "OPEN_SYSTEM_WORKFLOW": self._system_diagnostics_tab,
-            "OPEN_PROCESS_WORKFLOW": self._system_diagnostics_tab,
-            "OPEN_STARTUP_WORKFLOW": self._startup_management_tab,
-            "OPEN_SERVICE_WORKFLOW": self._service_management_tab,
-            "OPEN_CLEANUP_WORKFLOW": self._system_optimization_tab,
-            "OPEN_OPTIMIZATION_WORKFLOW": self._system_optimization_tab,
-            "OPEN_OFFICE_WORKFLOW": self._office_tab,
-            "OPEN_BROWSER_WORKFLOW": self._browser_tab,
+            "OPEN_FILE_WORKFLOW": (self._analysis_tab, ReleaseFeature.FILE_ANALYSIS),
+            "OPEN_SYSTEM_WORKFLOW": (
+                self._system_diagnostics_tab,
+                ReleaseFeature.SYSTEM_DIAGNOSTICS,
+            ),
+            "OPEN_PROCESS_WORKFLOW": (
+                self._system_diagnostics_tab,
+                ReleaseFeature.PROCESS_ACTIONS,
+            ),
+            "OPEN_STARTUP_WORKFLOW": (
+                self._startup_management_tab,
+                ReleaseFeature.STARTUP_ACTIONS,
+            ),
+            "OPEN_SERVICE_WORKFLOW": (
+                self._service_management_tab,
+                ReleaseFeature.SERVICE_ACTIONS,
+            ),
+            "OPEN_CLEANUP_WORKFLOW": (
+                self._system_optimization_tab,
+                ReleaseFeature.SYSTEM_CLEANUP,
+            ),
+            "OPEN_OPTIMIZATION_WORKFLOW": (
+                self._system_optimization_tab,
+                ReleaseFeature.OPTIMIZATION_ANALYSIS,
+            ),
+            "OPEN_OFFICE_WORKFLOW": (self._office_tab, ReleaseFeature.OFFICE),
+            "OPEN_BROWSER_WORKFLOW": (self._browser_tab, ReleaseFeature.BROWSER),
         }
-        target = widgets.get(action_code)
-        if target is None:
+        target_and_feature = widgets.get(action_code)
+        if target_and_feature is None:
             self.statusBar().showMessage("请从相应业务页面继续；任务中心没有执行权限。")
+            return
+        target, feature = target_and_feature
+        if self._route_blocked(feature):
             return
         self._tabs.setCurrentWidget(target)
         self.statusBar().showMessage("已打开业务页面；尚未批准或执行任何具体操作。")
@@ -827,6 +912,8 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def _open_move_for_paths(self, value: object) -> None:
+        if self._route_blocked(ReleaseFeature.FILE_OPERATIONS):
+            return
         paths = (
             tuple(path for path in value if isinstance(path, Path))
             if isinstance(value, tuple)
@@ -838,6 +925,8 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def _open_rename_for_paths(self, value: object) -> None:
+        if self._route_blocked(ReleaseFeature.FILE_OPERATIONS):
+            return
         paths = (
             tuple(path for path in value if isinstance(path, Path))
             if isinstance(value, tuple)
@@ -850,6 +939,8 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _open_trash_for_paths(self, value: object) -> None:
         """Transfer only explicitly checked analysis paths into the R2 page."""
+        if self._route_blocked(ReleaseFeature.RECYCLE_BIN):
+            return
         paths = (
             tuple(path for path in value if isinstance(path, Path))
             if isinstance(value, tuple)
@@ -862,6 +953,8 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _open_browser_download_in_office(self, value: object) -> None:
         """Transfer only a path hint; Office must independently select and confirm the file."""
+        if self._route_blocked(ReleaseFeature.OFFICE):
+            return
         if not isinstance(value, Path):
             self.statusBar().showMessage("浏览器下载交接失败：文件引用无效。")
             return
@@ -1132,6 +1225,26 @@ def _task_domain_for_request(domain: RequestDomain) -> DomainType:
         return mapping[domain]
     except KeyError as exc:
         raise ValueError("Request has no Stage 5E workflow domain") from exc
+
+
+def _release_feature_for_request(domain: RequestDomain) -> ReleaseFeature | None:
+    """Map a routed request to its build allow-list gate before task persistence."""
+    mapping = {
+        RequestDomain.FILES: ReleaseFeature.FILE_ANALYSIS,
+        RequestDomain.FILE_OPERATIONS: ReleaseFeature.FILE_OPERATIONS,
+        RequestDomain.TRASH: ReleaseFeature.RECYCLE_BIN,
+        RequestDomain.DIAGNOSTICS: ReleaseFeature.SYSTEM_DIAGNOSTICS,
+        RequestDomain.OPTIMIZATION: ReleaseFeature.OPTIMIZATION_ANALYSIS,
+        RequestDomain.CLEANUP: ReleaseFeature.SYSTEM_CLEANUP,
+        RequestDomain.RECYCLE_BIN_EMPTY: ReleaseFeature.SYSTEM_CLEANUP,
+        RequestDomain.PROCESS: ReleaseFeature.PROCESS_ACTIONS,
+        RequestDomain.STARTUP: ReleaseFeature.STARTUP_ACTIONS,
+        RequestDomain.SERVICE: ReleaseFeature.SERVICE_ACTIONS,
+        RequestDomain.SOFTWARE: ReleaseFeature.SOFTWARE_UNINSTALL,
+        RequestDomain.OFFICE: ReleaseFeature.OFFICE,
+        RequestDomain.BROWSER: ReleaseFeature.BROWSER,
+    }
+    return mapping.get(domain)
 
 
 def _task_shape_for_request(

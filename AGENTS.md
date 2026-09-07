@@ -109,6 +109,13 @@ instruction are all reported truthfully.
 
 ## Current MVP boundary
 
+Stage 7A production artifacts use an immutable default-deny feature policy. The initial private RC exposes only
+read-only file analysis, system diagnostics, software analysis and optimization analysis. Disabled domains must
+be hidden and rejected before task/plan persistence; UI visibility is never the authority. Model output and
+environment-provided feature lists cannot widen a production artifact. Release readiness is evidence-based:
+missing, failed, not-run and not-configured checks do not pass. Code signing is currently NOT_CONFIGURED, so no
+public-RC, V1-ready or trusted-Broker claim is permitted until independently verified signing evidence exists.
+
 Stage 5E is the final high-level coordination layer, not a global Executor. `ComputerTask`, graph versions,
 checkpoints, dispatch records, task-plan confirmation, attention queue and summaries never grant business-domain
 authority. The sealed `DomainWorkflow` registry contains exactly File/System/Process/Startup/Service/Software/

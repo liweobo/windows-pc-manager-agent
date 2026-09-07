@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Stage 7A
+
+### Added
+
+- A single package/application version source, explicit development/test/production build modes, and an
+  immutable closed feature allow-list for release artifacts.
+- A fail-closed private-RC policy exposing only read-only file analysis, system diagnostics, software analysis,
+  and optimization analysis; disabled domains are hidden and rejected before task or plan persistence.
+- A deterministic evidence-based readiness gate for DEV, private RC, public RC, and V1 qualification. Missing,
+  failed, not-run, or not-configured evidence can never be inferred as passing.
+
+### Security and limitations
+
+- The current signing state is `NOT_CONFIGURED`; this work does not claim public-RC or V1 readiness.
+- Private-RC feature flags are compiled into the production configuration and cannot be widened by model output
+  or an environment-provided feature list. Broker, uninstall, cleanup, file writes, Office, voice, browser,
+  Memory, multi-Agent execution, and Final Orchestrator surfaces remain disabled in that profile.
+
 ## Unreleased — Stage 5E
 
 ### Added
