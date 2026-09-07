@@ -34,6 +34,7 @@ from pc_manager_agent.app.runtime import ApplicationRuntime
 from pc_manager_agent.app.voice import audio_process_is_elevated, build_voice_services
 from pc_manager_agent.audit.repository import AuditUnavailableError
 from pc_manager_agent.confirmation.models import ConfirmationRequest
+from pc_manager_agent.domain.computer_tasks import AutonomyLevel, ComputerTaskKind
 from pc_manager_agent.domain.optimization_receipts import OptimizationTransactionReference
 from pc_manager_agent.domain.plans import TaskPlan
 from pc_manager_agent.domain.process_actions import (
@@ -42,6 +43,7 @@ from pc_manager_agent.domain.process_actions import (
 )
 from pc_manager_agent.domain.reports import ScanReport
 from pc_manager_agent.domain.software_uninstall_analysis import SoftwareTargetQuery
+from pc_manager_agent.domain.task_workflows import DomainType
 from pc_manager_agent.domain.user_requests import (
     RequestChannel,
     RequestDomain,
@@ -70,6 +72,7 @@ from pc_manager_agent.orchestration.user_requests import (
 from pc_manager_agent.ui.analysis_tab import FileAnalysisTab
 from pc_manager_agent.ui.browser_tab import BrowserTab
 from pc_manager_agent.ui.domain_review_events import ObservedDomainDialog
+from pc_manager_agent.ui.home_tab import HomeTaskTab, require_computer_task
 from pc_manager_agent.ui.memory_tab import MemoryTab
 from pc_manager_agent.ui.office_tab import OfficeTab
 from pc_manager_agent.ui.operation_tab import FileOperationTab
@@ -115,7 +118,7 @@ class MainWindow(QMainWindow):
             runtime.optimization_result_reader.read, datetime.now(UTC)
         )
         self._active_agent_task_id: UUID | None = None
-        self.setWindowTitle("Windows PC Manager Agent — Stage 5D 安全任务协调")
+        self.setWindowTitle("Windows PC Manager Agent — Stage 5E 安全长任务协调")
         self.resize(1_080, 720)
         self._tabs = QTabWidget()
         self.setCentralWidget(self._tabs)
@@ -130,8 +133,9 @@ class MainWindow(QMainWindow):
         self._build_scan_tab()
         self._build_audit_tab()
         self._build_settings_tab()
-        self._task_center_tab = TaskCenterTab(runtime.agents)
+        self._task_center_tab = TaskCenterTab(runtime.tasks)
         self._task_center_tab.status_message.connect(self.statusBar().showMessage)
+        self._task_center_tab.handoff_requested.connect(self._open_task_handoff)
         self._tabs.addTab(self._task_center_tab, "任务中心")
         self._memory_tab = MemoryTab(runtime.agents.runtime.memory)
         self._memory_tab.status_message.connect(self.statusBar().showMessage)
@@ -142,6 +146,10 @@ class MainWindow(QMainWindow):
         self._browser_tab.status_message.connect(self.statusBar().showMessage)
         self._browser_tab.office_handoff_requested.connect(self._open_browser_download_in_office)
         self._tabs.addTab(self._browser_tab, "受控浏览器")
+        self._home_tab = HomeTaskTab(runtime.tasks)
+        self._home_tab.status_message.connect(self.statusBar().showMessage)
+        self._home_tab.task_created.connect(self._register_home_task)
+        self._tabs.addTab(self._home_tab, "主页与长任务")
         self._build_voice()
         self._tabs.currentChanged.connect(self._voice_surface_changed)
         self.statusBar().showMessage("就绪：写操作默认不执行，必须先 Preview 并确认")
@@ -149,6 +157,7 @@ class MainWindow(QMainWindow):
     def attach_tray(self, tray: SystemTrayController) -> None:
         """Attach tray presentation after both objects are constructed."""
         self._tray = tray
+        tray.task_center_requested.connect(self._show_task_center)
 
     def _build_chat_tab(self) -> None:
         page = QWidget()
@@ -720,26 +729,27 @@ class MainWindow(QMainWindow):
         self._dispatch_domain(request, route)
 
     def _register_agent_task(self, request: UserRequest, route: RequestRoute) -> bool:
-        """Track a bounded handoff; this never approves the destination domain."""
+        """Create one durable Stage 5E plan without approving the destination domain."""
         try:
-            prepared = self._runtime.agents.runtime.prepare_request(request, route)
-            domain = prepared.boundary.allowed_domains[0]
-            result = self._runtime.agents.runtime.prepare_domain_handoff(
-                prepared.graph.task_id, domain
+            domain = _task_domain_for_request(route.domain)
+            kind, autonomy = _task_shape_for_request(route.domain)
+            task = self._runtime.tasks.orchestrator.create_task(
+                request.text,
+                (domain,),
+                root_request_id=request.request_id,
+                kind=kind,
+                autonomy=autonomy,
+                conversation_id=request.context.conversation_id,
             )
-            if not result.preparation_proposals or any(
-                proposal.execution_authorized for proposal in result.preparation_proposals
-            ):
-                raise RuntimeError("Agent handoff did not preserve the authorization boundary")
         except Exception as exc:
             self._conversation.append("Agent：任务协调安全检查失败，未进入业务执行流程。")
             self.statusBar().showMessage(f"任务未创建：{type(exc).__name__}")
             return False
-        self._active_agent_task_id = prepared.graph.task_id
-        self._task_center_tab.register_task(prepared)
+        self._active_agent_task_id = task.task_id
+        self._task_center_tab.register_computer_task(task)
         self._conversation.append(
-            f"Agent：任务 {str(prepared.graph.task_id)[:8]} 已记录并转交原业务域。"
-            "任务中心不能替你确认或执行。"
+            f"Agent：任务 {str(task.task_id)[:8]} 已记录，等待你在任务中心逐任务审查计划。"
+            "打开业务页面不代表批准；具体操作仍需该页面独立确认。"
         )
         return True
 
@@ -761,7 +771,7 @@ class MainWindow(QMainWindow):
             self._browser_tab.cancel()
         if self._active_agent_task_id is not None:
             try:
-                self._runtime.agents.runtime.cancel(self._active_agent_task_id)
+                self._runtime.tasks.orchestrator.cancel(self._active_agent_task_id)
             except Exception as exc:
                 self.statusBar().showMessage(
                     f"业务页面已停止；任务协调状态更新失败：{type(exc).__name__}"
@@ -769,6 +779,45 @@ class MainWindow(QMainWindow):
             else:
                 self._task_center_tab.refresh()
             self._active_agent_task_id = None
+
+    @Slot(object)
+    def _register_home_task(self, value: object) -> None:
+        """Display a newly created safe-template task without confirming it."""
+        try:
+            task = require_computer_task(value)
+        except TypeError as exc:
+            self.statusBar().showMessage(str(exc))
+            return
+        self._active_agent_task_id = task.task_id
+        self._task_center_tab.register_computer_task(task)
+        self._tabs.setCurrentWidget(self._task_center_tab)
+
+    @Slot()
+    def _show_task_center(self) -> None:
+        """Navigate from tray notification to task metadata only."""
+        self._task_center_tab.refresh()
+        self._tabs.setCurrentWidget(self._task_center_tab)
+
+    @Slot(str)
+    def _open_task_handoff(self, action_code: str) -> None:
+        """Open the existing owning-domain UI; this action cannot approve it."""
+        widgets = {
+            "OPEN_FILE_WORKFLOW": self._analysis_tab,
+            "OPEN_SYSTEM_WORKFLOW": self._system_diagnostics_tab,
+            "OPEN_PROCESS_WORKFLOW": self._system_diagnostics_tab,
+            "OPEN_STARTUP_WORKFLOW": self._startup_management_tab,
+            "OPEN_SERVICE_WORKFLOW": self._service_management_tab,
+            "OPEN_CLEANUP_WORKFLOW": self._system_optimization_tab,
+            "OPEN_OPTIMIZATION_WORKFLOW": self._system_optimization_tab,
+            "OPEN_OFFICE_WORKFLOW": self._office_tab,
+            "OPEN_BROWSER_WORKFLOW": self._browser_tab,
+        }
+        target = widgets.get(action_code)
+        if target is None:
+            self.statusBar().showMessage("请从相应业务页面继续；任务中心没有执行权限。")
+            return
+        self._tabs.setCurrentWidget(target)
+        self.statusBar().showMessage("已打开业务页面；尚未批准或执行任何具体操作。")
 
     def hideEvent(self, event: QHideEvent) -> None:
         """Stop audio before hiding to tray; no background or invisible microphone session."""
@@ -1060,3 +1109,39 @@ def _references_previous_service(text: str) -> bool:
             "start it",
         )
     )
+
+
+def _task_domain_for_request(domain: RequestDomain) -> DomainType:
+    """Map navigation-only request categories to one sealed Stage 5E domain."""
+    mapping = {
+        RequestDomain.FILES: DomainType.FILE,
+        RequestDomain.FILE_OPERATIONS: DomainType.FILE,
+        RequestDomain.TRASH: DomainType.FILE,
+        RequestDomain.DIAGNOSTICS: DomainType.SYSTEM,
+        RequestDomain.OPTIMIZATION: DomainType.OPTIMIZATION,
+        RequestDomain.CLEANUP: DomainType.CLEANUP,
+        RequestDomain.RECYCLE_BIN_EMPTY: DomainType.CLEANUP,
+        RequestDomain.PROCESS: DomainType.PROCESS,
+        RequestDomain.STARTUP: DomainType.STARTUP,
+        RequestDomain.SERVICE: DomainType.SERVICE,
+        RequestDomain.SOFTWARE: DomainType.SOFTWARE,
+        RequestDomain.OFFICE: DomainType.OFFICE,
+        RequestDomain.BROWSER: DomainType.BROWSER,
+    }
+    try:
+        return mapping[domain]
+    except KeyError as exc:
+        raise ValueError("Request has no Stage 5E workflow domain") from exc
+
+
+def _task_shape_for_request(
+    domain: RequestDomain,
+) -> tuple[ComputerTaskKind, AutonomyLevel]:
+    """Choose a conservative task kind; this does not classify domain action risk."""
+    if domain in {RequestDomain.FILES, RequestDomain.DIAGNOSTICS, RequestDomain.OPTIMIZATION}:
+        return ComputerTaskKind.ANALYSIS_ONLY, AutonomyLevel.PLAN_AND_ANALYZE
+    if domain is RequestDomain.BROWSER:
+        return ComputerTaskKind.BROWSER_RESEARCH, AutonomyLevel.GUIDED_EXECUTION
+    if domain is RequestDomain.OFFICE:
+        return ComputerTaskKind.DOCUMENT_WORKFLOW, AutonomyLevel.GUIDED_EXECUTION
+    return ComputerTaskKind.GUIDED_ACTION, AutonomyLevel.GUIDED_EXECUTION

@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QStyle, QSystemTrayIcon
 
 
 class SystemTrayController(QObject):
-    """Expose open/hide/exit actions and delegate controlled shutdown."""
+    """Expose navigation and lifecycle actions; tray notifications never authorize."""
+
+    task_center_requested = Signal()
 
     def __init__(self, window: QMainWindow, quit_callback: Callable[[], None]) -> None:
         super().__init__(window)
@@ -22,12 +24,15 @@ class SystemTrayController(QObject):
         menu = QMenu(window)
         open_action = QAction("打开主窗口", menu)
         hide_action = QAction("隐藏到托盘", menu)
+        task_action = QAction("打开任务中心", menu)
         exit_action = QAction("安全退出", menu)
         open_action.triggered.connect(self.show_window)
         hide_action.triggered.connect(window.hide)
+        task_action.triggered.connect(self._open_task_center)
         exit_action.triggered.connect(quit_callback)
         menu.addAction(open_action)
         menu.addAction(hide_action)
+        menu.addAction(task_action)
         menu.addSeparator()
         menu.addAction(exit_action)
         self._tray.setContextMenu(menu)
@@ -56,3 +61,13 @@ class SystemTrayController(QObject):
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason is QSystemTrayIcon.ActivationReason.Trigger:
             self.show_window()
+
+    def notify_attention(self, title: str, message: str) -> None:
+        """Show metadata-only attention; clicking it cannot confirm an operation."""
+        if self.is_available:
+            self._tray.showMessage(title[:80], message[:240])
+
+    def _open_task_center(self) -> None:
+        """Restore the window and request task-center navigation only."""
+        self.show_window()
+        self.task_center_requested.emit()
