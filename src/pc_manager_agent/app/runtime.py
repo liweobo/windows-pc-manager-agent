@@ -211,6 +211,7 @@ from pc_manager_agent.persistence.file_operations import (
     OperationRepository,
     TransactionExecutionGuard,
 )
+from pc_manager_agent.persistence.migrations import MigrationManager, MigrationReport
 from pc_manager_agent.persistence.msix_uninstall import (
     MsixUninstallExecutionGuard,
     MsixUninstallRepository,
@@ -705,6 +706,9 @@ class ApplicationRuntime:
     def __init__(self, settings: AppSettings) -> None:
         """保存配置并初始化审计、确认、授权目录和分析结果等共享服务。"""
         self.settings = settings
+        self.migration_report: MigrationReport = MigrationManager(
+            settings.database_path, __version__
+        ).migrate()
         self.audit = AuditRepository(settings.database_path)
         self.audit.initialize()
         self.optimization_session_repository = OptimizationSessionRepository(settings.database_path)

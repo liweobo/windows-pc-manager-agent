@@ -887,6 +887,12 @@ declarative bases. Foreign keys, WAL, full synchronous writes, and bounded queri
 configured centrally. A stale `RUNNING` analysis session is application-owned temporary
 data and is removed at the next initialization. Corrupt audit storage fails closed.
 
+Stage 7A places a versioned migration boundary before every repository. `MigrationManager` validates SQLite
+integrity and foreign keys, creates a verified retained backup for legacy upgrades, applies the complete schema
+catalog under an explicit transaction, and compares the resulting table set and schema digest. `IN_PROGRESS`,
+future-version, missing-step, drift, corrupt, or recovery-marker states stop startup; they never trigger a database
+rebuild. See [production database migration and recovery](release/database-migrations.md).
+
 Authorized-path changes produce FULL inverse records. Report export is R1 and uses
 exclusive creation; existing files are never overwritten. Export cleanup is deliberately
 manual because Stage 1 never deletes even an incomplete report. User-file analysis is R0

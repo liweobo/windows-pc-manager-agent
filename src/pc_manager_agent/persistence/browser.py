@@ -29,6 +29,9 @@ class _Base(DeclarativeBase):
     pass
 
 
+browser_metadata = _Base.metadata
+
+
 class _BrowserConfirmationRow(_Base):
     __tablename__ = "browser_confirmations"
 

@@ -19,34 +19,37 @@ from pc_manager_agent.domain.office_transactions import (
 )
 from pc_manager_agent.persistence.database import create_sqlite_engine
 
+office_metadata = MetaData()
+office_records = Table(
+    "office_records",
+    office_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("kind", String(30), nullable=False),
+    Column("body", Text, nullable=False),
+    Column("digest", String(64), nullable=False),
+)
+office_consents = Table(
+    "office_consents",
+    office_metadata,
+    Column("id", String(36), primary_key=True),
+    Column("binding", String(64), nullable=False),
+    Column("purpose", String(30), nullable=False),
+    Column("instance", String(36), nullable=False),
+    Column("state", String(30), nullable=False),
+    Column("expires", String(50), nullable=False),
+)
+
 
 class OfficeRepository:
     """Persist metadata, checksums and consumed authority without document bodies."""
 
     def __init__(self, path: Path) -> None:
         self._engine = create_sqlite_engine(path)
-        metadata = MetaData()
-        self._records = Table(
-            "office_records",
-            metadata,
-            Column("id", String(36), primary_key=True),
-            Column("kind", String(30), nullable=False),
-            Column("body", Text, nullable=False),
-            Column("digest", String(64), nullable=False),
-        )
-        self._consents = Table(
-            "office_consents",
-            metadata,
-            Column("id", String(36), primary_key=True),
-            Column("binding", String(64), nullable=False),
-            Column("purpose", String(30), nullable=False),
-            Column("instance", String(36), nullable=False),
-            Column("state", String(30), nullable=False),
-            Column("expires", String(50), nullable=False),
-        )
+        self._records = office_records
+        self._consents = office_consents
         self._instance = str(uuid4())
         self._lock = RLock()
-        metadata.create_all(self._engine)
+        office_metadata.create_all(self._engine)
         self._interrupt_previous()
 
     def put_backup(self, backup: OfficeDocumentBackup) -> None:

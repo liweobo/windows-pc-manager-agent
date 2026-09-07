@@ -12,6 +12,31 @@ from sqlalchemy.exc import SQLAlchemyError
 from pc_manager_agent.domain.voice import FrozenVoiceModel, VoiceError, VoiceState
 from pc_manager_agent.persistence.database import create_sqlite_engine
 
+voice_metadata = MetaData()
+voice_sessions = Table(
+    "voice_sessions",
+    voice_metadata,
+    Column("reference", String(36), primary_key=True),
+    Column("instance", String(36), nullable=False),
+    Column("state", String(40), nullable=False),
+    Column("revision", Integer, nullable=False),
+    Column("started_at", Float, nullable=False),
+    Column("updated_at", Float, nullable=False),
+    Column("request_ref", String(36), unique=True),
+    Column("content_digest", String(64)),
+)
+voice_disclosures = Table(
+    "voice_disclosures",
+    voice_metadata,
+    Column("reference", String(36), primary_key=True),
+    Column("instance", String(36), nullable=False),
+    Column("owner_ref", String(36), nullable=False),
+    Column("purpose", String(10), nullable=False),
+    Column("digest", String(64), nullable=False),
+    Column("expires_at", Float, nullable=False),
+    Column("state", String(20), nullable=False),
+)
+
 
 class VoiceSessionRecord(FrozenVoiceModel):
     """Only metadata survives a session; bodies are deliberately absent from this schema."""
@@ -32,32 +57,10 @@ class VoiceTranscriptConsumptionStore:
     def __init__(self, path: Path, instance: UUID) -> None:
         self.instance = instance
         self._engine = create_sqlite_engine(path)
-        metadata = MetaData()
-        self._sessions = Table(
-            "voice_sessions",
-            metadata,
-            Column("reference", String(36), primary_key=True),
-            Column("instance", String(36), nullable=False),
-            Column("state", String(40), nullable=False),
-            Column("revision", Integer, nullable=False),
-            Column("started_at", Float, nullable=False),
-            Column("updated_at", Float, nullable=False),
-            Column("request_ref", String(36), unique=True),
-            Column("content_digest", String(64)),
-        )
-        self._consents = Table(
-            "voice_disclosures",
-            metadata,
-            Column("reference", String(36), primary_key=True),
-            Column("instance", String(36), nullable=False),
-            Column("owner_ref", String(36), nullable=False),
-            Column("purpose", String(10), nullable=False),
-            Column("digest", String(64), nullable=False),
-            Column("expires_at", Float, nullable=False),
-            Column("state", String(20), nullable=False),
-        )
+        self._sessions = voice_sessions
+        self._consents = voice_disclosures
         try:
-            metadata.create_all(self._engine)
+            voice_metadata.create_all(self._engine)
             with self._engine.begin() as connection:
                 # Never revive pending input or outbound authority after startup.
                 connection.execute(

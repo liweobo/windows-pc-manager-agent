@@ -10,6 +10,9 @@
   and optimization analysis; disabled domains are hidden and rejected before task or plan persistence.
 - A deterministic evidence-based readiness gate for DEV, private RC, public RC, and V1 qualification. Missing,
   failed, not-run, or not-configured evidence can never be inferred as passing.
+- A complete versioned SQLite schema catalog, integrity/digest validation, verified pre-migration backups,
+  transactional legacy migration, interruption markers, fail-closed downgrade policy, and non-overwrite recovery
+  copy primitive.
 
 ### Security and limitations
 

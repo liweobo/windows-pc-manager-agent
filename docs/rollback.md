@@ -1,5 +1,13 @@
 # Rollback design
 
+## Stage 7A database migration recovery
+
+Before an existing unversioned database changes, Stage 7A retains an integrity-checked SQLite backup with a
+SHA-256 digest. Migration DDL and version changes use an explicit transaction. Failure or interruption blocks the
+next startup with `MIGRATION_RECOVERY_REQUIRED`; it never drops/recreates tables or silently retries. The recovery
+API can copy a verified backup only to a new path and cannot overwrite the live database. Downgrade is unsupported;
+see [database migration and recovery](release/database-migrations.md) before any manual replacement.
+
 ## Stage 5E task recovery
 
 There is no task-wide rollback transaction. Cancelling a `ComputerTask` stops only future coordination. The final
