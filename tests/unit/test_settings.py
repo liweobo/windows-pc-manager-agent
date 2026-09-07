@@ -37,6 +37,16 @@ def test_settings_load_and_normalize_environment(monkeypatch: pytest.MonkeyPatch
     assert settings.residual_cleanup_runtime_confirmation_ttl_seconds == 60
 
 
+def test_environment_final_task_limits_are_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "PC_MANAGER_TASK_LIMITS",
+        '{"max_task_nodes":8,"max_concurrent_reads":2,"max_background_workers":2}',
+    )
+    settings = AppSettings.from_environment()
+    assert settings.task_limits.max_task_nodes == 8
+    assert settings.task_limits.max_concurrent_reads == 2
+
+
 def test_settings_reject_unknown_provider_and_invalid_limit() -> None:
     with pytest.raises(ValidationError, match="Unsupported"):
         AppSettings(llm_provider="other")

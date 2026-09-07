@@ -34,6 +34,11 @@ _DOMAIN_ROLE: dict[TaskDomain, AgentRole] = {
     TaskDomain.BROWSER: AgentRole.BROWSER,
     TaskDomain.OPTIMIZATION: AgentRole.OPTIMIZATION,
     TaskDomain.MEMORY: AgentRole.MEMORY_MANAGER,
+    TaskDomain.PROCESS: AgentRole.SYSTEM,
+    TaskDomain.STARTUP: AgentRole.SYSTEM,
+    TaskDomain.SERVICE: AgentRole.SYSTEM,
+    TaskDomain.RESIDUAL: AgentRole.SOFTWARE,
+    TaskDomain.CLEANUP: AgentRole.OPTIMIZATION,
 }
 
 

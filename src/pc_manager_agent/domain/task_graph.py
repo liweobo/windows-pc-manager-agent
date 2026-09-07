@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from pydantic import Field, model_validator
 
 from pc_manager_agent.domain.agents import AgentRole
+from pc_manager_agent.domain.computer_tasks import DependencyType, NodeFailurePolicy
 from pc_manager_agent.domain.plans import FrozenModel
 from pc_manager_agent.domain.risk import RiskLevel
 
@@ -26,6 +27,11 @@ class TaskDomain(StrEnum):
     BROWSER = "BROWSER"
     OPTIMIZATION = "OPTIMIZATION"
     MEMORY = "MEMORY"
+    PROCESS = "PROCESS"
+    STARTUP = "STARTUP"
+    SERVICE = "SERVICE"
+    RESIDUAL = "RESIDUAL"
+    CLEANUP = "CLEANUP"
 
 
 class TaskNodeType(StrEnum):
@@ -86,6 +92,9 @@ class TaskNode(FrozenModel):
     output_refs: tuple[str, ...] = Field(default=(), max_length=32)
     resources: tuple[ResourceIdentity, ...] = Field(default=(), max_length=32)
     risk_hint: RiskLevel = RiskLevel.R0
+    failure_policy: NodeFailurePolicy = NodeFailurePolicy.STOP_TASK
+    safe_read_retry_limit: int = Field(default=0, ge=0, le=2)
+    roadmap_label: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")
     def require_unique_references(self) -> TaskNode:
@@ -94,6 +103,12 @@ class TaskNode(FrozenModel):
             raise ValueError("Input references must be unique")
         if len(self.output_refs) != len(set(self.output_refs)):
             raise ValueError("Output references must be unique")
+        if self.risk_hint is not RiskLevel.R0 and self.safe_read_retry_limit:
+            raise ValueError("Only R0 nodes may be retried")
+        if self.failure_policy is NodeFailurePolicy.RETRY_SAFE_READ and (
+            self.risk_hint is not RiskLevel.R0 or self.safe_read_retry_limit == 0
+        ):
+            raise ValueError("Safe-read retry policy requires a bounded R0 retry")
         return self
 
 
@@ -102,6 +117,7 @@ class TaskDependency(FrozenModel):
 
     prerequisite_id: UUID
     dependent_id: UUID
+    dependency_type: DependencyType = DependencyType.HARD_DEPENDENCY
 
     @model_validator(mode="after")
     def reject_self_dependency(self) -> TaskDependency:

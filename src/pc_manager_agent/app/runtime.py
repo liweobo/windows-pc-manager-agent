@@ -17,6 +17,7 @@ from pc_manager_agent.app.optimization_reviews import (
     OptimizationReviewServices,
     build_optimization_review_services,
 )
+from pc_manager_agent.app.tasks import FinalTaskServices, build_final_task_services
 from pc_manager_agent.audit.elevated_broker import ElevatedBrokerAuditLogger
 from pc_manager_agent.audit.file_operations import OperationAuditLogger
 from pc_manager_agent.audit.models import AuditEvent
@@ -818,6 +819,7 @@ class ApplicationRuntime:
         )
         self.browser: BrowserServices = build_browser_services(settings, self.audit)
         self.agents: AgentServices = build_agent_services(settings, self.audit)
+        self.tasks: FinalTaskServices = build_final_task_services(settings, self.audit)
 
     def create_scan_orchestrator(self, root: Path) -> ScanOrchestrator:
         """为一个用户选择的根目录创建独立路径策略、注册表和扫描编排器。"""
@@ -2124,6 +2126,7 @@ class ApplicationRuntime:
 
     def close(self) -> None:
         """Release local persistence resources."""
+        self.tasks.close()
         self.agents.close()
         self.browser.close()
         self.office.close()
