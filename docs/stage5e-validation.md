@@ -8,12 +8,13 @@ paid provider request, user document write, browser transaction or Recycle Bin e
 
 | Check | Command summary | Result |
 |---|---|---|
-| Formatting | `uv run ruff format --check .` | 860 files already formatted |
+| Formatting | `uv run ruff format --check .` | 861 files already formatted |
 | Lint | `uv run ruff check .` | passed |
 | Types | `uv run mypy src` | 545 source files, passed |
 | Full non-performance tests | pytest excluding performance and Playwright, with branch coverage and 85% gate | 1699 passed, 6 skipped, 13 deselected; 86.71% |
-| Stage 5E core gate | 28 task/orchestrator/recovery/fake-E2E/security/GUI tests | passed; 86.46% |
-| Stage 5E critical gate | 11 safety/checkpoint/workflow-boundary tests with 95% gate | passed; 97.57% |
+| Cross-stage security gate | all security boundaries plus Stage 5D/5E policy suites | 1035 passed, 3 skipped; 95.71% |
+| Stage 5E core gate | 29 task/orchestrator/recovery/fake-E2E/security/GUI tests | passed; 86.57% |
+| Stage 5E critical gate | 12 safety/checkpoint/workflow-boundary tests with 95% gate | passed; 97.70% |
 | Performance | `uv run pytest tests/performance -q -s` | 11 passed in 174.91s |
 | Static security | `uv run bandit -q -r src` | passed, no findings |
 | Dependency audit | `uv run pip-audit` | no known vulnerabilities; the local project itself is not published on PyPI |

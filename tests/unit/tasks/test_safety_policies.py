@@ -51,6 +51,7 @@ from pc_manager_agent.safety.task_staleness import (
     StalenessKind,
     TaskStalenessPolicy,
 )
+from pc_manager_agent.safety.task_templates import TaskTemplateRegistry
 
 
 def _task_and_graph(task_services):
@@ -65,6 +66,21 @@ def _task_and_graph(task_services):
     goal = task_services.orchestrator._volatile_goals[task.task_id]
     graph = task_services.orchestrator._require_volatile_graph(task)
     return task, graph, goal
+
+
+def test_task_template_registry_is_closed_and_ordered() -> None:
+    registry = TaskTemplateRegistry()
+    templates = registry.list()
+    assert tuple(item.code for item in templates) == (
+        "PC_HEALTH_CHECK",
+        "DISK_SPACE_ANALYSIS",
+        "STARTUP_REVIEW",
+        "HEALTH_REPORT",
+        "WEB_RESEARCH_REPORT",
+    )
+    assert registry.get("PC_HEALTH_CHECK") is templates[0]
+    with pytest.raises(FinalOrchestratorSafetyError, match="Unknown task template"):
+        registry.get("NOT_REGISTERED")
 
 
 def test_confirmation_policy_rejects_state_graph_scope_expiry_replay_and_binding(

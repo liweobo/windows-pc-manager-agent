@@ -97,6 +97,9 @@ jobs:
           tests/integration/test_startup_action_workflow.py
           tests/security/test_service_startup_safety.py
           tests/security/test_startup_safety.py
+          tests/unit/agents tests/unit/context tests/unit/memory
+          tests/integration/test_stage5d_multi_agent_flow.py
+          tests/unit/tasks/test_safety_policies.py
           --cov-config=.coveragerc-cross-stage-security
           --cov=pc_manager_agent.safety
           --cov=pc_manager_agent.confirmation --cov=pc_manager_agent.rollback
@@ -658,6 +661,7 @@ jobs:
           --cov=pc_manager_agent.safety.final_orchestrator
           --cov=pc_manager_agent.safety.task_revision
           --cov=pc_manager_agent.safety.task_staleness
+          --cov=pc_manager_agent.safety.task_templates
           --cov=pc_manager_agent.domain.task_checkpoints
           --cov=pc_manager_agent.domain.task_workflows
           --cov-report=term-missing --cov-fail-under=95 -q
