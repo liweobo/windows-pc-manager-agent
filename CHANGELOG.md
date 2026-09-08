@@ -32,6 +32,8 @@
 - Production Main no longer imports the Mock Broker implementation, and the build rejects ambient Poppler ICU
   DLLs that caused the packaged Qt runtime to fail.
 - A failed development evidence set no longer incorrectly reports `DEV_READY`.
+- RC installer validation reads the exact Chocolatey package identity instead of trusting the compiler's
+  non-informative `0.0.0.0` Windows product-version field.
 
 ### Security and limitations
 

@@ -59,8 +59,12 @@ jobs:
         run: |
           $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
           if (-not (Test-Path -LiteralPath $iscc)) { throw 'INSTALLER_TOOL_NOT_FOUND' }
-          $version = (Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion
-          if (-not $version.StartsWith('6.7.1')) { throw "INNO_VERSION_DRIFT:$version" }
+          $packageRows = @(& choco list --exact innosetup --limit-output)
+          if ($LASTEXITCODE -ne 0) { throw "INNO_PACKAGE_QUERY_FAILED:$LASTEXITCODE" }
+          $packageMatch = @($packageRows | Where-Object { $_ -match '^innosetup\|(?<version>[^|]+)$' })
+          if ($packageMatch.Count -ne 1) { throw 'INNO_PACKAGE_IDENTITY_AMBIGUOUS' }
+          $version = [regex]::Match($packageMatch[0], '^innosetup\|(?<version>[^|]+)$').Groups['version'].Value
+          if ($version -ne '6.7.1') { throw "INNO_VERSION_DRIFT:$version" }
           "path=$iscc" >> $env:GITHUB_OUTPUT
       - name: Build private-RC installer
         shell: pwsh
