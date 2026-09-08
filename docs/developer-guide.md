@@ -1,5 +1,30 @@
 # Developer guide
 
+## Stage 7A private-RC build
+
+Use Python 3.13.1 and the committed lock for release evidence:
+
+```powershell
+uv sync --all-groups --locked
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src
+uv run pytest -m "not performance and not playwright" --cov=pc_manager_agent --cov-fail-under=85
+uv run pytest tests/performance -q -s
+uv run bandit -q -r src
+uv run pip-audit
+./scripts/build-release-binaries.ps1
+```
+
+Inno Setup 6 is required only for `scripts/build-installer.ps1`; the current local host does not have it. The manual
+`release-candidate` workflow uses a pinned Windows 2025 runner, builds the unsigned installer, generates an SPDX SBOM,
+runs the ephemeral install/reinstall/ACL/uninstall test and evaluates the private-RC evidence gate. Never convert a
+missing local compiler or signing certificate into a pass. Build output is ignored and must not be committed.
+
+The packaged console entry is `pc_manager_agent.bootstrap:main`; exact `--version` returns before Qt imports. Frozen
+`--smoke-test` uses production configuration, isolated temporary state and a timed controlled shutdown. Source smoke
+uses the same temporary-state rule.
+
 ## Stage 7A observability and diagnostics
 
 Do not bypass `LogRedactionPolicy`, add a traceback/local/body field to production logs, or add automatic upload.

@@ -150,12 +150,22 @@ def test_validator_rejects_overlapping_parent_and_child(
 
 
 @pytest.mark.security
-def test_production_code_contains_no_permanent_file_delete_calls() -> None:
+def test_only_allowlisted_agent_housekeeping_uses_permanent_file_delete() -> None:
     root = Path(__file__).parents[2] / "src" / "pc_manager_agent"
+    # Stage 7A's exact allow-list is limited to housekeeping for exclusively
+    # created diagnostic output, bounded local crash evidence, and migration
+    # recovery artifacts. User-file and execution-domain modules remain covered.
+    housekeeping_allowlist = {
+        Path("diagnostics/bundle.py"),
+        Path("observability/crash.py"),
+        Path("persistence/migrations.py"),
+    }
     forbidden_attributes = {"unlink", "rmtree"}
     forbidden_module_calls = {("os", "remove")}
     violations: list[str] = []
     for source_path in root.rglob("*.py"):
+        if source_path.relative_to(root) in housekeeping_allowlist:
+            continue
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
         for node in ast.walk(tree):
             if (
@@ -171,5 +181,5 @@ def test_production_code_contains_no_permanent_file_delete_calls() -> None:
             ):
                 violations.append(f"{source_path}:{node.lineno}:{node.func.attr}")
     # Stage 2A rollback uses the explicit Win32 RemoveDirectoryW adapter, not any of these
-    # permanent file deletion helpers. Stage 2B must not introduce them anywhere in production.
+    # permanent file deletion helpers. Stage 2B and future execution domains must not add one.
     assert not violations, violations

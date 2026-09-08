@@ -26,9 +26,7 @@ _FORBIDDEN_SUFFIXES = {
     ".sqlite",
 }
 _FORBIDDEN_AMBIENT_DLLS = {"icuuc.dll", "icudt78.dll"}
-_INLINE_SECRET = re.compile(
-    rb"(?i)(?<![a-z0-9_])(?:gh[pousr]_[a-z0-9_]{20,}|sk-[a-z0-9_-]{12,})"
-)
+_INLINE_SECRET = re.compile(rb"(?i)(?<![a-z0-9_])(?:gh[pousr]_[a-z0-9_]{20,}|sk-[a-z0-9_-]{12,})")
 _PRIVATE_KEY_BLOCK = re.compile(
     rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\s+"
     rb"[A-Za-z0-9+/=\r\n]{64,}\s+"

@@ -139,6 +139,13 @@ shell/generic tool routing, automatic destructive retry or global Undo. Maintain
 and 95% safety/checkpoint coverage gates and update docs/final-orchestrator.md, docs/task-lifecycle.md,
 docs/crash-recovery.md, docs/api-final-orchestrator.md and the manual checklist on every related change.
 
+Stage 7A freezes the private RC at version `1.0.0-rc.1` with exactly FILE_ANALYSIS,
+SYSTEM_DIAGNOSTICS, SOFTWARE_ANALYSIS and OPTIMIZATION_ANALYSIS enabled. Production builds must use the
+separate Main/Broker/Browser Worker specs, standard-user Main manifest, locked dependencies, artifact inspection,
+verified migration, redacted local diagnostics and deterministic release gate. Mock Broker and every write/action
+surface remain absent or disabled. Signing is NOT_CONFIGURED; public RC/V1 claims and a final v1 tag are prohibited.
+Installer work must preserve LocalAppData by default and keep trusted binaries under non-user-writable Program Files.
+
 Stage 5D is a coordination and low-risk preference layer, not a new execution domain. Every Agent role is created by
 runtime and bound to a sealed default-deny manifest; provider role claims are ignored. Agents, TaskGraph, messages,
 Safety Reviewer output and Memory never authorize, confirm, elevate, execute or establish success. Only listed R0

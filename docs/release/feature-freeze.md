@@ -1,5 +1,7 @@
 # Stage 7A feature freeze
 
+Candidate version: `1.0.0-rc.1` (private, unsigned; no final v1 tag).
+
 Stage 7A changes release safety, data integrity, packaging, compatibility, performance,
 accessibility and documentation only. It does not add a new business capability.
 

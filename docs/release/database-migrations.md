@@ -7,6 +7,8 @@ app_schema row and SQLite user_version. The current database schema is version 1
 contract is version 1. There is currently no separate configuration file: provider credentials remain outside
 SQLite and are not copied into migration metadata.
 
+Application version `1.0.0-rc.1` is provenance, not the schema number; schema/config versions advance independently.
+
 The complete table catalog is created by one versioned migration before Audit, confirmations, Memory, task state,
 or any domain repository is opened. Repository-level create_all calls remain idempotent compatibility checks;
 they are not an upgrade strategy. A new durable table or column requires an adjacent migration step and a schema

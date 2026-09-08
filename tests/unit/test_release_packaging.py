@@ -89,6 +89,13 @@ def test_installer_uses_program_files_and_preserves_user_state() -> None:
     assert "runasoriginaluser" in installer
 
 
+def test_installer_lifecycle_runs_isolated_production_smoke() -> None:
+    lifecycle = (_ROOT / "scripts" / "test-installer-lifecycle.ps1").read_text(encoding="utf-8")
+    assert "REQUIRES_EXPLICIT_EPHEMERAL_GITHUB_HOST" in lifecycle
+    assert "Invoke-CheckedProcess $main @('--version')" in lifecycle
+    assert "Invoke-CheckedProcess $main @('--smoke-test')" in lifecycle
+
+
 def test_signing_hook_requires_store_identity_and_verification() -> None:
     script = (_ROOT / "scripts" / "sign-artifacts.ps1").read_text(encoding="utf-8")
     assert "SIGNING_NOT_CONFIGURED" in script

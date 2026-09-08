@@ -1,5 +1,15 @@
 # Rollback design
 
+## Stage 7A application release rollback
+
+Code rollback uses `git revert <stage-7a-commit>` and a new reviewed build; never replace remote history. Installed
+application downgrade is not supported because an older binary may not understand current schema/policy versions.
+Prefer installing a newer corrective RC. Preserve `%LOCALAPPDATA%` before any manual recovery.
+
+Normal uninstall removes Program Files binaries and keeps local state. A migration failure retains a verified backup
+and recovery marker; `MigrationBackupService.restore_to_new_path()` creates only an absent recovery copy and never
+overwrites the live database. Code/installer rollback does not imply file-operation Undo or Recycle Bin restore.
+
 ## Stage 7A database migration recovery
 
 Before an existing unversioned database changes, Stage 7A retains an integrity-checked SQLite backup with a

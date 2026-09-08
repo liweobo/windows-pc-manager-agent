@@ -17,6 +17,13 @@ Stage 7A 正在把开发构建收敛为可验证的 Windows 发布物。首个�
 详见[隐私模型](docs/privacy.md)、[日志与诊断](docs/release/logging-and-diagnostics.md)、
 [数据库迁移](docs/release/database-migrations.md)及[生产加固 API](docs/api-production-hardening.md)。
 
+私有 RC 的统一版本为 `1.0.0-rc.1`。三类 Windows 冻结构建、安装/升级/卸载说明、真实限制和
+发布门禁分别见[打包](docs/release/packaging.md)、[安装](docs/release/installation.md)、
+[升级](docs/release/upgrade.md)、[卸载](docs/release/uninstall.md)、
+[已知限制](docs/release/known-issues-rc.md)、[性能基线](docs/release/performance-baseline.md)、
+[就绪评估](docs/release/readiness-assessment.md)与[发布检查表](docs/release/release-checklist.md)。
+签名仍为 `NOT_CONFIGURED`；不要关闭 SmartScreen、Defender 或 UAC 来安装内部测试构建。
+
 ## Stage 5E：可恢复的长任务协调与统一任务中心
 
 新增 Final Orchestrator，用版本化 `ComputerTask`/`TaskGraph`、检查点、单次派发、用户注意队列和

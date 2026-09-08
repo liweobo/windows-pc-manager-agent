@@ -1,5 +1,17 @@
 # Threat model
 
+## Stage 7A installer and supply-chain review
+
+| Threat | Control | Residual risk |
+|---|---|---|
+| Build-host dependency/DLL injection | locked graph, isolated specs, ambient ICU exclusion, artifact inspection | compiler/runner and upstream packages remain trusted dependencies |
+| Installer or binary tampering | SHA-256 inventory, Program Files ACL test, fixed Broker path/hash/version, signing hook | signing is not configured; private distribution needs a trusted hash channel |
+| Main becomes persistently elevated | Main `asInvoker`, production token check, separate Broker | installer itself prompts for Program Files write access |
+| Mock/developer feature ships | immutable flags, config validator, PyInstaller exclusion/xref test | disabled-domain imports still increase Main package size |
+| Upgrade corrupts state | integrity checks, verified backup, adjacent transaction, recovery markers, no downgrade | manual live-database recovery needs expert review |
+| Logs/crash/support bundle leak data | bounded redaction, hashed paths, structural fields, local-only export | unknown secret shapes may evade pattern redaction |
+| Browser/model content redirects update | auto-update absent; no Browser update route | users may manually obtain a file from an untrusted source |
+
 ## Stage 5E additions
 
 | Threat | Control |

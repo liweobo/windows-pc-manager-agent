@@ -1,5 +1,17 @@
 # Security model
 
+## Stage 7A distribution controls
+
+The unsigned private RC is fail-closed to four R0 analysis domains. Production rejects a non-frozen or elevated Main,
+developer/Mock settings, widened features and noncanonical data paths. Main, Broker and Browser Worker are separate
+artifacts; Main and Broker are `asInvoker`, while any future Broker elevation remains an on-demand authenticated UAC
+flow. Broker is installed under Program Files but disabled until a real pinned signature is configured.
+
+Release builds use `uv.lock`, reject ambient ICU build contamination, inspect artifact contents and Broker dependencies,
+and record hashes. Release CI blocks on Ruff, mypy, tests/coverage, global invariants, Bandit, pip-audit, Gitleaks,
+packaging, SBOM, installer lifecycle and the deterministic release evidence gate. Missing evidence is failure. Signing,
+manual UAC and broader Windows validation remain required for public release.
+
 ## Stage 5E global coordination invariants
 
 - The task plan confirms only exact R0 coordination nodes and always has `domain_write_authorized=false`.

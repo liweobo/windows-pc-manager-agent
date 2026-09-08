@@ -1,8 +1,8 @@
 # Stage 7A production-hardening API
 
-This document describes every public function/method introduced by the completed Stage 7A release-policy,
-database-migration, logging, crash and diagnostic slices. Private helpers are included where they enforce a security
-boundary. Packaging/signing APIs will be added when those slices are implemented.
+This document describes every public function/method introduced by the Stage 7A release-policy, database-migration,
+logging, crash, diagnostic, packaging and release-gate slices. Private helpers are included where they enforce a
+security boundary.
 
 ## Version and production policy
 
@@ -14,12 +14,12 @@ boundary. Packaging/signing APIs will be added when those slices are implemented
 | `FeatureFlags.require(feature)` | Raises `FeatureDisabledError` before a disabled route can create task/plan state. |
 | `FeatureFlags.development_defaults()` | Returns every existing domain for source development while preserving each domain's original safety layer. |
 | `FeatureFlags.private_rc_defaults()` | Returns the fixed read-only private-RC allow-list: file, system, software and optimization analysis. |
-| `ProductionRuntimeContext` | Holds independently observed frozen/elevation/executable/environment facts used by validation. |
+| `ProductionRuntimeContext` | Holds independently observed frozen/elevation/executable/environment facts used by validation. Its explicit smoke-test bit permits only the auto-closing temporary-state validation path. |
 | `ProductionConfigValidator.validate(settings, context)` | Returns every stable policy violation: non-frozen production, elevation, unsafe flags/provider/Broker/path/hash or forbidden debug/dev environment. Safe mode requires an empty capability set and disabled provider. |
 | `ProductionConfigValidator.require_valid(settings, context)` | Fails startup with `ProductionConfigurationError` when any violation exists. |
 | `ReleaseEvidence` | One explicit PASS/FAIL/NOT_RUN/NOT_CONFIGURED item; missing evidence is never success. |
 | `ReleaseGateEvaluator.required_checks(level)` | Returns the immutable evidence set required for one readiness level. |
-| `ReleaseGateEvaluator.evaluate(requested, evidence)` | Rejects duplicate/empty evidence, requires exact PASS status and computes the highest truthful readiness grade. |
+| `ReleaseGateEvaluator.evaluate(requested, evidence)` | Rejects duplicate/empty evidence, requires exact PASS status and computes the highest truthful readiness grade. `achieved` is null when even DEV evidence is incomplete. |
 | `ApplicationRuntime.require_feature(feature)` | Shared deterministic domain guard used before preparation/persistence. |
 | `MainWindow._apply_feature_flags()` | Hides disabled tabs from the release UI; it is presentation only and never grants authority. |
 | `MainWindow._route_blocked(feature)` | Rejects disabled chat/navigation routes before task/plan persistence and explains the fixed release block. |
@@ -98,14 +98,41 @@ boundary. Packaging/signing APIs will be added when those slices are implemented
 
 | API | Purpose and contract |
 |---|---|
-| `build_parser()` | Exposes only version, smoke test and reduction-only safe mode. It has no force/admin/debug/feature-widening switch. |
+| `build_parser()` | Exposes only version, smoke test and reduction-only safe mode. It has no force/admin/debug/feature-widening switch. Version exits before runtime and tolerates a windowed EXE without stdout. |
+| `bootstrap.main(argv=None)` | Handles the exact `--version` metadata request before importing Qt/runtime dependencies, then delegates every other argument to the guarded application parser. |
 | `run_application(settings, smoke_test=False)` | Acquires single-instance ownership, evaluates crash-loop/safe-mode reduction, validates production configuration, starts logging/crash evidence, migrates runtime storage, constructs the appropriate UI and cleans up deterministically. |
-| `main(argv=None)` | Loads environment settings and uses temporary state for source smoke tests. |
+| `main(argv=None)` | Loads environment settings and uses temporary state for source and frozen smoke tests, so release validation cannot migrate or contaminate the user's live database. |
 | `SafeModeWindow.__init__(runtime)` | Constructs a separate minimal three-tab recovery surface and no domain tabs/workers. |
 | `SafeModeWindow.attach_tray(tray)` | Allows tray navigation only to the recovery window. |
 | `SafeModeWindow.request_quit()` | Marks intentional shutdown; no business worker exists to cancel. |
 | `SafeModeWindow.shutdown()` | Reports immediate local shutdown and never claims a domain result. |
 | `SafeModeWindow.closeEvent(event)` | Preserves hide-to-tray behavior without adding an execution channel. |
+
+## Packaging and release scripts
+
+| API | Purpose and contract |
+|---|---|
+| `bootstrap.main(argv=None)` | Handles exact version metadata without importing Qt; delegates every other finite argument to the guarded Main parser. |
+| `generate_version_info.read_version(source)` | Reads a final or `-rc.N` SemVer from the single source without importing application code. Unknown syntax fails. |
+| `generate_version_info.render_version_info(version, filename, description)` | Converts SemVer to bounded Windows numeric/string VERSIONINFO; the RC number becomes the fourth numeric component. |
+| `generate_version_info.generate_all(source, output)` | Writes version resources for Main, Broker and Browser Worker under the build directory. |
+| `generate_third_party_notices.runtime_distributions(project)` | Traverses the installed runtime dependency closure while excluding extras/dev groups; missing distributions fail. |
+| `generate_third_party_notices.license_label(distribution)` | Uses package-declared SPDX/license/classifier evidence and fails on unknown metadata rather than guessing. |
+| `generate_third_party_notices.render_notices(project)` | Renders deterministic runtime-only Markdown inventory. |
+| `inspect_release_artifacts.inspect_directory(root, executable)` | Requires an exact layout, streams hashes and rejects source, state, tests, secrets, private keys and ambient ICU DLLs. |
+| `inspect_release_artifacts.inspect_broker_xref(path)` | Rejects GUI/model/provider/Browser/Office/Voice/Mock dependencies in the Broker graph. |
+| `evaluate_release_gate.parse_arguments(argv=None)` | Accepts only closed readiness/check/status vocabularies and one nonempty evidence reference. |
+| `evaluate_release_gate.evidence_from_arguments(arguments)` | Builds explicit evidence without deduplication; duplicates are deliberately rejected by the evaluator. |
+| `evaluate_release_gate.main(argv=None)` | Prints JSON and exits nonzero unless every check required by the requested readiness level is PASS. |
+| `BrowserWorkerClient._worker_command()` | Source mode selects the isolated interpreter module; frozen mode permits only the exact sibling Worker and fails if absent. |
+| `MockPrivilegedBrokerPort.dispatch(...)` | Structural developer-only port that prevents production coordination code from importing the Mock implementation. |
+| `ElevatedBrokerPort.dispatch(...)` | Structural one-request elevated endpoint port; shared session code depends on this finite contract instead of importing the Broker implementation into Main. |
+| `machine_msi_state_digest(product, assessment_digest, preflight_digest)` | Canonically binds MSI identity, safety assessment and Fresh preflight evidence without importing an elevated handler into Main. |
+
+PowerShell entry points are `build-release-binaries.ps1`, `build-installer.ps1`, `sign-artifacts.ps1`,
+`test-installed-layout.ps1` and `test-installer-lifecycle.ps1`. Each accepts explicit paths/identity, checks native exit
+codes and fails closed. The lifecycle script additionally requires an explicit ephemeral GitHub-hosted CI environment;
+it cannot be used accidentally against the developer's installed application.
 
 ## Audit redaction update
 

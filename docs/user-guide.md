@@ -1,5 +1,16 @@
 # User guide
 
+## 1.0.0-rc.1 private candidate
+
+This internal candidate supports Windows 11 x64 and exposes only four read-only areas: approved-root file analysis,
+system diagnostics, software analysis and optimization analysis. Other source-development pages are intentionally
+hidden and blocked. A plan review is still required before read-only collection.
+
+Install only from the trusted private workflow and compare its SHA-256 evidence. Installer UAC writes trusted files to
+Program Files; the Main app runs normally as a standard user afterward. Signing is not configured, so do not disable
+SmartScreen, Defender or UAC to bypass a warning. Normal uninstall retains local settings, Audit and recovery state.
+See `docs/release/installation.md`, `upgrade.md`, `uninstall.md` and `known-issues-rc.md` before testing.
+
 ## Stage 7A 安全模式与诊断包
 
 应用连续异常退出后会自动进入安全模式，也可以使用 `--safe-mode` 启动。安全模式不会加载文件、

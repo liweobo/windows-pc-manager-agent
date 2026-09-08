@@ -19,6 +19,19 @@
   expiring single-use authority, exclusive no-overwrite commit, exact verification and mandatory audit callbacks.
 - A complete privacy data-flow register, retention policy, logging/diagnostic operations guide and Stage 7A
   per-function API reference for the implemented slices.
+- Version `1.0.0-rc.1` from one source, isolated PyInstaller Main/Broker/Browser Worker builds, Windows
+  manifests/version resources, Inno Setup installer source, ACL/lifecycle smoke scripts, artifact content
+  inspection, runtime license notices, SBOM/release workflow and an executable private-RC evidence gate.
+- Release-blocking static dangerous-execution invariants, a managed Browser child-process leak check and a
+  100-task create/cancel stress baseline.
+
+### Fixed
+
+- Frozen `--smoke-test` now performs a production-configured timed startup instead of opening indefinitely.
+- Pre-start cancellation/blocked task records can be persisted and read without inventing a start timestamp.
+- Production Main no longer imports the Mock Broker implementation, and the build rejects ambient Poppler ICU
+  DLLs that caused the packaged Qt runtime to fail.
+- A failed development evidence set no longer incorrectly reports `DEV_READY`.
 
 ### Security and limitations
 
@@ -28,6 +41,9 @@
   Memory, multi-Agent execution, and Final Orchestrator surfaces remain disabled in that profile.
 - Telemetry remains `NOT_IMPLEMENTED`; crash evidence and diagnostics stay local until the user manually shares a
   reviewed file. Pattern redaction is defense in depth and is not represented as comprehensive DLP.
+- Main/Broker/installer signing and real Windows install/UAC/accessibility matrices remain incomplete, so public
+  RC and v1 readiness are blocked. The local host has no Inno Setup compiler; installer validation is delegated to
+  the explicit ephemeral release workflow and remains pending until that workflow succeeds.
 
 ## Unreleased — Stage 5E
 

@@ -17,10 +17,11 @@ confirmation. There is no Confirm All, global Executor, full unattended mode or 
 ## Stage 7A — release hardening and trustworthy distribution (in progress)
 
 Implemented slices: immutable private-RC feature freeze/readiness evidence, versioned fail-closed database migration,
-bounded redacted local logging, sanitized crash evidence, crash-loop Safe Mode, reviewed local diagnostic export and
-privacy/retention documentation. Remaining work includes separate packaged-process validation, installer/ACL and
-artifact inspection, SBOM/license/vulnerability evidence, accessibility/performance/leak/manual matrices and signed
-real-device validation. Signing is NOT_CONFIGURED, so public RC and V1 remain blocked. No auto-update or final tag.
+bounded redacted local logging, sanitized crash evidence, crash-loop Safe Mode, reviewed local diagnostic export,
+three isolated frozen builds, artifact/Broker dependency inspection, installer/ACL/lifecycle scripts, SBOM/license
+workflow, task/browser leak baselines and release documentation. Remote installer lifecycle, full release workflow,
+accessibility/manual matrices and signed real-device validation remain pending. Signing is NOT_CONFIGURED, so public RC
+and V1 remain blocked. No auto-update or final tag.
 
 ## Stage 5C — bounded browser automation (implemented; visible-site validation pending)
 

@@ -29,6 +29,7 @@ Invoke-CheckedProcess $installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTA
 Invoke-CheckedProcess $installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
 $main = Join-Path $installDirectory "pc-manager-agent.exe"
 Invoke-CheckedProcess $main @('--version')
+Invoke-CheckedProcess $main @('--smoke-test')
 $broker = Join-Path $installDirectory "broker\pc-manager-privileged-broker.exe"
 $brokerProcess = Start-Process -FilePath $broker -PassThru -Wait -WindowStyle Hidden
 if ($brokerProcess.ExitCode -ne 20) { throw "BROKER_NO_AUTHORITY_GUARD_FAILED" }

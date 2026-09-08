@@ -1,5 +1,16 @@
 # Architecture
 
+## Stage 7A release boundary
+
+Production composition is a reduction of the modular application, not a new execution domain. A fixed runtime hook
+selects `PRODUCTION`; `ProductionConfigValidator` requires a frozen, standard-user process, canonical LocalAppData,
+disabled Broker and the immutable four-domain R0 feature set. Disabled routes are rejected before persistence.
+
+PyInstaller emits separate Main, one-shot Broker and disposable Browser Worker directories. The installer places Main
+and the disabled Broker under Program Files; writable SQLite/log/crash/backup state stays under LocalAppData. Main does
+not import the Mock Broker implementation, and Broker packaging excludes GUI/model/Browser/Office/Voice code. Database
+migration, logging/crash, diagnostics, packaging inspection and release evidence remain independent boundaries.
+
 ## Stage 5E Final Orchestrator boundary
 
 `app.tasks` composes an independent metadata repository, closed high-level `DomainWorkflowRegistry`, validated
