@@ -34,6 +34,8 @@
 - A failed development evidence set no longer incorrectly reports `DEV_READY`.
 - RC installer validation reads the exact Chocolatey package identity instead of trusting the compiler's
   non-informative `0.0.0.0` Windows product-version field.
+- The Inno Setup 6.7.1 installer resolves Simplified Chinese messages from the official `Languages\Unofficial`
+  location used by that compiler release.
 
 ### Security and limitations
 

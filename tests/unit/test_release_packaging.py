@@ -87,6 +87,7 @@ def test_installer_uses_program_files_and_preserves_user_state() -> None:
     assert "\n[UninstallDelete]\n" not in installer
     assert "LocalAppData" in installer
     assert "runasoriginaluser" in installer
+    assert "compiler:Languages\\Unofficial\\ChineseSimplified.isl" in installer
 
 
 def test_installer_lifecycle_runs_isolated_production_smoke() -> None:
