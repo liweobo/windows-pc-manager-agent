@@ -7,6 +7,8 @@
   multi-monitor/DPI and accessibility validation are not yet complete.
 - The installer cannot be built locally on the current host because Inno Setup 6 is absent; the
   pinned GitHub Windows image path is prepared but its workflow result is pending.
+- The private-RC installer chrome is English-only because the pinned Inno package omits unofficial translations;
+  the installed application remains Chinese-first. A reviewed, vendored translation is deferred to Stage 7B.
 - Only one Windows 11 x64 development build has been exercised. Windows 10 and ARM64 are not claimed.
 
 ## Private-RC limitations
