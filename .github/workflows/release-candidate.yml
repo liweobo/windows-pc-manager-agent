@@ -64,7 +64,9 @@ jobs:
           $packageMatch = @($packageRows | Where-Object { $_ -match '^innosetup\|(?<version>[^|]+)$' })
           if ($packageMatch.Count -ne 1) { throw 'INNO_PACKAGE_IDENTITY_AMBIGUOUS' }
           $packageIdentity = [string]$packageMatch[0]
-          if ($packageIdentity -cne 'innosetup|6.7.1') { throw "INNO_VERSION_DRIFT:$packageIdentity" }
+          if ($packageIdentity.ToLowerInvariant() -ne 'innosetup|6.7.1') {
+            throw "INNO_VERSION_DRIFT:$packageIdentity"
+          }
           "path=$iscc" >> $env:GITHUB_OUTPUT
       - name: Build private-RC installer
         shell: pwsh

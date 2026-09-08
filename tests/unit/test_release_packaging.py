@@ -104,7 +104,7 @@ def test_release_workflow_is_read_only_and_branch_scoped_before_merge() -> None:
     assert "workflow_dispatch:" in workflow
     assert "- codex/stage-7a-production-hardening" in workflow
     assert "choco list --exact innosetup --limit-output" in workflow
-    assert "-cne 'innosetup|6.7.1'" in workflow
+    assert ".ToLowerInvariant() -ne 'innosetup|6.7.1'" in workflow
     assert "INNO_VERSION_DRIFT" in workflow
     assert "VersionInfo.ProductVersion" not in workflow
     assert "release:" not in workflow
