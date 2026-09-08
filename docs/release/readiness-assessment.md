@@ -60,7 +60,7 @@ prepared, result pending.
 
 Local evidence is 1,798 passed, 6 environment/opt-in skips and 86.94% coverage; the 12-test performance suite and
 2-test managed Playwright suite also passed. Frozen Main, Browser Worker fail-closed input and Broker no-authority
-smokes passed. The installer lifecycle remains restricted to the manual release workflow. Real UAC, signed binary
+smokes passed. The installer lifecycle remains restricted to the dedicated release workflow. Real UAC, signed binary
 tamper, clean VM, accessibility, devices, visible Browser and Office tests remain manual and are `NOT_RUN` until
 recorded.
 

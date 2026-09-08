@@ -96,6 +96,16 @@ def test_installer_lifecycle_runs_isolated_production_smoke() -> None:
     assert "Invoke-CheckedProcess $main @('--smoke-test')" in lifecycle
 
 
+def test_release_workflow_is_read_only_and_branch_scoped_before_merge() -> None:
+    workflow = (_ROOT / ".github" / "workflows" / "release-candidate.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "contents: read" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "- codex/stage-7a-production-hardening" in workflow
+    assert "release:" not in workflow
+
+
 def test_signing_hook_requires_store_identity_and_verification() -> None:
     script = (_ROOT / "scripts" / "sign-artifacts.ps1").read_text(encoding="utf-8")
     assert "SIGNING_NOT_CONFIGURED" in script
