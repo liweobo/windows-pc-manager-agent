@@ -59,7 +59,16 @@ def redact_json(value: JsonValue) -> JsonValue:
     """Redact sensitive fields recursively while preserving JSON shape."""
     if isinstance(value, dict):
         return {
-            key: REDACTED if is_sensitive_key(key) else redact_json(item)
+            # A literal False may be retained as auditable evidence that sensitive
+            # content was not persisted. No true flag or other value receives this
+            # exception, so a positive/unknown content claim still fails closed.
+            key: (
+                False
+                if is_sensitive_key(key) and item is False
+                else REDACTED
+                if is_sensitive_key(key)
+                else redact_json(item)
+            )
             for key, item in value.items()
         }
     if isinstance(value, list):

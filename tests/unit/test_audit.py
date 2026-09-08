@@ -30,6 +30,8 @@ def test_redaction_blocks_release_credential_and_content_shapes() -> None:
         "mfa_code": "123456",
         "raw_audio_bytes": "voice",
         "document_body": "private document",
+        "prompt_body_saved": False,
+        "document_body_saved": True,
         "safe": (
             "Bearer abcdefghijklmnop ghp_abcdefghijklmnopqrstuvwxyz eyJabcdefgh.abcdefgh.abcdefgh"
         ),
@@ -40,6 +42,8 @@ def test_redaction_blocks_release_credential_and_content_shapes() -> None:
     assert redacted["mfa_code"] == REDACTED
     assert redacted["raw_audio_bytes"] == REDACTED
     assert redacted["document_body"] == REDACTED
+    assert redacted["prompt_body_saved"] is False
+    assert redacted["document_body_saved"] == REDACTED
     assert redacted["safe"] == f"Bearer {REDACTED} {REDACTED} {REDACTED}"
 
 
