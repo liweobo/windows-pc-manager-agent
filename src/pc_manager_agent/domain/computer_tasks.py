@@ -186,8 +186,14 @@ class ComputerTask(FrozenModel):
         if self.started_at is not None and self.started_at < self.created_at:
             raise ValueError("Task start cannot precede creation")
         started_at = self.started_at
-        if self.completed_at is not None and started_at is None:
-            raise ValueError("Completed tasks require a start time")
+        if self.completed_at is not None and self.completed_at < self.created_at:
+            raise ValueError("Task completion cannot precede creation")
+        if (
+            self.completed_at is not None
+            and started_at is None
+            and self.state in {ComputerTaskState.COMPLETED, ComputerTaskState.PARTIALLY_COMPLETED}
+        ):
+            raise ValueError("Executed completion requires a start time")
         if (
             self.completed_at is not None
             and started_at is not None

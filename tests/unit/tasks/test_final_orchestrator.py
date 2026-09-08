@@ -137,6 +137,24 @@ def test_pause_resume_requires_fresh_user_review_and_cancel_is_future_only(task_
         task_services.orchestrator.cancel(task.task_id)
 
 
+def test_cancel_before_start_remains_durably_readable(task_services) -> None:
+    template = task_services.templates.get("STARTUP_REVIEW")
+    task = task_services.orchestrator.create_task(
+        template.title,
+        template.domains,
+        root_request_id=uuid4(),
+        kind=template.kind,
+        autonomy=template.autonomy,
+    )
+
+    cancelled = task_services.orchestrator.cancel(task.task_id)
+    reloaded = task_services.orchestrator.list_recent()[0]
+
+    assert cancelled.state is ComputerTaskState.CANCELLED
+    assert cancelled.started_at is None
+    assert reloaded == cancelled
+
+
 def test_domain_transaction_reference_is_opaque_and_bound_to_active_node(task_services) -> None:
     task, _ = _create_started(task_services, "STARTUP_REVIEW")
     task_services.orchestrator.advance(task.task_id)
