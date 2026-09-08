@@ -29,9 +29,12 @@ foreach ($binary in @($main, $broker)) {
 }
 
 $acl = Get-Acl -LiteralPath $resolved
-$ordinaryWrite = $acl.Access | Where-Object {
+$accessRules = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
+$currentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$untrustedWriteSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', $currentUserSid)
+$ordinaryWrite = $accessRules | Where-Object {
     $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-    $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-545' -and
+    $_.IdentityReference.Value -in $untrustedWriteSids -and
     ($_.FileSystemRights -band (
         [Security.AccessControl.FileSystemRights]::Write -bor
         [Security.AccessControl.FileSystemRights]::Modify -bor

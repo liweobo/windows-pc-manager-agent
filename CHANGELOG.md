@@ -36,6 +36,8 @@
   non-informative `0.0.0.0` Windows product-version field.
 - The private-RC installer uses Inno Setup's bundled English messages because the pinned Chocolatey package omits
   unofficial translations; vendoring a reviewed Simplified Chinese translation is deferred to Stage 7B.
+- Installed-layout validation reads ACL identities as binary SIDs and rejects write access for Everyone,
+  Authenticated Users, the built-in Users group or the installing user without relying on account-name translation.
 
 ### Security and limitations
 

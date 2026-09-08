@@ -93,9 +93,15 @@ def test_installer_uses_program_files_and_preserves_user_state() -> None:
 
 def test_installer_lifecycle_runs_isolated_production_smoke() -> None:
     lifecycle = (_ROOT / "scripts" / "test-installer-lifecycle.ps1").read_text(encoding="utf-8")
+    layout = (_ROOT / "scripts" / "test-installed-layout.ps1").read_text(encoding="utf-8")
     assert "REQUIRES_EXPLICIT_EPHEMERAL_GITHUB_HOST" in lifecycle
     assert "Invoke-CheckedProcess $main @('--version')" in lifecycle
     assert "Invoke-CheckedProcess $main @('--smoke-test')" in lifecycle
+    assert "GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])" in layout
+    assert "S-1-1-0" in layout
+    assert "S-1-5-11" in layout
+    assert "S-1-5-32-545" in layout
+    assert ".Translate(" not in layout
 
 
 def test_release_workflow_is_read_only_and_branch_scoped_before_merge() -> None:
