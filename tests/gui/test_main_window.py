@@ -89,6 +89,12 @@ def test_private_rc_hides_and_blocks_non_release_domains(
         assert not window._tabs.isTabVisible(window._tabs.indexOf(window._trash_tab))
         assert not window._tabs.isTabVisible(window._tabs.indexOf(window._browser_tab))
         assert window._voice is None
+        assert window.accessibleName() == "Windows PC Manager Agent 主窗口"
+        assert window._tabs.accessibleName() == "主要功能页面"
+        assert window._chat_input.accessibleName() == "聊天输入"
+        assert window._root_input.accessibleName() == "授权扫描目录"
+        assert window._plan_view.accessibleName() == "结构化扫描计划"
+        assert window._results.accessibleName() == "只读扫描结果"
 
         before_events = runtime.audit.list_recent(100)
         window._chat_input.setText("把文件移动到另一个目录")
@@ -115,5 +121,8 @@ def test_safe_mode_keeps_only_minimal_surfaces(qtbot: QtBot, tmp_path: Path) -> 
         visible = {window._tabs.tabText(index) for index in range(window._tabs.count())}
         assert visible == {"安全模式", "审计", "设置"}
         assert "安全模式" in window.statusBar().currentMessage()
+        assert window.accessibleName() == "Windows PC Manager Agent 安全模式窗口"
+        assert window._tabs.accessibleName() == "安全模式页面"
+        assert window._audit.accessibleName() == "安全模式审计记录"
     finally:
         runtime.close()
