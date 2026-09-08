@@ -65,11 +65,11 @@ from pc_manager_agent.platform_support.service_control import ServiceControlPlat
 from pc_manager_agent.platform_support.service_startup import ServiceStartupPlatform
 from pc_manager_agent.platform_support.startup import StartupManagementPlatform
 from pc_manager_agent.platform_support.windows.startup_management import machine_absent_state_digest
-from pc_manager_agent.privileged.machine_msi_handler import machine_msi_state_digest
 from pc_manager_agent.privileged.resolver import (
     PrivilegeAssessmentInput,
     PrivilegeRequirementResolver,
 )
+from pc_manager_agent.privileged.state_digests import machine_msi_state_digest
 from pc_manager_agent.safety.machine_msi_policy import MachineMsiExecutionPolicy
 from pc_manager_agent.safety.machine_startup_policy import MachineStartupSafetyPolicy
 from pc_manager_agent.safety.service_startup_policy import (

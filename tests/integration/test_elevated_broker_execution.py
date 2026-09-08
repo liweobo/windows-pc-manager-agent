@@ -8,6 +8,7 @@ from pathlib import Path
 from tests.fixtures.privileged_actions import build_privileged_test_stack
 from tests.stage4x2_support import prepare_real_stop
 
+from pc_manager_agent import __version__
 from pc_manager_agent.audit.elevated_broker import ElevatedBrokerAuditLogger
 from pc_manager_agent.domain.elevated_broker import (
     BrokerBinaryIdentity,
@@ -38,7 +39,7 @@ def _process(process_id: int, *, elevated: bool, image_sha256: str) -> WindowsPr
         process_creation_time_ns=process_id,
         image_path_hash=f"{process_id % 10}" * 64,
         image_sha256=image_sha256,
-        product_version="0.1.0",
+        product_version=__version__,
         elevated=elevated,
         integrity_level="HIGH" if elevated else "MEDIUM",
     )
@@ -60,7 +61,7 @@ def test_broker_revalidates_consumes_executes_verifies_and_rejects_replay(
             file_id="volume:file",
             sha256="2" * 64,
             size_bytes=4096,
-            product_version="0.1.0",
+            product_version=__version__,
             signature_status=SignatureStatus.UNSIGNED,
             trusted_location=False,
         )

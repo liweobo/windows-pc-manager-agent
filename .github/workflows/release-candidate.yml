@@ -1,0 +1,104 @@
+name: release-candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  unsigned-private-rc:
+    needs: secret-scan
+    runs-on: windows-2025
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13.1"
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.11.32"
+          enable-cache: true
+      - name: Locked dependencies and release tests
+        shell: pwsh
+        run: |
+          uv sync --all-groups --locked
+          uv run ruff format --check .
+          uv run ruff check .
+          uv run mypy src
+          uv run pytest -m "not performance and not playwright" --cov=pc_manager_agent --cov-report=term-missing --cov-report=xml --cov-fail-under=85
+          uv run pytest tests/performance -q -s
+          uv run playwright install chromium
+          uv run pytest -m playwright -q
+          uv run bandit -q -r src
+          uv run pip-audit
+      - name: Generate runtime dependency notices
+        run: uv run python scripts/generate_third_party_notices.py THIRD_PARTY_NOTICES.md
+      - name: Build and inspect isolated binaries
+        shell: pwsh
+        run: ./scripts/build-release-binaries.ps1
+      - name: Verify pinned Inno Setup compiler
+        id: inno
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path -LiteralPath $iscc)) { throw 'INSTALLER_TOOL_NOT_FOUND' }
+          $version = (Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion
+          if (-not $version.StartsWith('6.7.1')) { throw "INNO_VERSION_DRIFT:$version" }
+          "path=$iscc" >> $env:GITHUB_OUTPUT
+      - name: Build private-RC installer
+        shell: pwsh
+        run: ./scripts/build-installer.ps1 -IsccPath '${{ steps.inno.outputs.path }}'
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: dist/pc-manager-agent
+          format: spdx-json
+          output-file: dist/installer/windows-pc-manager-agent-main.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Ephemeral install, reinstall, ACL and uninstall test
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem dist/installer/*setup.exe | Select-Object -First 1).FullName
+          if (-not $installer) { throw 'INSTALLER_OUTPUT_MISSING' }
+          ./scripts/test-installer-lifecycle.ps1 -InstallerPath $installer -CiEphemeralHost
+      - name: Record unsigned checksums and notices
+        shell: pwsh
+        run: |
+          Copy-Item -LiteralPath THIRD_PARTY_NOTICES.md -Destination dist/installer/THIRD_PARTY_NOTICES.md
+          Get-ChildItem dist/installer -File | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -LiteralPath dist/installer/SHA256SUMS.txt -Encoding ascii
+          'SIGNING_NOT_PRODUCTION_READY' | Set-Content -LiteralPath dist/installer/SIGNING_STATUS.txt -Encoding ascii
+      - name: Evaluate deterministic private-RC gate
+        shell: pwsh
+        run: >-
+          uv run python scripts/evaluate_release_gate.py
+          --requested PRIVATE_RC_READY
+          --reference "github-actions:${{ github.sha }}"
+          --passed quality type_check tests coverage security global_invariants
+          dependencies secrets production_config migrations package installer
+          artifact_inspection installed_smoke documentation performance privacy
+      - name: Upload unsigned private-RC evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-pc-manager-agent-unsigned-private-rc
+          path: dist/installer/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

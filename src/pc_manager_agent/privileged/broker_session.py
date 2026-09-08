@@ -24,7 +24,6 @@ from pc_manager_agent.domain.privileged_actions import (
     PrivilegedActionEnvelope,
 )
 from pc_manager_agent.privileged.broker_identity import BrokerTrustError
-from pc_manager_agent.privileged.elevated_broker import ElevatedPrivilegedBroker
 from pc_manager_agent.privileged.ipc_protocol import (
     BrokerFrameCodec,
     BrokerIpcAuthenticationError,
@@ -41,6 +40,24 @@ from pc_manager_agent.privileged.ipc_protocol import (
 from pc_manager_agent.privileged.serialization import PrivilegedRequestSerializer
 
 _HANDSHAKE_REQUEST_ID = UUID(int=0)
+
+
+class ElevatedBrokerPort(Protocol):
+    """Minimum one-request server dispatch surface shared without importing Broker internals."""
+
+    def dispatch(
+        self,
+        envelope: PrivilegedActionEnvelope,
+        *,
+        session: IpcSessionAuthenticator,
+        broker_instance_id: UUID,
+        caller_identity: WindowsProcessIdentity,
+        expected_caller_identity: WindowsProcessIdentity,
+        broker_identity: WindowsProcessIdentity,
+        expected_broker_binary: BrokerBinaryIdentity,
+    ) -> ElevatedBrokerResultEnvelope:
+        """Validate and execute one exact authenticated request on the elevated endpoint."""
+        ...
 
 
 class AuthenticatedPipeStream(PipeByteStream, Protocol):
@@ -71,7 +88,7 @@ class ElevatedBrokerServerSession:
 
     def __init__(
         self,
-        broker: ElevatedPrivilegedBroker,
+        broker: ElevatedBrokerPort,
         broker_identity: WindowsProcessIdentity,
         broker_binary: BrokerBinaryIdentity,
         caller_identity_reader: Callable[[AuthenticatedPipeStream], WindowsProcessIdentity],

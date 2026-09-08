@@ -41,7 +41,7 @@ dependencies = [
 ]
 
 [project.scripts]
-pc-manager-agent = "pc_manager_agent.main:main"
+pc-manager-agent = "pc_manager_agent.bootstrap:main"
 
 [dependency-groups]
 dev = [

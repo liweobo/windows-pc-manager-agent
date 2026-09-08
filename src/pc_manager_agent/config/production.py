@@ -91,6 +91,7 @@ class ProductionRuntimeContext(BaseModel):
     process_elevated: bool
     executable_path: Path
     active_environment_names: frozenset[str] = Field(default_factory=frozenset)
+    smoke_test: bool = False
 
 
 class ProductionConfigViolation(BaseModel):
@@ -161,7 +162,7 @@ class ProductionConfigValidator:
         app_name = getattr(settings, "app_name", "WindowsPCManagerAgent")
         expected_data = user_data_path(str(app_name), ensure_exists=False).resolve(strict=False)
         configured_data = getattr(settings, "data_directory", Path()).resolve(strict=False)
-        if configured_data != expected_data:
+        if configured_data != expected_data and not context.smoke_test:
             violations.append(
                 self._violation(
                     "DATA_DIRECTORY", "Production requires the fixed per-user data directory"

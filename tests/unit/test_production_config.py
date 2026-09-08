@@ -69,6 +69,21 @@ def test_valid_unsigned_private_rc_configuration_passes() -> None:
     assert report.violations == ()
 
 
+def test_production_smoke_test_may_use_an_isolated_data_directory(tmp_path: Path) -> None:
+    isolated = _production_settings(data_directory=tmp_path)
+
+    assert (
+        ProductionConfigValidator()
+        .validate(
+            isolated,
+            _context(smoke_test=True),
+        )
+        .valid
+    )
+    ordinary_report = ProductionConfigValidator().validate(isolated, _context())
+    assert "DATA_DIRECTORY" in {item.code for item in ordinary_report.violations}
+
+
 def test_safe_mode_allows_only_empty_features_and_disabled_provider() -> None:
     safe = _production_settings(
         safe_mode=True,

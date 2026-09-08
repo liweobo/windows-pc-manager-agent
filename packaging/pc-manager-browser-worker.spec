@@ -1,21 +1,21 @@
-# PyInstaller specification for the isolated one-shot Stage 4X2 Broker.
+# PyInstaller specification for the separate non-elevated disposable Browser Worker.
 
 from pathlib import Path
 
 project_root = Path(SPEC).resolve().parent.parent
 source_root = project_root / "src"
-manifest = project_root / "packaging" / "manifests" / "pc-manager-privileged-broker.exe.manifest"
-version_file = project_root / "build" / "generated" / "pc-manager-privileged-broker-version.txt"
+manifest = project_root / "packaging" / "manifests" / "pc-manager-browser-worker.exe.manifest"
+version_file = project_root / "build" / "generated" / "pc-manager-browser-worker-version.txt"
 
 if not version_file.is_file():
     raise SystemExit("Generate build version resources before running PyInstaller")
 
 analysis = Analysis(
-    [str(source_root / "pc_manager_agent" / "broker" / "__main__.py")],
+    [str(source_root / "pc_manager_agent" / "browser" / "worker.py")],
     pathex=[str(source_root)],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=["playwright.sync_api"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -23,7 +23,9 @@ analysis = Analysis(
         "PySide6",
         "openai",
         "pc_manager_agent.agents",
+        "pc_manager_agent.broker",
         "pc_manager_agent.memory",
+        "pc_manager_agent.office",
         "pc_manager_agent.providers",
         "pc_manager_agent.ui",
     ],
@@ -37,12 +39,12 @@ executable = EXE(
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="pc-manager-privileged-broker",
+    name="pc-manager-browser-worker",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,
+    console=True,
     disable_windowed_traceback=True,
     argv_emulation=False,
     target_arch=None,
@@ -59,5 +61,5 @@ distribution = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="pc-manager-privileged-broker",
+    name="pc-manager-browser-worker",
 )

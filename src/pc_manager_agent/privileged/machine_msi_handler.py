@@ -40,6 +40,7 @@ from pc_manager_agent.privileged.dispatcher import (
     PrivilegedHandlerOutcome,
 )
 from pc_manager_agent.privileged.revalidation import PrivilegedRevalidationError
+from pc_manager_agent.privileged.state_digests import machine_msi_state_digest
 from pc_manager_agent.safety.machine_msi_policy import MachineMsiExecutionPolicy
 from pc_manager_agent.safety.software_uninstall_policy import SoftwareUninstallSafetyPolicy
 from pc_manager_agent.tools.manifest import CancellationToken
@@ -256,21 +257,6 @@ class WindowsMachineMsiPrivilegedHandler:
                 software_identity_present_after=identity_present,
             ),
         )
-
-
-def machine_msi_state_digest(
-    product: ValidatedMsiProduct,
-    assessment_digest: str,
-    preflight_digest: str,
-) -> str:
-    """Bind the privileged Preview to stable product, policy, and preflight evidence."""
-    return canonical_model_digest(
-        {
-            "product_evidence": product.evidence_digest(),
-            "assessment_digest": assessment_digest,
-            "preflight_digest": preflight_digest,
-        }
-    )
 
 
 def _matches_payload(

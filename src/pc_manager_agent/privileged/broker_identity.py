@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pc_manager_agent import __version__
 from pc_manager_agent.domain.elevated_broker import (
     BrokerBinaryIdentity,
     BrokerTrustMode,
@@ -23,6 +24,7 @@ class BrokerTrustPolicy:
     mode: BrokerTrustMode
     expected_sha256: str
     expected_signer_fingerprint: str | None = None
+    expected_product_version: str = __version__
 
     def require_binary(self, identity: BrokerBinaryIdentity) -> None:
         """Require an ordinary asInvoker EXE matching the configured trust policy."""
@@ -30,6 +32,8 @@ class BrokerTrustPolicy:
             raise BrokerTrustError("Broker file identity or SHA-256 differs from configuration")
         if identity.manifest_execution_level != "asInvoker":
             raise BrokerTrustError("Broker manifest does not retain asInvoker")
+        if identity.product_version != self.expected_product_version:
+            raise BrokerTrustError("BROKER_VERSION_INCOMPATIBLE")
         if self.mode is BrokerTrustMode.PRODUCTION and (
             not identity.trusted_location
             or identity.signature_status is not SignatureStatus.VALID

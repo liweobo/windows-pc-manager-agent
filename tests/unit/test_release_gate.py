@@ -31,6 +31,22 @@ def test_private_gate_does_not_infer_missing_installer_evidence() -> None:
     assert ReleaseCheck.INSTALLER in result.missing_or_failed
 
 
+def test_failed_development_evidence_does_not_claim_development_ready() -> None:
+    evidence = (
+        ReleaseEvidence(
+            check=ReleaseCheck.QUALITY,
+            status=EvidenceStatus.FAILED,
+            reference="ruff:failed",
+        ),
+    )
+
+    result = ReleaseGateEvaluator().evaluate(ReadinessLevel.DEV_READY, evidence)
+
+    assert not result.passed
+    assert result.achieved is None
+    assert ReleaseCheck.QUALITY in result.missing_or_failed
+
+
 def test_not_configured_signing_blocks_public_but_not_complete_private_gate() -> None:
     evaluator = ReleaseGateEvaluator()
     evidence = list(_evidence(evaluator.required_checks(ReadinessLevel.PRIVATE_RC_READY)))

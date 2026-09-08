@@ -25,6 +25,7 @@ class ReleaseCheck(StrEnum):
     TESTS = "tests"
     COVERAGE = "coverage"
     SECURITY = "security"
+    GLOBAL_INVARIANTS = "global_invariants"
     DEPENDENCIES = "dependencies"
     SECRETS = "secrets"
     PRODUCTION_CONFIG = "production_config"
@@ -70,7 +71,7 @@ class ReleaseGateResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     requested: ReadinessLevel
-    achieved: ReadinessLevel
+    achieved: ReadinessLevel | None
     passed: bool
     missing_or_failed: tuple[ReleaseCheck, ...]
 
@@ -85,6 +86,7 @@ class ReleaseGateEvaluator:
             ReleaseCheck.TESTS,
             ReleaseCheck.COVERAGE,
             ReleaseCheck.SECURITY,
+            ReleaseCheck.GLOBAL_INVARIANTS,
             ReleaseCheck.DEPENDENCIES,
             ReleaseCheck.SECRETS,
         }
@@ -148,7 +150,7 @@ class ReleaseGateEvaluator:
                 key=lambda item: item.value,
             )
         )
-        achieved = ReadinessLevel.DEV_READY
+        achieved: ReadinessLevel | None = None
         for level in self._ORDER:
             if all(by_check.get(check) is EvidenceStatus.PASSED for check in self._REQUIRED[level]):
                 achieved = level

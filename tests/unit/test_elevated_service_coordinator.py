@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from pc_manager_agent import __version__
 from pc_manager_agent.audit.elevated_broker import ElevatedBrokerAuditLogger
 from pc_manager_agent.domain.elevated_broker import (
     BrokerBinaryIdentity,
@@ -48,7 +49,7 @@ def _binary(sha256: str = "2" * 64) -> BrokerBinaryIdentity:
         file_id="volume:file",
         sha256=sha256,
         size_bytes=4096,
-        product_version="0.1.0",
+        product_version=__version__,
         signature_status=SignatureStatus.UNSIGNED,
         trusted_location=False,
     )
@@ -62,7 +63,7 @@ def _caller() -> WindowsProcessIdentity:
         process_creation_time_ns=1,
         image_path_hash="3" * 64,
         image_sha256="4" * 64,
-        product_version="0.1.0",
+        product_version=__version__,
         elevated=False,
         integrity_level="MEDIUM",
     )

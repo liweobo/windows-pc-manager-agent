@@ -7,6 +7,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from pc_manager_agent import __version__
@@ -338,12 +339,6 @@ from pc_manager_agent.platform_support.windows.winget_uninstall import (
 from pc_manager_agent.privileged.authentication import EphemeralHmacAuthenticator
 from pc_manager_agent.privileged.availability import PrivilegedBrokerAvailabilityService
 from pc_manager_agent.privileged.builder import PrivilegedActionBuilder
-from pc_manager_agent.privileged.mock_broker import MockPrivilegedBroker
-from pc_manager_agent.privileged.registry import build_stage4x1_registry
-from pc_manager_agent.privileged.revalidation import (
-    FakePrivilegedSystemState,
-    ServicePrivilegedRevalidator,
-)
 from pc_manager_agent.privileged.serialization import PrivilegedRequestSerializer
 from pc_manager_agent.providers.llm.base import LLMProvider
 from pc_manager_agent.providers.llm.openai_provider import OpenAILLMProvider
@@ -502,6 +497,10 @@ from pc_manager_agent.tools.system_tools.system_optimization import (
 )
 from pc_manager_agent.tools.system_tools.vendor_uninstall import VendorUninstallTool
 from pc_manager_agent.tools.system_tools.winget_uninstall import WingetUninstallTool
+
+if TYPE_CHECKING:
+    from pc_manager_agent.privileged.mock_broker import MockPrivilegedBroker
+    from pc_manager_agent.privileged.revalidation import FakePrivilegedSystemState
 
 
 class ProviderConfigurationError(RuntimeError):
@@ -1913,6 +1912,10 @@ class ApplicationRuntime:
         fake_state: FakePrivilegedSystemState,
     ) -> PrivilegedActionServices:
         """Compose Mock-only protocol services when the explicit developer mode is enabled."""
+        from pc_manager_agent.privileged.mock_broker import MockPrivilegedBroker
+        from pc_manager_agent.privileged.registry import build_stage4x1_registry
+        from pc_manager_agent.privileged.revalidation import ServicePrivilegedRevalidator
+
         self.require_feature(ReleaseFeature.PRIVILEGED_BROKER)
         if self.settings.privileged_broker_mode != "mock":
             raise RuntimeError("Stage 4X1 privileged broker is disabled")

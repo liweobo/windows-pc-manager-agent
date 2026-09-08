@@ -49,9 +49,10 @@ class BrowserWorkerClient:
         """Launch the worker with no shell and create one ephemeral browser context."""
         if self._process is not None:
             raise BrowserWorkerError("BROWSER_WORKER_ALREADY_STARTED")
-        # Fixed argv and current interpreter only; shell remains disabled.
+        command = _worker_command()
+        # Fixed source-module or sibling packaged Worker only; shell remains disabled.
         process = subprocess.Popen(  # nosec B603
-            [sys.executable, "-I", "-m", "pc_manager_agent.browser.worker"],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -61,6 +62,7 @@ class BrowserWorkerClient:
             bufsize=1,
             shell=False,
             env=_worker_environment(),
+            creationflags=_worker_creation_flags(),
         )
         self._process = process
         self._reader = threading.Thread(target=self._read_responses, daemon=True)
@@ -246,3 +248,20 @@ def _worker_environment() -> dict[str, str]:
         for name, value in os.environ.items()
         if not any(marker in name.upper() for marker in blocked_markers)
     }
+
+
+def _worker_command() -> list[str]:
+    """Return only the source interpreter entry or fixed sibling packaged Worker."""
+    if bool(getattr(sys, "frozen", False)):
+        worker = Path(sys.executable).resolve(strict=True).parent / (
+            "browser-worker/pc-manager-browser-worker.exe"
+        )
+        if not worker.is_file():
+            raise BrowserWorkerError("BROWSER_WORKER_BINARY_MISSING")
+        return [str(worker)]
+    return [sys.executable, "-I", "-m", "pc_manager_agent.browser.worker"]
+
+
+def _worker_creation_flags() -> int:
+    """Suppress a console window for the owned packaged worker on Windows."""
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if sys.platform == "win32" else 0

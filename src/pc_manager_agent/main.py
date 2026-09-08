@@ -40,7 +40,11 @@ _LOG = logging.getLogger(__name__)
 def build_parser() -> argparse.ArgumentParser:
     """Build the minimal test-friendly CLI surface."""
     parser = argparse.ArgumentParser(description="Windows PC Manager Agent")
-    parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="show the application version when a console is attached, then exit",
+    )
     parser.add_argument(
         "--smoke-test",
         action="store_true",
@@ -92,6 +96,7 @@ def run_application(settings: AppSettings, *, smoke_test: bool = False) -> int:
                     active_environment_names=frozenset(
                         name.upper() for name, value in os.environ.items() if value
                     ),
+                    smoke_test=smoke_test,
                 ),
             )
         logging_runtime = configure_application_logging(
@@ -177,10 +182,14 @@ def run_application(settings: AppSettings, *, smoke_test: bool = False) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and avoid persistent user data during a smoke test."""
     arguments = build_parser().parse_args(argv)
+    if arguments.version:
+        if sys.stdout is not None:
+            sys.stdout.write(f"{__version__}\n")
+        return 0
     base_settings = AppSettings.from_environment().model_copy(
         update={"safe_mode": arguments.safe_mode}
     )
-    if arguments.smoke_test and not bool(getattr(sys, "frozen", False)):
+    if arguments.smoke_test:
         with TemporaryDirectory(prefix="pc-manager-agent-smoke-") as temporary_directory:
             settings = base_settings.model_copy(
                 update={"data_directory": Path(temporary_directory)}

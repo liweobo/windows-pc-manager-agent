@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from pc_manager_agent import __version__
 from pc_manager_agent.domain.elevated_broker import (
     BrokerBinaryIdentity,
     BrokerTrustMode,
@@ -39,7 +40,7 @@ def _binary(*, signature: SignatureStatus = SignatureStatus.VALID) -> BrokerBina
         file_id="volume:file",
         sha256="2" * 64,
         size_bytes=4096,
-        product_version="0.1.0",
+        product_version=__version__,
         signature_status=signature,
         signer_fingerprint="3" * 64 if signature is SignatureStatus.VALID else None,
         trusted_location=True,
@@ -115,6 +116,13 @@ def test_development_trust_requires_exact_hash_and_manifest() -> None:
     BrokerTrustPolicy(BrokerTrustMode.DEVELOPMENT, identity.sha256).require_binary(identity)
     with pytest.raises(BrokerTrustError):
         BrokerTrustPolicy(BrokerTrustMode.DEVELOPMENT, "f" * 64).require_binary(identity)
+
+
+def test_broker_binary_version_must_match_before_uac() -> None:
+    identity = _binary().model_copy(update={"product_version": "9.9.9"})
+
+    with pytest.raises(BrokerTrustError, match="BROKER_VERSION_INCOMPATIBLE"):
+        BrokerTrustPolicy(BrokerTrustMode.DEVELOPMENT, identity.sha256).require_binary(identity)
 
 
 def test_production_trust_requires_pinned_valid_signer() -> None:

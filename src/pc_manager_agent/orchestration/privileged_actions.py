@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID
 
 from pc_manager_agent.audit.privileged_actions import PrivilegedActionAuditLogger
@@ -23,12 +24,23 @@ from pc_manager_agent.domain.privileged_actions import (
 )
 from pc_manager_agent.persistence.privileged_actions import PrivilegedActionRepository
 from pc_manager_agent.privileged.builder import PrivilegedActionBuilder
-from pc_manager_agent.privileged.mock_broker import MockPrivilegedBroker
 from pc_manager_agent.privileged.serialization import PrivilegedRequestSerializer
 
 
 class PrivilegedActionPreparationError(RuntimeError):
     """Raised when upstream evidence is blocked, stale, or not Administrator-required."""
+
+
+class MockPrivilegedBrokerPort(Protocol):
+    """Minimum in-process Mock dispatch surface; production never imports its implementation."""
+
+    def dispatch(
+        self,
+        serialized_request: bytes,
+        caller: PrivilegedCallerContext,
+    ) -> PrivilegedActionResultEnvelope:
+        """Dispatch one authenticated synthetic request in explicit developer mode."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +69,7 @@ class PrivilegedActionService:
         confirmations: PrivilegedActionConfirmationService,
         repository: PrivilegedActionRepository,
         serializer: PrivilegedRequestSerializer,
-        broker: MockPrivilegedBroker | None,
+        broker: MockPrivilegedBrokerPort | None,
         audit: PrivilegedActionAuditLogger,
         caller: PrivilegedCallerContext,
         execution_mode: PrivilegedExecutionMode = PrivilegedExecutionMode.MOCK,
