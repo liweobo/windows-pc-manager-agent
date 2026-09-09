@@ -19,9 +19,28 @@ $sentinel = Join-Path $sentinelDirectory "installer-preserve-sentinel.txt"
 New-Item -ItemType Directory -Path $sentinelDirectory -Force | Out-Null
 Set-Content -LiteralPath $sentinel -Value "synthetic-ci-state" -Encoding utf8NoBOM
 
+function Invoke-ProcessForExitCode(
+    [string]$FilePath,
+    [string[]]$Arguments = @(),
+    [int]$TimeoutSeconds = 180
+) {
+    $startParameters = @{
+        FilePath = $FilePath
+        PassThru = $true
+        WindowStyle = 'Hidden'
+    }
+    if ($Arguments.Count -gt 0) { $startParameters.ArgumentList = $Arguments }
+    $process = Start-Process @startParameters
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        throw "PROCESS_TIMEOUT:${FilePath}:${TimeoutSeconds}"
+    }
+    return $process.ExitCode
+}
+
 function Invoke-CheckedProcess([string]$FilePath, [string[]]$Arguments) {
-    $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru -Wait -WindowStyle Hidden
-    if ($process.ExitCode -ne 0) { throw "PROCESS_FAILED:${FilePath}:$($process.ExitCode)" }
+    $exitCode = Invoke-ProcessForExitCode -FilePath $FilePath -Arguments $Arguments
+    if ($exitCode -ne 0) { throw "PROCESS_FAILED:${FilePath}:$exitCode" }
 }
 
 Invoke-CheckedProcess $installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
@@ -29,10 +48,19 @@ Invoke-CheckedProcess $installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTA
 Invoke-CheckedProcess $installer @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
 $main = Join-Path $installDirectory "pc-manager-agent.exe"
 Invoke-CheckedProcess $main @('--version')
-Invoke-CheckedProcess $main @('--smoke-test')
+$runnerIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$runnerPrincipal = [Security.Principal.WindowsPrincipal]::new($runnerIdentity)
+$runnerElevated = $runnerPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$smokeExitCode = Invoke-ProcessForExitCode -FilePath $main -Arguments @('--smoke-test') -TimeoutSeconds 120
+if ($runnerElevated) {
+    if ($smokeExitCode -ne 23) { throw "ELEVATED_MAIN_DENIAL_FAILED:$smokeExitCode" }
+    Write-Output "ELEVATED_MAIN_DENIAL_VERIFIED"
+} elseif ($smokeExitCode -ne 0) {
+    throw "STANDARD_USER_MAIN_SMOKE_FAILED:$smokeExitCode"
+}
 $broker = Join-Path $installDirectory "broker\pc-manager-privileged-broker.exe"
-$brokerProcess = Start-Process -FilePath $broker -PassThru -Wait -WindowStyle Hidden
-if ($brokerProcess.ExitCode -ne 20) { throw "BROKER_NO_AUTHORITY_GUARD_FAILED" }
+$brokerExitCode = Invoke-ProcessForExitCode -FilePath $broker -TimeoutSeconds 120
+if ($brokerExitCode -ne 20) { throw "BROKER_NO_AUTHORITY_GUARD_FAILED:$brokerExitCode" }
 $uninstaller = Join-Path $installDirectory "unins000.exe"
 Invoke-CheckedProcess $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
 if (Test-Path -LiteralPath $main) { throw "UNINSTALL_LEFT_MAIN_BINARY" }

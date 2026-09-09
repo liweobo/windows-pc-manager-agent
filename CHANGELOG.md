@@ -37,7 +37,10 @@
 - The private-RC installer uses Inno Setup's bundled English messages because the pinned Chocolatey package omits
   unofficial translations; vendoring a reviewed Simplified Chinese translation is deferred to Stage 7B.
 - Installed-layout validation reads ACL identities as binary SIDs and rejects write access for Everyone,
-  Authenticated Users, the built-in Users group or the installing user without relying on account-name translation.
+  Authenticated Users, the built-in Users group or the installing user without relying on account-name translation;
+  the write mask excludes composite rights so read-only ACEs are not false positives.
+- Frozen unattended smoke failures return bounded deterministic codes instead of opening a modal dialog. The hosted
+  elevated Runner must prove exact `MAIN_ELEVATED` denial, while a standard-user smoke remains mandatory evidence.
 
 ### Security and limitations
 

@@ -60,15 +60,17 @@ prepared, result pending.
 
 Local evidence is 1,798 passed, 6 environment/opt-in skips and 86.94% coverage; the 12-test performance suite and
 2-test managed Playwright suite also passed. Frozen Main, Browser Worker fail-closed input and Broker no-authority
-smokes passed. The installer lifecycle remains restricted to the dedicated release workflow. Real UAC, signed binary
-tamper, clean VM, accessibility, devices, visible Browser and Office tests remain manual and are `NOT_RUN` until
-recorded.
+smokes passed. The installer lifecycle remains restricted to the dedicated release workflow. Because the hosted
+Runner token is elevated, it must prove that production Main fails closed with the exact unattended elevation code;
+this is not a substitute for standard-user launch evidence. Real UAC, signed binary tamper, clean VM, accessibility,
+devices, visible Browser and Office tests remain manual and are `NOT_RUN` until recorded.
 
 ## M. RC build plan
 
 Generate version resources → build three isolated binaries → inspect contents/xref → build installer → generate SPDX
-SBOM/notices/hashes → install/reinstall/ACL/smoke/uninstall on ephemeral Windows → run deterministic private gate →
-upload 14-day unsigned private evidence. No release tag and no public publishing occur in Stage 7A.
+SBOM/notices/hashes → install/reinstall/ACL/elevated-Main-denial/Broker-denial/uninstall on ephemeral Windows → run
+deterministic private gate → upload 14-day unsigned private evidence. The already recorded standard-user frozen smoke
+remains separate evidence. No release tag and no public publishing occur in Stage 7A.
 
 ## N. Git/GitHub plan
 

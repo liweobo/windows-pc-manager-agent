@@ -18,12 +18,15 @@ uv run pip-audit
 
 Inno Setup 6 is required only for `scripts/build-installer.ps1`; the current local host does not have it. The manual
 `release-candidate` workflow uses a pinned Windows 2025 runner, builds the unsigned installer, generates an SPDX SBOM,
-runs the ephemeral install/reinstall/ACL/uninstall test and evaluates the private-RC evidence gate. Never convert a
-missing local compiler or signing certificate into a pass. Build output is ignored and must not be committed.
+runs the ephemeral install/reinstall/ACL/uninstall test and evaluates the private-RC evidence gate. The hosted Runner
+has an elevated token, so its Main smoke must return the exact unattended `MAIN_ELEVATED` denial code; it does not
+substitute for the separate standard-user smoke evidence. Every child has a timeout. Never convert a missing local
+compiler or signing certificate into a pass. Build output is ignored and must not be committed.
 
 The packaged console entry is `pc_manager_agent.bootstrap:main`; exact `--version` returns before Qt imports. Frozen
 `--smoke-test` uses production configuration, isolated temporary state and a timed controlled shutdown. Source smoke
-uses the same temporary-state rule.
+uses the same temporary-state rule. Startup failure in this unattended mode returns a deterministic nonzero code and
+never opens a modal dialog; normal interactive startup retains its user-facing error dialog.
 
 ## Stage 7A observability and diagnostics
 

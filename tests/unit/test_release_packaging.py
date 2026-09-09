@@ -96,7 +96,10 @@ def test_installer_lifecycle_runs_isolated_production_smoke() -> None:
     layout = (_ROOT / "scripts" / "test-installed-layout.ps1").read_text(encoding="utf-8")
     assert "REQUIRES_EXPLICIT_EPHEMERAL_GITHUB_HOST" in lifecycle
     assert "Invoke-CheckedProcess $main @('--version')" in lifecycle
-    assert "Invoke-CheckedProcess $main @('--smoke-test')" in lifecycle
+    assert "-Arguments @('--smoke-test') -TimeoutSeconds 120" in lifecycle
+    assert "ELEVATED_MAIN_DENIAL_VERIFIED" in lifecycle
+    assert "STANDARD_USER_MAIN_SMOKE_FAILED" in lifecycle
+    assert "PROCESS_TIMEOUT" in lifecycle
     assert "GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])" in layout
     assert "S-1-1-0" in layout
     assert "S-1-5-11" in layout
@@ -114,6 +117,7 @@ def test_release_workflow_is_read_only_and_branch_scoped_before_merge() -> None:
         encoding="utf-8"
     )
     assert "contents: read" in workflow
+    assert "timeout-minutes: 60" in workflow
     assert "workflow_dispatch:" in workflow
     assert "- codex/stage-7a-production-hardening" in workflow
     assert "choco list --exact innosetup --limit-output" in workflow

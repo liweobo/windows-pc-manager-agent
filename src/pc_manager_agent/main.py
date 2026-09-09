@@ -18,6 +18,7 @@ from pc_manager_agent.app.runtime import ApplicationRuntime
 from pc_manager_agent.config.production import (
     BuildMode,
     FeatureFlags,
+    ProductionConfigurationError,
     ProductionConfigValidator,
     ProductionRuntimeContext,
 )
@@ -35,6 +36,17 @@ from pc_manager_agent.ui.safe_mode_window import SafeModeWindow
 from pc_manager_agent.ui.system_tray import SystemTrayController
 
 _LOG = logging.getLogger(__name__)
+_SMOKE_MAIN_ELEVATED_EXIT_CODE = 23
+_SMOKE_STARTUP_FAILURE_EXIT_CODE = 24
+
+
+def _smoke_failure_exit_code(error: Exception) -> int:
+    """Return a stable unattended exit code without weakening production validation."""
+    if isinstance(error, ProductionConfigurationError) and {
+        violation.code for violation in error.report.violations
+    } == {"MAIN_ELEVATED"}:
+        return _SMOKE_MAIN_ELEVATED_EXIT_CODE
+    return _SMOKE_STARTUP_FAILURE_EXIT_CODE
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -138,9 +150,11 @@ def run_application(settings: AppSettings, *, smoke_test: bool = False) -> int:
             sys.excepthook = previous_exception_hook
         if logging_runtime is not None:
             logging_runtime.close()
+        guard.close()
+        if smoke_test:
+            return _smoke_failure_exit_code(exc)
         detail = str(exc) if settings.build_mode is not BuildMode.PRODUCTION else type(exc).__name__
         QMessageBox.critical(None, "启动失败", f"安全启动检查或本地数据库初始化失败：{detail}")
-        guard.close()
         return 1
     window = SafeModeWindow(runtime) if settings.safe_mode else MainWindow(runtime)
 

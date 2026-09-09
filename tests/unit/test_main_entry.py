@@ -7,9 +7,19 @@ from pathlib import Path
 import pytest
 
 from pc_manager_agent.bootstrap import main as bootstrap_main
-from pc_manager_agent.config.production import FeatureFlags
+from pc_manager_agent.config.production import (
+    FeatureFlags,
+    ProductionConfigReport,
+    ProductionConfigurationError,
+    ProductionConfigViolation,
+)
 from pc_manager_agent.config.settings import AppSettings
-from pc_manager_agent.main import build_parser, main, reduce_to_safe_mode
+from pc_manager_agent.main import (
+    _smoke_failure_exit_code,
+    build_parser,
+    main,
+    reduce_to_safe_mode,
+)
 
 
 def test_cli_contains_only_fixed_non_bypass_switches() -> None:
@@ -59,6 +69,30 @@ def test_frozen_smoke_test_uses_production_settings(
     assert observed[0][0].build_mode.value == "production"
     assert observed[0][0].data_directory != AppSettings().data_directory
     assert observed[0][1]
+
+
+def test_unattended_smoke_distinguishes_exact_elevated_main_denial() -> None:
+    elevated_only = ProductionConfigurationError(
+        ProductionConfigReport(
+            valid=False,
+            violations=(
+                ProductionConfigViolation(code="MAIN_ELEVATED", message="standard-user required"),
+            ),
+        )
+    )
+    multiple_failures = ProductionConfigurationError(
+        ProductionConfigReport(
+            valid=False,
+            violations=(
+                ProductionConfigViolation(code="MAIN_ELEVATED", message="standard-user required"),
+                ProductionConfigViolation(code="FEATURE_SET", message="feature drift"),
+            ),
+        )
+    )
+
+    assert _smoke_failure_exit_code(elevated_only) == 23
+    assert _smoke_failure_exit_code(multiple_failures) == 24
+    assert _smoke_failure_exit_code(RuntimeError("startup failed")) == 24
 
 
 def test_safe_mode_only_removes_authority_and_provider_configuration(tmp_path: Path) -> None:

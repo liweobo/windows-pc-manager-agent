@@ -23,6 +23,7 @@ jobs:
   unsigned-private-rc:
     needs: secret-scan
     runs-on: windows-2025
+    timeout-minutes: 60
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"
