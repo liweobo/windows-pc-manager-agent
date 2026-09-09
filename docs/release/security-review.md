@@ -10,7 +10,7 @@
 | Browser | disposable Worker, URL/origin policy, no generic action | Browser boundary + managed lifecycle | Visible sites | SOURCE_REGRESSION_ONLY; disabled |
 | Memory/Agent | low-risk hints only; no authority or secret context | Stage 5D boundary suite | UX/data reset | SOURCE_REGRESSION_ONLY; disabled |
 | Final Orchestrator | no replay/global execution/Confirm All | Stage 5E invariant/crash suites | crash/resume UX | SOURCE_REGRESSION_ONLY; disabled |
-| Installer | trusted Program Files placement and ordinary-user non-write ACL | ephemeral CI lifecycle script | clean/upgrade/uninstall | CI_PENDING |
+| Installer | trusted Program Files placement and ordinary-user non-write ACL | ephemeral CI lifecycle PASS (`34303873949`) | clean/upgrade/uninstall | AUTOMATED_PASS / MANUAL_PENDING |
 
 Static AST release checks block `eval`, `exec`, `os.system`, unsafe pickle loading and
 `subprocess(..., shell=True)`. Bandit, pip-audit and Gitleaks are release blocking. Fixed subprocess

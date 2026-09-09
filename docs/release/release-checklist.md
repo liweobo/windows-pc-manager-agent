@@ -10,9 +10,10 @@
 - [x] Release-blocking global invariant test and executable evidence gate.
 - [x] Standard Main/Broker manifests remain `asInvoker`.
 - [x] Installer source, safe reinstall/uninstall semantics and ACL test script.
-- [ ] Remote release workflow, SBOM, installer build and ephemeral lifecycle pass.
+- [x] Remote release workflow, SBOM, installer build and ephemeral lifecycle pass (run `34303873949`).
 - [x] Local Ruff, mypy, pytest/coverage, performance, Playwright, Bandit and pip-audit evidence recorded.
-- [ ] Remote Gitleaks and release-workflow evidence recorded.
+- [x] Remote Gitleaks and release-workflow evidence recorded for commit
+  `e1bf5f785d4c1c11668e5079f7bd1e90daa56189`.
 
 ## Manual/signing gate
 

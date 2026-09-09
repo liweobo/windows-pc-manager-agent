@@ -98,6 +98,7 @@ security boundary.
 
 | API | Purpose and contract |
 |---|---|
+| `_smoke_failure_exit_code(error)` | Maps the exact production `MAIN_ELEVATED`-only validation failure to exit code 23 and every other unattended startup failure to 24. It never turns a failed safety check into success or opens a modal dialog. |
 | `build_parser()` | Exposes only version, smoke test and reduction-only safe mode. It has no force/admin/debug/feature-widening switch. Version exits before runtime and tolerates a windowed EXE without stdout. |
 | `bootstrap.main(argv=None)` | Handles the exact `--version` metadata request before importing Qt/runtime dependencies, then delegates every other argument to the guarded application parser. |
 | `run_application(settings, smoke_test=False)` | Acquires single-instance ownership, evaluates crash-loop/safe-mode reduction, validates production configuration, starts logging/crash evidence, migrates runtime storage, constructs the appropriate UI and cleans up deterministically. |
@@ -124,6 +125,8 @@ security boundary.
 | `evaluate_release_gate.parse_arguments(argv=None)` | Accepts only closed readiness/check/status vocabularies and one nonempty evidence reference. |
 | `evaluate_release_gate.evidence_from_arguments(arguments)` | Builds explicit evidence without deduplication; duplicates are deliberately rejected by the evaluator. |
 | `evaluate_release_gate.main(argv=None)` | Prints JSON and exits nonzero unless every check required by the requested readiness level is PASS. |
+| `test-installer-lifecycle.ps1::Invoke-ProcessForExitCode(FilePath, Arguments, TimeoutSeconds)` | Starts one explicit installer/application binary without a shell, omits an empty argument list, waits at most the bounded timeout, terminates only the hung CI child, and returns its real exit code. Timeout is always a failed test. |
+| `test-installer-lifecycle.ps1::Invoke-CheckedProcess(FilePath, Arguments)` | Uses the bounded process helper and rejects every nonzero exit for lifecycle operations that must succeed. Main elevation and Broker no-authority probes use the lower-level helper because their exact nonzero denial codes are expected evidence. |
 | `BrowserWorkerClient._worker_command()` | Source mode selects the isolated interpreter module; frozen mode permits only the exact sibling Worker and fails if absent. |
 | `MockPrivilegedBrokerPort.dispatch(...)` | Structural developer-only port that prevents production coordination code from importing the Mock implementation. |
 | `ElevatedBrokerPort.dispatch(...)` | Structural one-request elevated endpoint port; shared session code depends on this finite contract instead of importing the Broker implementation into Main. |

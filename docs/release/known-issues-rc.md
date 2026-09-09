@@ -6,7 +6,8 @@
 - Real-machine UAC/Broker, clean install, upgrade, uninstall/reinstall, Explorer restart, sleep/resume,
   multi-monitor/DPI and accessibility validation are not yet complete.
 - The installer cannot be built locally on the current host because Inno Setup 6 is absent; the
-  pinned GitHub Windows image path is prepared but its workflow result is pending.
+  pinned GitHub Windows image successfully built and lifecycle-tested the unsigned candidate in run
+  `34303873949`. This does not replace a clean Windows 11 VM test.
 - The private-RC installer chrome is English-only because the pinned Inno package omits unofficial translations;
   the installed application remains Chinese-first. A reviewed, vendored translation is deferred to Stage 7B.
 - Only one Windows 11 x64 development build has been exercised. Windows 10 and ARM64 are not claimed.

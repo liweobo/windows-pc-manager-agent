@@ -1,6 +1,6 @@
 # Stage 7A production readiness assessment
 
-Assessment date: 2026-09-08. Target: `1.0.0-rc.1` unsigned private candidate for Windows 11 x64.
+Assessment date: 2026-09-09. Target: `1.0.0-rc.1` unsigned private candidate for Windows 11 x64.
 
 ## A. Feature freeze matrix
 
@@ -25,7 +25,7 @@ Assessment date: 2026-09-08. Target: `1.0.0-rc.1` unsigned private candidate for
 ## B. Release blockers
 
 - **CRITICAL:** no open finding in the completed local full regression and security checks.
-- **HIGH:** signing is not configured; remote installer/lifecycle workflow and real UAC/Broker validation are pending.
+- **HIGH:** signing is not configured; real Windows 11 standard-user/UAC/Broker validation remains pending.
 - **MEDIUM:** clean Windows matrix, accessibility/DPI/tray/sleep-resume validation and Main dependency/size reduction
   are incomplete.
 - **LOW:** Chinese-first UI has no complete localization/English fallback system.
@@ -43,7 +43,9 @@ checks are implemented.
 Inno Setup 6 source provides Program Files installation, Start Menu entry, optional desktop shortcut, safe reinstall,
 uninstall and version/publisher metadata. User data remains in LocalAppData. There is no repair command, auto-start,
 portable mode, downgrade, silent update or destructive app-data removal. Local compiler: unavailable. Ephemeral CI:
-prepared, result pending.
+PASS for commit `e1bf5f785d4c1c11668e5079f7bd1e90daa56189` in
+[release-candidate run 34303873949](https://github.com/liweobo/windows-pc-manager-agent/actions/runs/34303873949).
+The run produced one 14-day unsigned private-RC evidence artifact; signing remained `NOT_CONFIGURED`.
 
 ## E–K. Audit plans and implemented controls
 

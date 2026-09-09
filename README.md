@@ -11,6 +11,11 @@ Stage 7A 正在把开发构建收敛为可验证的 Windows 发布物。首个�
 `NOT_CONFIGURED`，因此不能宣称 public RC 或 V1 ready。功能冻结清单见
 [私有 RC 功能冻结](docs/release/feature-freeze.md)。
 
+提交 `e1bf5f785d4c1c11668e5079f7bd1e90daa56189` 的私有 RC 自动化门已在 GitHub Windows Runner
+完整通过，包括锁定依赖、全量测试、三套冻结构建、SBOM、安装/重装、Program Files ACL、
+提权 Main 拒绝、Broker 无授权拒绝、卸载和用户状态保留。该工件仍是未签名内部候选，不替代
+Windows 11 干净虚拟机上的标准用户、UAC、升级、可访问性与真实设备手工验证。
+
 启动现在先执行数据库迁移校验、生产配置校验与崩溃循环检测。连续异常启动会进入只能查看状态、
 审计元数据、设置和导出本地诊断包的安全模式；不会加载业务能力或模型。应用日志采用本地限量 JSONL
 并集中脱敏。诊断 ZIP 必须选择不存在的本地文件、查看精确清单并确认后才创建，且绝不自动上传。

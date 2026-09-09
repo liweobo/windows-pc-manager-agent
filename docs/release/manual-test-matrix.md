@@ -2,6 +2,10 @@
 
 `NOT_RUN` means exactly that; automated fake/synthetic evidence is never recorded as a manual pass.
 
+Automated ephemeral evidence is tracked separately: GitHub run `34303873949` passed installer build, Program Files
+ACL inspection, reinstall, exact elevated-Main denial, Broker no-authority denial, uninstall and synthetic user-state
+preservation. It does not change any manual status below.
+
 | Scenario | Target | Status | Required evidence |
 |---|---|---|---|
 | Clean install / standard-user launch / tray | Windows 11 x64 clean VM | NOT_RUN | screenshots, versions, process token, logs |

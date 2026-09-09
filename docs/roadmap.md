@@ -19,9 +19,10 @@ confirmation. There is no Confirm All, global Executor, full unattended mode or 
 Implemented slices: immutable private-RC feature freeze/readiness evidence, versioned fail-closed database migration,
 bounded redacted local logging, sanitized crash evidence, crash-loop Safe Mode, reviewed local diagnostic export,
 three isolated frozen builds, artifact/Broker dependency inspection, installer/ACL/lifecycle scripts, SBOM/license
-workflow, task/browser leak baselines and release documentation. Remote installer lifecycle, full release workflow,
-accessibility/manual matrices and signed real-device validation remain pending. Signing is NOT_CONFIGURED, so public RC
-and V1 remain blocked. No auto-update or final tag.
+workflow, task/browser leak baselines and release documentation. The remote installer lifecycle and full private-RC
+workflow passed for commit `e1bf5f785d4c1c11668e5079f7bd1e90daa56189`. Accessibility/manual matrices and signed
+real-device validation remain pending. Signing is NOT_CONFIGURED, so public RC and V1 remain blocked. No auto-update
+or final tag.
 
 ## Stage 5C — bounded browser automation (implemented; visible-site validation pending)
 

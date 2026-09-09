@@ -51,8 +51,8 @@
 - Telemetry remains `NOT_IMPLEMENTED`; crash evidence and diagnostics stay local until the user manually shares a
   reviewed file. Pattern redaction is defense in depth and is not represented as comprehensive DLP.
 - Main/Broker/installer signing and real Windows install/UAC/accessibility matrices remain incomplete, so public
-  RC and v1 readiness are blocked. The local host has no Inno Setup compiler; installer validation is delegated to
-  the explicit ephemeral release workflow and remains pending until that workflow succeeds.
+  RC and v1 readiness are blocked. The local host has no Inno Setup compiler; installer validation was delegated to
+  the explicit ephemeral release workflow and passed for commit `e1bf5f785d4c1c11668e5079f7bd1e90daa56189`.
 
 ## Unreleased — Stage 5E
 
