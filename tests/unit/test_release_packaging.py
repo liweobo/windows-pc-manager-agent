@@ -102,6 +102,11 @@ def test_installer_lifecycle_runs_isolated_production_smoke() -> None:
     assert "S-1-5-11" in layout
     assert "S-1-5-32-545" in layout
     assert ".Translate(" not in layout
+    assert "WriteData" in layout
+    assert "AppendData" in layout
+    assert "ChangePermissions" in layout
+    assert "TakeOwnership" in layout
+    assert "FileSystemRights]::FullControl" not in layout
 
 
 def test_release_workflow_is_read_only_and_branch_scoped_before_merge() -> None:

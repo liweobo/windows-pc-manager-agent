@@ -32,14 +32,22 @@ $acl = Get-Acl -LiteralPath $resolved
 $accessRules = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
 $currentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $untrustedWriteSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', $currentUserSid)
+# Do not include composite rights such as FullControl in this mask. FullControl
+# contains read bits, so a read-only ACE would otherwise produce a false match.
+$writeCapableRights = (
+    [Security.AccessControl.FileSystemRights]::WriteData -bor
+    [Security.AccessControl.FileSystemRights]::AppendData -bor
+    [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+    [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+    [Security.AccessControl.FileSystemRights]::Delete -bor
+    [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+    [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+    [Security.AccessControl.FileSystemRights]::TakeOwnership
+)
 $ordinaryWrite = $accessRules | Where-Object {
     $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
     $_.IdentityReference.Value -in $untrustedWriteSids -and
-    ($_.FileSystemRights -band (
-        [Security.AccessControl.FileSystemRights]::Write -bor
-        [Security.AccessControl.FileSystemRights]::Modify -bor
-        [Security.AccessControl.FileSystemRights]::FullControl
-    ))
+    ($_.FileSystemRights -band $writeCapableRights)
 }
 if ($ordinaryWrite) { throw "INSTALL_ACL_ORDINARY_USER_WRITABLE" }
 Write-Output "INSTALLED_LAYOUT_VERIFIED:$resolved"
