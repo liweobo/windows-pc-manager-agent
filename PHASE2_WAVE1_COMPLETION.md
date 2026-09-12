@@ -257,6 +257,6 @@ Refs: Phase 2 Wave 1 - Provider Trust Boundary Remediation
 ---
 
 **Completed:** 2026-09-12  
-**Branch:** codex/stage-7a-production-hardening  
-**Commits:** 8389155 (core fix), [pending] (F841 fix)  
+**Branch:** codex/phase2-wave1-provider-trust  
+**Commits:** 8389155 (core fix), 9d6cc6f (documentation), 7ff2fa5 (F841 fix)  
 **Engineer:** Claude Opus 5 (1M context)
