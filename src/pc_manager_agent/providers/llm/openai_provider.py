@@ -116,7 +116,7 @@ class OpenAILLMProvider(LLMProvider):
         self._client = client or cast(
             _OpenAIClient,
             AsyncOpenAI(
-                api_key=api_key, base_url="https://agentrouter.org/v1", timeout=30.0, max_retries=1
+                api_key=api_key, base_url="https://agentrouter.org/", timeout=30.0, max_retries=1
             ),
         )
 
