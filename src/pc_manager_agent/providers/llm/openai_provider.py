@@ -116,7 +116,7 @@ class OpenAILLMProvider(LLMProvider):
         self._client = client or cast(
             _OpenAIClient,
             AsyncOpenAI(
-                api_key=api_key, base_url="https://agentrouter.org/", timeout=30.0, max_retries=1
+                api_key=api_key, base_url="https://api.openai.com/v1", timeout=30.0, max_retries=1
             ),
         )
 
@@ -124,6 +124,11 @@ class OpenAILLMProvider(LLMProvider):
     def name(self) -> str:
         """Return the adapter identifier without exposing configuration."""
         return "openai"
+
+    @property
+    def destination(self) -> str:
+        """Declare the fixed official endpoint and configured model; never a hidden proxy."""
+        return f"OpenAI | https://api.openai.com/v1 | {self._model}"
 
     async def create_plan(self, request: PlannerRequest) -> ProviderPlanResult:
         """Send only explicitly supplied planning data and validate the response."""

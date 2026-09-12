@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -214,3 +215,109 @@ def test_openai_provider_parses_file_operation_intent() -> None:
     )
     assert result.intent.group_by is OrganizationGroup.MODIFIED_YEAR
     assert responses.arguments["model"] == "test-model"
+
+
+def test_openai_provider_uses_official_openai_destination() -> None:
+    """Verify OpenAILLMProvider connects only to official OpenAI endpoint."""
+    with patch("pc_manager_agent.providers.llm.openai_provider.AsyncOpenAI") as mock_openai:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
+        provider = OpenAILLMProvider(model="gpt-4", api_key="test-key-12345")
+
+        mock_openai.assert_called_once()
+        call_kwargs = mock_openai.call_args[1]
+        assert call_kwargs["api_key"] == "test-key-12345"
+        assert call_kwargs["base_url"] == "https://api.openai.com/v1"
+        assert call_kwargs["timeout"] == 30.0
+        assert call_kwargs["max_retries"] == 1
+
+
+def test_openai_provider_never_routes_to_agentrouter() -> None:
+    """Regression test: ensure OPENAI_API_KEY never goes to third-party gateway."""
+    with patch("pc_manager_agent.providers.llm.openai_provider.AsyncOpenAI") as mock_openai:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
+        OpenAILLMProvider(model="gpt-4", api_key="sk-test")
+
+        call_kwargs = mock_openai.call_args[1]
+        base_url = call_kwargs["base_url"]
+        assert "agentrouter" not in base_url.lower(), (
+            f"OpenAI provider must not route to agentrouter; got base_url={base_url}"
+        )
+        assert "api.openai.com" in base_url
+
+
+def test_openai_provider_exposes_destination_metadata() -> None:
+    """Verify provider declares its network destination for audit and disclosure."""
+    responses = FakeResponses(None)
+    provider = OpenAILLMProvider(
+        model="gpt-4o",
+        api_key="test-key",
+        client=FakeClient(responses),
+    )
+
+    destination = provider.destination
+    assert "OpenAI" in destination
+    assert "https://api.openai.com/v1" in destination
+    assert "gpt-4o" in destination
+    assert "test-key" not in destination
+
+
+def test_llm_provider_defaults_to_disabled(tmp_path: Path) -> None:
+    """Verify runtime safe default keeps provider disabled without explicit config."""
+    settings = AppSettings(data_directory=tmp_path)
+    assert settings.llm_provider == "disabled"
+
+    runtime = ApplicationRuntime(settings)
+    provider = runtime.create_llm_provider()
+    assert provider is None
+    runtime.close()
+
+
+def test_provider_factory_returns_none_when_disabled(tmp_path: Path) -> None:
+    """Verify explicitly setting disabled prevents provider instantiation."""
+    settings = AppSettings(
+        data_directory=tmp_path,
+        llm_provider="disabled",
+        openai_model="gpt-4",
+        openai_api_key="present-but-ignored",
+    )
+    runtime = ApplicationRuntime(settings)
+    provider = runtime.create_llm_provider()
+    assert provider is None
+    runtime.close()
+
+
+def test_provider_factory_builds_openai_only_when_explicitly_enabled(tmp_path: Path) -> None:
+    """Verify provider is only built when explicitly enabled, not by accident."""
+    runtime = ApplicationRuntime(
+        AppSettings(
+            data_directory=tmp_path,
+            llm_provider="openai",
+            openai_model="gpt-4",
+            openai_api_key="sk-test",
+        )
+    )
+    provider = runtime.create_llm_provider()
+    assert isinstance(provider, OpenAILLMProvider)
+    assert provider.name == "openai"
+    runtime.close()
+
+
+def test_openai_provider_requires_explicit_api_key() -> None:
+    """Verify OpenAI provider fails safely without credential."""
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        OpenAILLMProvider(model="gpt-4", api_key="")
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        OpenAILLMProvider(model="gpt-4", api_key="   ")
+
+
+def test_openai_provider_requires_explicit_model() -> None:
+    """Verify OpenAI provider fails safely without model specification."""
+    with pytest.raises(ValueError, match="model"):
+        OpenAILLMProvider(model="", api_key="sk-test")
+    with pytest.raises(ValueError, match="model"):
+        OpenAILLMProvider(model="   ", api_key="sk-test")
+
