@@ -223,7 +223,7 @@ def test_openai_provider_uses_official_openai_destination() -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
 
-        provider = OpenAILLMProvider(model="gpt-4", api_key="test-key-12345")
+        OpenAILLMProvider(model="gpt-4", api_key="test-key-12345")
 
         mock_openai.assert_called_once()
         call_kwargs = mock_openai.call_args[1]
