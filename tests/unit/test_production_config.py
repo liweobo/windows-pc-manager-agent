@@ -97,6 +97,21 @@ def test_safe_mode_allows_only_empty_features_and_disabled_provider() -> None:
     assert "SAFE_MODE_PROVIDER" in {item.code for item in report.violations}
 
 
+def test_safe_mode_rejects_enabled_provider() -> None:
+    """Verify safe mode strictly enforces disabled LLM provider."""
+    safe_with_openai = _production_settings(
+        safe_mode=True,
+        feature_flags=FeatureFlags(),
+        llm_provider="openai",
+        openai_model="gpt-4",
+        openai_api_key="sk-test",
+    )
+
+    report = ProductionConfigValidator().validate(safe_with_openai, _context())
+    assert not report.valid
+    assert "SAFE_MODE_PROVIDER" in {item.code for item in report.violations}
+
+
 @pytest.mark.parametrize(
     ("settings", "context", "code"),
     [
