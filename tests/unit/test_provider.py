@@ -320,4 +320,3 @@ def test_openai_provider_requires_explicit_model() -> None:
         OpenAILLMProvider(model="", api_key="sk-test")
     with pytest.raises(ValueError, match="model"):
         OpenAILLMProvider(model="   ", api_key="sk-test")
-

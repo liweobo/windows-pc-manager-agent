@@ -1,6 +1,6 @@
 # Phase 2 Wave 1: Provider Trust Boundary Remediation
 
-## Status: ✅ COMPLETE
+## Status: CLOSEOUT VALIDATION
 
 ## Summary
 
@@ -16,20 +16,20 @@ Fixed critical trust boundary violation where `OpenAILLMProvider` was routing us
 **Before:**
 ```python
 AsyncOpenAI(
-    api_key=api_key, 
+    api_key=api_key,
     base_url="https://agentrouter.org/",  # ❌ Third-party gateway
-    timeout=30.0, 
-    max_retries=1
+    timeout=30.0,
+    max_retries=1,
 )
 ```
 
 **After:**
 ```python
 AsyncOpenAI(
-    api_key=api_key, 
+    api_key=api_key,
     base_url="https://api.openai.com/v1",  # ✅ Official OpenAI endpoint
-    timeout=30.0, 
-    max_retries=1
+    timeout=30.0,
+    max_retries=1,
 )
 ```
 
@@ -159,7 +159,9 @@ tests/unit/voice/ (6 tests) PASSED
 - [x] All provider-related tests passing (34/34)
 - [x] No credential leakage in error messages
 - [x] Documentation updated
-- [x] Full test suite running
+- [x] Full test suite passing (1821/1821)
+- [x] Ruff format/lint passing
+- [x] Commit created (8389155)
 
 ---
 
@@ -200,10 +202,12 @@ Refs: Phase 2 Wave 1 - Provider Trust Boundary Remediation
 
 ## Next Steps
 
-1. ✅ **Immediate:** Commit and push fix
-2. 🔄 **In Progress:** Full test suite validation
-3. ⏳ **Pending:** Update user documentation about provider trust model
-4. ⏳ **Pending:** Security advisory for users on old versions
+1. ✅ **Complete:** Core fix committed (8389155)
+2. ✅ **Complete:** All 34 provider tests passing
+3. ✅ **Complete:** Full test suite passing (1821 tests)
+4. ⏳ **Pending:** Update user documentation about provider trust model
+5. ⏳ **Pending:** Security advisory for users on old versions
+6. ⏳ **Pending:** Merge to main after PR review
 
 ---
 
@@ -217,5 +221,5 @@ Refs: Phase 2 Wave 1 - Provider Trust Boundary Remediation
 ---
 
 **Completed:** 2026-09-12  
-**Branch:** codex/stage-7a-production-hardening  
+**Branch:** codex/phase2-wave1-provider-trust  
 **Engineer:** Claude Opus 5 (1M context)
